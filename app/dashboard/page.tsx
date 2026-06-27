@@ -2,10 +2,8 @@ import Image from "next/image";
 
 const menuItems = [
   "Dashboard",
-  "Profile",
   "Career Memory",
-  "Resume Center",
-  "Cover Letter",
+  "Application Center",
   "Job Tracker",
   "Analytics",
   "Settings",
@@ -13,24 +11,31 @@ const menuItems = [
 
 const progressCards = [
   {
-    title: "Applications Submitted",
-    value: "105",
-    change: "+24%",
-    note: "24 applications submitted today",
+    title: "Career Memory",
+    value: "82%",
+    change: "+6%",
+    note: "profile improved this week",
+    icon: "🧠",
+  },
+  {
+    title: "Application Packages",
+    value: "14",
+    change: "+3",
+    note: "new packages created this week",
+    icon: "📦",
+  },
+  {
+    title: "Applications Sent",
+    value: "27",
+    change: "+5",
+    note: "applications submitted this month",
     icon: "📤",
   },
   {
-    title: "Applications Reviewed",
-    value: "68",
-    change: "+18%",
-    note: "18 applications reviewed today",
-    icon: "📄",
-  },
-  {
-    title: "Interviews Scheduled",
-    value: "23",
-    change: "+15%",
-    note: "Interviews scheduled today",
+    title: "Interviews",
+    value: "8",
+    change: "+2",
+    note: "interviews scheduled",
     icon: "🗓️",
   },
 ];
@@ -77,14 +82,32 @@ export default function DashboardPage() {
             {menuItems.map((item) => (
               <a
                 key={item}
-                href="#"
+                href={
+                  item === "Dashboard"
+                    ? "/dashboard"
+                    : item === "Career Memory"
+                    ? "/career-memory"
+                    : "#"
+                }
                 className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                   item === "Dashboard"
                     ? "bg-blue-600 text-white shadow-sm"
                     : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
                 }`}
               >
-                <span>{item === "Dashboard" ? "🏠" : item === "Profile" ? "👤" : item === "Career Memory" ? "🧠" : item === "Resume Center" ? "📄" : item === "Cover Letter" ? "✉️" : item === "Job Tracker" ? "💼" : item === "Analytics" ? "📊" : "⚙️"}</span>
+                <span>
+                  {item === "Dashboard"
+                    ? "🏠"
+                    : item === "Career Memory"
+                    ? "🧠"
+                    : item === "Application Center"
+                    ? "📦"
+                    : item === "Job Tracker"
+                    ? "💼"
+                    : item === "Analytics"
+                    ? "📊"
+                    : "⚙️"}
+                </span>
                 {item}
               </a>
             ))}
@@ -97,7 +120,7 @@ export default function DashboardPage() {
 
             <input
               type="text"
-              placeholder="Search jobs..."
+              placeholder="Search jobs, packages..."
               className="w-80 rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm outline-none focus:border-blue-500"
             />
 
@@ -120,9 +143,9 @@ export default function DashboardPage() {
           <div className="grid grid-cols-12 gap-6 px-8 pb-8">
             <section className="col-span-12 space-y-6 xl:col-span-9">
               <div>
-                <h2 className="mb-4 text-lg font-bold">Application Progress</h2>
+                <h2 className="mb-4 text-lg font-bold">Application Overview</h2>
 
-                <div className="grid gap-5 md:grid-cols-3">
+                <div className="grid gap-5 md:grid-cols-4">
                   {progressCards.map((card) => (
                     <div
                       key={card.title}
@@ -163,40 +186,40 @@ export default function DashboardPage() {
 
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                  <h2 className="text-lg font-bold">Interview Opportunities</h2>
+                  <h2 className="text-lg font-bold">Application Packages</h2>
 
                   <div className="mt-5 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-gray-500">
-                        Interview Invitations
+                        Company-specific packages
                       </p>
-                      <h3 className="mt-2 text-3xl font-extrabold">20</h3>
+                      <h3 className="mt-2 text-3xl font-extrabold">14</h3>
                       <p className="mt-1 text-xs font-bold text-green-600">
-                        +17%
+                        +3 this week
                       </p>
                     </div>
 
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-purple-100 text-2xl">
-                      💼
+                      📦
                     </div>
                   </div>
 
                   <a href="#" className="mt-5 inline-block text-sm font-bold text-blue-600">
-                    View All Interviews
+                    Open Application Center
                   </a>
                 </div>
 
                 <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
                   <h2 className="text-lg font-bold">
-                    Connection and Network Growth
+                    Job URL Analysis
                   </h2>
 
                   <div className="mt-5 grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm font-semibold text-gray-500">
-                        New Connections
+                        URLs analyzed
                       </p>
-                      <h3 className="mt-2 text-3xl font-extrabold">73</h3>
+                      <h3 className="mt-2 text-3xl font-extrabold">31</h3>
                       <p className="mt-1 text-xs font-bold text-green-600">
                         +12%
                       </p>
@@ -204,11 +227,11 @@ export default function DashboardPage() {
 
                     <div>
                       <p className="text-sm font-semibold text-gray-500">
-                        Network Growth
+                        Avg. match score
                       </p>
-                      <h3 className="mt-2 text-3xl font-extrabold">2,765</h3>
+                      <h3 className="mt-2 text-3xl font-extrabold">84%</h3>
                       <p className="mt-1 text-xs font-bold text-green-600">
-                        +35%
+                        +5%
                       </p>
                     </div>
                   </div>
@@ -256,7 +279,7 @@ export default function DashboardPage() {
 
                       <div className="mt-5">
                         <div className="flex justify-between text-xs font-bold text-gray-500">
-                          <span>{job.match} match with your profile</span>
+                          <span>{job.match} match with your Career Memory</span>
                         </div>
                         <div className="mt-2 h-2 rounded-full bg-gray-100">
                           <div
@@ -267,38 +290,127 @@ export default function DashboardPage() {
                       </div>
 
                       <button className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">
-                        Apply Now
+                        Create Package
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+                <div className="mb-5 flex items-center justify-between">
+                  <h2 className="text-lg font-bold">🎪 Upcoming Career Fairs</h2>
+
+                  <button className="text-sm font-bold text-blue-600 hover:underline">
+                    View All
+                  </button>
+                </div>
+
+                <div className="mb-6 flex items-center gap-3">
+                  <span className="text-xl">📍</span>
+
+                  <input
+                    type="text"
+                    placeholder="Toronto, ON"
+                    className="w-64 rounded-xl border border-gray-300 px-4 py-2 outline-none focus:border-blue-600"
+                  />
+
+                  <button className="rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700">
+                    Search
+                  </button>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-xl border border-gray-200 p-5 transition hover:shadow-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
+                        Jul 12
+                      </span>
+                      <span className="text-2xl">🎓</span>
+                    </div>
+
+                    <h3 className="mt-4 text-lg font-bold">
+                      Toronto Career Fair
+                    </h3>
+
+                    <p className="mt-2 text-sm text-gray-500">
+                      Metro Toronto Convention Centre
+                    </p>
+
+                    <button className="mt-5 w-full rounded-lg bg-blue-600 py-2 font-semibold text-white hover:bg-blue-700">
+                      View Details
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 p-5 transition hover:shadow-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                        Jul 18
+                      </span>
+                      <span className="text-2xl">⚖️</span>
+                    </div>
+
+                    <h3 className="mt-4 text-lg font-bold">
+                      Legal Career Expo
+                    </h3>
+
+                    <p className="mt-2 text-sm text-gray-500">
+                      North York Civic Centre
+                    </p>
+
+                    <button className="mt-5 w-full rounded-lg border border-blue-600 py-2 font-semibold text-blue-600 hover:bg-blue-50">
+                      Save Event
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 p-5 transition hover:shadow-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-700">
+                        Aug 2
+                      </span>
+                      <span className="text-2xl">🏛️</span>
+                    </div>
+
+                    <h3 className="mt-4 text-lg font-bold">
+                      Government Hiring Fair
+                    </h3>
+
+                    <p className="mt-2 text-sm text-gray-500">
+                      Mississauga Convention Centre
+                    </p>
+
+                    <button className="mt-5 w-full rounded-lg bg-gray-900 py-2 font-semibold text-white hover:bg-black">
+                      Register
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
 
             <aside className="col-span-12 space-y-6 xl:col-span-3">
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-bold">Profile Strength</h2>
+                <h2 className="text-lg font-bold">Career Memory</h2>
 
                 <div className="mt-5 flex justify-center">
                   <div className="flex h-24 w-24 items-center justify-center rounded-full border-8 border-blue-100 bg-blue-50 text-3xl">
-                    👤
+                    🧠
                   </div>
                 </div>
 
                 <div className="mt-6 space-y-4">
                   <div>
                     <div className="flex justify-between text-xs font-bold text-gray-500">
-                      <span>Profile Completed</span>
-                      <span>90%</span>
+                      <span>Memory Completed</span>
+                      <span>82%</span>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-gray-100">
-                      <div className="h-2 w-[90%] rounded-full bg-blue-600" />
+                      <div className="h-2 w-[82%] rounded-full bg-blue-600" />
                     </div>
                   </div>
 
                   <div>
                     <div className="flex justify-between text-xs font-bold text-gray-500">
-                      <span>Profile Strength</span>
+                      <span>AI Personalization</span>
                       <span>70%</span>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-gray-100">
@@ -309,12 +421,13 @@ export default function DashboardPage() {
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-bold">Skill Development</h2>
+                <h2 className="text-lg font-bold">AI Suggestions</h2>
 
                 <div className="mt-5 space-y-4">
                   {[
-                    ["Resume Optimization", "73%"],
-                    ["Job Matching", "89%"],
+                    ["Import latest resume", "High"],
+                    ["Complete Skills section", "Medium"],
+                    ["Create first package", "New"],
                   ].map(([name, percent]) => (
                     <div key={name} className="rounded-xl bg-slate-50 p-4">
                       <div className="flex items-center justify-between">
@@ -324,7 +437,7 @@ export default function DashboardPage() {
                         </span>
                       </div>
                       <a href="#" className="mt-2 block text-xs font-bold text-blue-600">
-                        Continue Course
+                        Review
                       </a>
                     </div>
                   ))}
@@ -351,8 +464,9 @@ export default function DashboardPage() {
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-bold">Next Suggestion</h2>
                 <p className="mt-3 text-sm leading-6 text-gray-600">
-                  Add your latest resume so Career Élan can create stronger
-                  job-specific applications.
+                  Create your first Application Package by pasting a job posting
+                  URL. Career Élan will generate a resume and cover letter
+                  together.
                 </p>
               </div>
             </aside>
