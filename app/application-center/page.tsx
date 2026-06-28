@@ -13,15 +13,15 @@ const menuItems = [
 ];
 
 const applicantItems = [
-  { title: "Resume", description: "Ready to review and send", icon: "📄" },
-  { title: "Cover Letter", description: "Tailored to this job", icon: "✉️" },
-  { title: "Email Draft", description: "Copy or send from Career Élan", icon: "📧" },
+  { title: "Resume", description: "Tailored to this job", icon: "📄" },
+  { title: "Cover Letter", description: "Personalized for this position", icon: "✉️" },
+  { title: "Follow-up Email", description: "Ready to send after applying", icon: "📧" },
 ];
 
 const privateItems = [
-  { title: "Interview Prep", description: "Private practice", icon: "🎤" },
-  { title: "Company Summary", description: "Private research", icon: "🏢" },
-  { title: "ATS Match Report", description: "Private feedback", icon: "📊" },
+  { title: "Interview Prep", description: "Practice with AI questions", icon: "🎤" },
+  { title: "Company Research", description: "Mission, culture & interview insights", icon: "🏢" },
+  { title: "ATS Match Report", description: "Keywords and optimization tips", icon: "📊" },
 ];
 
 type JobData = {
@@ -83,6 +83,8 @@ export default function ApplicationCenterPage() {
   const [jobInput, setJobInput] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [jobData, setJobData] = useState<JobData>(defaultJobData);
   const [inputMessage, setInputMessage] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
@@ -106,6 +108,7 @@ export default function ApplicationCenterPage() {
 
     setJobData(data);
     setAnalyzed(true);
+    setGenerated(false);
   }
 
   async function handleAnalyzeJob() {
@@ -116,6 +119,7 @@ export default function ApplicationCenterPage() {
 
     setIsAnalyzing(true);
     setAnalyzed(false);
+    setGenerated(false);
     setInputMessage("");
 
     try {
@@ -146,6 +150,7 @@ export default function ApplicationCenterPage() {
 
         setJobData(data);
         setAnalyzed(true);
+        setGenerated(false);
         setInputMessage("URL successfully analyzed.");
         return;
       }
@@ -163,6 +168,20 @@ export default function ApplicationCenterPage() {
     }
   }
 
+  function handleGenerateMaterials() {
+    if (!analyzed) {
+      alert("Please analyze a job first.");
+      return;
+    }
+
+    setIsGenerating(true);
+
+    setTimeout(() => {
+      setGenerated(true);
+      setIsGenerating(false);
+    }, 900);
+  }
+
   async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
@@ -171,6 +190,7 @@ export default function ApplicationCenterPage() {
     setSelectedFileName(file.name);
     setInputMessage(`Selected file: ${file.name}. Upload analysis is ready to connect.`);
     setAnalyzed(false);
+    setGenerated(false);
 
     const fileType = file.type;
     const fileName = file.name.toLowerCase();
@@ -208,7 +228,9 @@ export default function ApplicationCenterPage() {
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       <div className="flex min-h-screen">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
-          <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
+          <a href="/dashboard">
+            <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
+          </a>
 
           <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
             Overview
@@ -255,9 +277,9 @@ export default function ApplicationCenterPage() {
 
             <div className="flex items-center gap-3">
               <button className="rounded-full bg-white p-3 shadow-sm">🔔</button>
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
+              <a href="/settings" className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
                 D
-              </div>
+              </a>
             </div>
           </header>
 
@@ -278,6 +300,7 @@ export default function ApplicationCenterPage() {
                     onChange={(e) => {
                       setJobInput(e.target.value);
                       setInputMessage("");
+                      setGenerated(false);
                     }}
                     placeholder="Paste a job URL, job description, or drop a file here..."
                     className="w-full resize-none bg-transparent text-lg font-semibold outline-none placeholder:text-gray-500"
@@ -328,6 +351,7 @@ export default function ApplicationCenterPage() {
               <button
                 onClick={() => {
                   setJobInput("");
+                  setGenerated(false);
                   setInputMessage("Paste a job URL above, then click Analyze Job. If URL reading fails, paste the job description or upload a file.");
                 }}
                 className="rounded-2xl border border-gray-200 bg-white p-5 text-left transition hover:-translate-y-1 hover:shadow-lg"
@@ -348,6 +372,7 @@ export default function ApplicationCenterPage() {
               <button
                 onClick={() => {
                   setJobInput("");
+                  setGenerated(false);
                   setInputMessage("Paste the full job description above, then click Analyze Job.");
                 }}
                 className="rounded-2xl border border-gray-200 bg-white p-5 text-left transition hover:-translate-y-1 hover:shadow-lg"
@@ -415,9 +440,7 @@ export default function ApplicationCenterPage() {
               </h2>
               <span
                 className={`rounded-full px-3 py-1 text-xs font-bold ${
-                  analyzed
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-green-100 text-green-700"
+                  analyzed ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
                 }`}
               >
                 {analyzed ? "Analyzed" : "Example"}
@@ -448,10 +471,7 @@ export default function ApplicationCenterPage() {
                     </h4>
                     <p className="mt-1 text-sm font-semibold text-gray-500">ATS Match</p>
                     <div className="mt-3 h-2 rounded-full bg-gray-100">
-                      <div
-                        className="h-2 rounded-full bg-green-500"
-                        style={{ width: jobData.match }}
-                      />
+                      <div className="h-2 rounded-full bg-green-500" style={{ width: jobData.match }} />
                     </div>
                   </div>
 
@@ -480,10 +500,7 @@ export default function ApplicationCenterPage() {
                   <h4 className="text-sm font-extrabold">Top Skills & Keywords</h4>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {jobData.keywords.map((keyword) => (
-                      <span
-                        key={keyword}
-                        className="rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600"
-                      >
+                      <span key={keyword} className="rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600">
                         {keyword}
                       </span>
                     ))}
@@ -493,12 +510,10 @@ export default function ApplicationCenterPage() {
 
               <div className="rounded-2xl bg-slate-50 p-6">
                 <h3 className="font-extrabold">Job Summary</h3>
-                <p className="mt-4 text-sm leading-7 text-gray-600">
-                  {jobData.summary}
-                </p>
+                <p className="mt-4 text-sm leading-7 text-gray-600">{jobData.summary}</p>
 
                 <button className="mt-5 font-bold text-blue-600">
-                  View full analysis →
+                  See Full Analysis →
                 </button>
               </div>
             </div>
@@ -507,25 +522,30 @@ export default function ApplicationCenterPage() {
           <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <h2 className="text-xl font-extrabold">
-                  Generate Application Materials
-                </h2>
+                <h2 className="text-xl font-extrabold">Generate Application Package</h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  Create employer-ready materials and private AI support for this job.
+                  Generate personalized application materials and AI insights for this job.
                 </p>
               </div>
 
               <button
-                disabled={!analyzed}
+                onClick={handleGenerateMaterials}
+                disabled={!analyzed || isGenerating}
                 className="rounded-xl bg-blue-600 px-7 py-3 font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                ✨ Generate Materials
+                {isGenerating ? "Generating..." : generated ? "✅ Package Generated" : "✨ Generate Package"}
               </button>
             </div>
 
             {!analyzed && (
               <p className="mt-4 text-sm font-semibold text-gray-500">
                 Analyze a job first to unlock material generation.
+              </p>
+            )}
+
+            {generated && (
+              <p className="mt-4 rounded-xl bg-green-50 px-4 py-3 text-sm font-bold text-green-700">
+                Application package is ready. Review each item before sending anything to an employer.
               </p>
             )}
 
@@ -541,13 +561,28 @@ export default function ApplicationCenterPage() {
 
               <div className="grid gap-4 md:grid-cols-3">
                 {applicantItems.map((item) => (
-                  <div
-                    key={item.title}
-                    className="rounded-2xl border border-gray-100 bg-slate-50 p-4"
-                  >
-                    <div className="text-2xl">{item.icon}</div>
+                  <div key={item.title} className="rounded-2xl border border-gray-100 bg-slate-50 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="text-2xl">{item.icon}</div>
+                      {generated && (
+                        <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                          Ready
+                        </span>
+                      )}
+                    </div>
                     <h3 className="mt-3 text-sm font-extrabold">{item.title}</h3>
                     <p className="mt-1 text-xs text-gray-500">{item.description}</p>
+
+                    {generated && (
+                      <div className="mt-4 flex gap-2">
+                        <button className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white">
+                          Preview
+                        </button>
+                        <button className="rounded-lg border border-blue-600 px-3 py-2 text-xs font-bold text-blue-600">
+                          Edit
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -565,13 +600,23 @@ export default function ApplicationCenterPage() {
 
               <div className="grid gap-4 md:grid-cols-3">
                 {privateItems.map((item) => (
-                  <div
-                    key={item.title}
-                    className="rounded-2xl border border-gray-100 bg-white p-4"
-                  >
-                    <div className="text-2xl">{item.icon}</div>
+                  <div key={item.title} className="rounded-2xl border border-gray-100 bg-white p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="text-2xl">{item.icon}</div>
+                      {generated && (
+                        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
+                          Ready
+                        </span>
+                      )}
+                    </div>
                     <h3 className="mt-3 text-sm font-extrabold">{item.title}</h3>
                     <p className="mt-1 text-xs text-gray-500">{item.description}</p>
+
+                    {generated && (
+                      <button className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600">
+                        Open
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
