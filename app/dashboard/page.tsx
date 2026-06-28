@@ -25,7 +25,13 @@ const neutralJobs = [
   { title: "Office Clerk", company: "Entry-Level Office Role", type: "Full-time", tags: ["Data Entry", "Organization"] },
 ];
 
-const personalizedJobs = [
+const personalizedJobs: {
+  title: string;
+  company: string;
+  type: string;
+  tags: string[];
+  match: string;
+}[] = [
   { title: "Legal Assistant", company: "Toronto Legal Group", type: "Full-time", tags: ["Legal", "Admin"], match: "87%" },
   { title: "Administrative Assistant", company: "North York Office", type: "Part-time", tags: ["Office", "Client Service"], match: "76%" },
   { title: "Law Clerk Intern", company: "Downtown Firm", type: "Internship", tags: ["Law Clerk", "Research"], match: "91%" },
@@ -303,13 +309,16 @@ export default function DashboardPage() {
                         ))}
                       </div>
 
-                      {careerMemoryCompleted && "match" in job ? (
+                      {careerMemoryCompleted && "match" in job && typeof job.match === "string" ? (
                         <div className="mt-5">
                           <div className="flex justify-between text-xs font-bold text-gray-500">
                             <span>{job.match} match with your Career Memory</span>
                           </div>
                           <div className="mt-2 h-2 rounded-full bg-gray-100">
-                            <div className="h-2 rounded-full bg-blue-600" style={{ width: job.match }} />
+                            <div
+                              className="h-2 rounded-full bg-blue-600"
+                              style={{ width: job.match }}
+                            />
                           </div>
                         </div>
                       ) : (
