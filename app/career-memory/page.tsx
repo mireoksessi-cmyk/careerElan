@@ -75,7 +75,15 @@ export default function CareerMemoryPage() {
             ].map((item) => (
               <a
                 key={item}
-                href={item === "Dashboard" ? "/dashboard" : "#"}
+                href={
+                item === "Dashboard"
+                ? "/dashboard"
+                : item === "Career Memory"
+                ? "/career-memory"
+                : item === "Application Center"
+                ? "/application-center"
+                : "#"
+}
                 className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                   item === "Career Memory"
                     ? "bg-blue-600 text-white"
