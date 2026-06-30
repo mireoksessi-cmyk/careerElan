@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { searchJobs, type SearchJob } from "@/lib/services/search";
 
 type Job = {
   id: number;
@@ -17,11 +19,28 @@ type Job = {
   posted: string;
 };
 
+type DisplayJob = {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  type: string;
+  mode: string;
+  category: string;
+  match?: number;
+  matched: string[];
+  missing: string[];
+  posted: string;
+  url?: string;
+  logo?: string;
+  source?: string;
+};
+
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
   { label: "Career Memory", href: "/career-memory", icon: "🧠" },
   { label: "Create Package", href: "/create-package", icon: "📦" },
-  { label: "Find Jobs", href: "/create-package/find-jobs", icon: "🔍" },
+  { label: "Find Jobs", href: "/find-jobs", icon: "🔍" },
   { label: "Paste Job", href: "/paste-job", icon: "📋" },
   { label: "Job Tracker", href: "/job-tracker", icon: "💼" },
   { label: "Analytics", href: "/analytics", icon: "📊" },
@@ -50,38 +69,126 @@ const aiJobs: Job[] = neutralJobs.map((job, index) => ({
   ...job,
   match: 94 - index * 2,
   company:
-    index === 0
-      ? "TD Bank"
-      : index === 1
-      ? "Blakes Law Firm"
-      : index === 2
-      ? "RBC"
-      : index === 3
-      ? "Toronto Legal Clinic"
-      : index === 4
-      ? "Government of Ontario"
-      : index === 5
-      ? "CIBC"
-      : job.company,
+    index === 0 ? "TD Bank" :
+    index === 1 ? "Blakes Law Firm" :
+    index === 2 ? "RBC" :
+    index === 3 ? "Toronto Legal Clinic" :
+    index === 4 ? "Government of Ontario" :
+    index === 5 ? "CIBC" :
+    job.company,
 }));
 
+function formatPosted(posted: string) {
+  if (!posted) return "Recently posted";
+  const date = new Date(posted);
+  if (Number.isNaN(date.getTime())) return posted;
+  return date.toLocaleDateString("en-CA", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function convertLocalJob(job: Job): DisplayJob {
+  return {
+    id: String(job.id),
+    title: job.title,
+    company: job.company,
+    location: job.location,
+    type: job.type,
+    mode: job.mode,
+    category: job.category,
+    match: job.match,
+    matched: job.matched,
+    missing: job.missing,
+    posted: job.posted,
+  };
+}
+
+function convertApiJob(job: SearchJob, hasCareerMemory: boolean): DisplayJob {
+  return {
+    id: job.id,
+    title: job.title,
+    company: job.company,
+    location: job.location,
+    type: job.type,
+    mode: job.type?.toLowerCase().includes("remote") ? "Remote" : "On-site / Hybrid",
+    category: job.category || "General",
+    match: job.match,
+    matched: hasCareerMemory
+  ? [
+      job.title?.toLowerCase().includes("admin")
+        ? "Administrative experience"
+        : "Relevant job title",
+      job.description?.toLowerCase().includes("customer")
+        ? "Customer service"
+        : "Company posting",
+      job.location ? "Canada-based role" : "Location available",
+    ]
+  : ["Upload resume or complete Career Memory for AI match"],
+
+missing: hasCareerMemory
+  ? [
+      job.description?.toLowerCase().includes("french")
+        ? "French may be required"
+        : "Review full posting",
+      job.description?.toLowerCase().includes("experience")
+        ? "Check experience requirement"
+        : "Confirm job details",
+    ]
+  : ["No resume analyzed yet"],
+    posted: formatPosted(job.posted),
+    url: job.url,
+    logo: job.logo,
+    source: job.source,
+  };
+}
+
 export default function FindJobsPage() {
+  const router = useRouter();
+
   const [query, setQuery] = useState("");
-  const [location, setLocation] = useState("Toronto, ON");
+  const [location, setLocation] = useState("Canada");
   const [jobType, setJobType] = useState("All");
   const [category, setCategory] = useState("All");
-  const [visibleCount, setVisibleCount] = useState(6);
   const [page, setPage] = useState(1);
   const [hasCareerMemory, setHasCareerMemory] = useState(false);
+
+  const [externalJobs, setExternalJobs] = useState<DisplayJob[]>([]);
+  const [externalMode, setExternalMode] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [message, setMessage] = useState("");
+  const [externalTotalPages, setExternalTotalPages] = useState(1);
 
   useEffect(() => {
     const saved = localStorage.getItem("careerMemoryData");
     setHasCareerMemory(Boolean(saved));
   }, []);
 
+  useEffect(() => {
+    const saved = sessionStorage.getItem("findJobsState");
+    if (!saved) return;
+
+    try {
+      const state = JSON.parse(saved);
+
+      setQuery(state.query || "");
+      setLocation(state.location || "Canada");
+      setJobType(state.jobType || "All");
+      setCategory(state.category || "All");
+      setPage(state.page || 1);
+      setExternalJobs(Array.isArray(state.jobs) ? state.jobs : []);
+      setExternalMode(Boolean(state.externalMode));
+      setExternalTotalPages(state.externalTotalPages || 1);
+    } catch (error) {
+      console.error(error);
+      sessionStorage.removeItem("findJobsState");
+    }
+  }, []);
+
   const baseJobs = hasCareerMemory ? aiJobs : neutralJobs;
 
-  const filteredJobs = useMemo(() => {
+  const filteredLocalJobs = useMemo(() => {
     return baseJobs.filter((job) => {
       const q = query.toLowerCase();
 
@@ -93,6 +200,7 @@ export default function FindJobsPage() {
 
       const matchesLocation =
         location === "All" ||
+        location === "Canada" ||
         job.location.includes(location.replace(", ON", ""));
 
       const matchesType = jobType === "All" || job.type === jobType;
@@ -102,21 +210,115 @@ export default function FindJobsPage() {
     });
   }, [query, location, jobType, category, baseJobs]);
 
-  const jobsPerPage = 15;
-  const totalPages = Math.max(1, Math.ceil(filteredJobs.length / jobsPerPage));
-  const pagedJobs = filteredJobs.slice(
-    (page - 1) * jobsPerPage,
-    page * jobsPerPage
-  );
-  const jobsToShow = pagedJobs.slice(0, visibleCount);
+  const jobsPerPage = 10;
 
-  function resetList() {
-    setVisibleCount(6);
-    setPage(1);
+  const localDisplayJobs = filteredLocalJobs.map(convertLocalJob);
+  const activeJobs = externalMode ? externalJobs : localDisplayJobs;
+
+  const totalPages = externalMode
+    ? externalTotalPages
+    : Math.max(1, Math.ceil(activeJobs.length / jobsPerPage));
+
+  const jobsToShow = externalMode
+    ? activeJobs.slice(0, jobsPerPage)
+    : activeJobs.slice((page - 1) * jobsPerPage, page * jobsPerPage);
+
+  async function handleSearch(nextPage = 1) {
+    setIsSearching(true);
+    setMessage("");
+
+    try {
+      const data = await searchJobs({
+        query: query || "administrative assistant",
+        location: location === "All" ? "Canada" : location,
+        page: nextPage,
+      });
+
+      const jobs = data.jobs.map((job) => convertApiJob(job, hasCareerMemory));
+
+      const nextTotalPages = jobs.length > 0 ? Math.max(nextPage + 1, 2) : nextPage;
+
+      setExternalJobs(jobs);
+      setExternalMode(true);
+      setPage(nextPage);
+      setExternalTotalPages(nextTotalPages);
+      setMessage(jobs.length > 0 ? "" : "No jobs found. Try another keyword or location.");
+
+      sessionStorage.setItem(
+        "findJobsState",
+        JSON.stringify({
+          query,
+          location,
+          jobType,
+          category,
+          page: nextPage,
+          jobs,
+          externalMode: true,
+          externalTotalPages: nextTotalPages,
+        })
+      );
+    } catch (error: any) {
+      console.error(error);
+      setMessage(
+        error?.message ||
+          "Job search service is temporarily unavailable. Please try again later."
+      );
+    } finally {
+      setIsSearching(false);
+    }
   }
 
-  function handleMoreJobs() {
-    setVisibleCount((prev) => Math.min(prev + 3, jobsPerPage));
+  function handleResetFilters() {
+    setExternalMode(false);
+    setExternalJobs([]);
+    setPage(1);
+    setMessage("");
+    sessionStorage.removeItem("findJobsState");
+  }
+
+  function goToPage(nextPage: number) {
+    if (nextPage < 1) return;
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    if (externalMode) {
+      handleSearch(nextPage);
+      return;
+    }
+
+    const safePage = Math.min(nextPage, totalPages);
+    setPage(safePage);
+  }
+
+
+
+  function saveCurrentSearchState() {
+    sessionStorage.setItem(
+      "findJobsState",
+      JSON.stringify({
+        query,
+        location,
+        jobType,
+        category,
+        page,
+        jobs: externalJobs,
+        externalMode,
+        externalTotalPages,
+      })
+    );
+  }
+
+  function getPackageHref(job: DisplayJob) {
+    if (job.url) {
+      return `/paste-job?from=find-jobs&url=${encodeURIComponent(job.url)}&title=${encodeURIComponent(job.title)}`;
+    }
+
+    return `/paste-job?from=find-jobs&job=${job.id}`;
+  }
+
+  function openJobDetails(job: DisplayJob) {
+    saveCurrentSearchState();
+    router.push(getPackageHref(job));
   }
 
   return (
@@ -173,7 +375,7 @@ export default function FindJobsPage() {
                 Find Jobs in Career Élan
               </h1>
               <p className="mt-1 text-sm text-gray-500">
-                Search jobs matched to your profile. Select a job to create your full application package.
+                Search jobs across Canada, then create a full application package.
               </p>
             </div>
 
@@ -191,7 +393,7 @@ export default function FindJobsPage() {
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  resetList();
+                  handleResetFilters();
                 }}
                 placeholder="Search job title, company, or keyword..."
                 className="rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-4"
@@ -201,13 +403,18 @@ export default function FindJobsPage() {
                 value={location}
                 onChange={(e) => {
                   setLocation(e.target.value);
-                  resetList();
+                  handleResetFilters();
                 }}
                 className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
               >
+                <option>Canada</option>
                 <option>Toronto, ON</option>
                 <option>North York, ON</option>
                 <option>Mississauga, ON</option>
+                <option>Vancouver, BC</option>
+                <option>Calgary, AB</option>
+                <option>Montreal, QC</option>
+                <option>Ottawa, ON</option>
                 <option>All</option>
               </select>
 
@@ -215,7 +422,7 @@ export default function FindJobsPage() {
                 value={jobType}
                 onChange={(e) => {
                   setJobType(e.target.value);
-                  resetList();
+                  handleResetFilters();
                 }}
                 className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
               >
@@ -230,7 +437,7 @@ export default function FindJobsPage() {
                 value={category}
                 onChange={(e) => {
                   setCategory(e.target.value);
-                  resetList();
+                  handleResetFilters();
                 }}
                 className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
               >
@@ -242,22 +449,35 @@ export default function FindJobsPage() {
               </select>
 
               <button
-                onClick={resetList}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white lg:col-span-2"
+                onClick={() => handleSearch(1)}
+                disabled={isSearching}
+                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60 lg:col-span-2"
               >
-                Search
+                {isSearching ? "Searching..." : "Search"}
               </button>
             </div>
+
+            {message && (
+              <p className="mt-4 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                {message}
+              </p>
+            )}
           </section>
 
           <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-extrabold">
-                  {hasCareerMemory ? "AI Matched Jobs" : "Recommended Jobs"}
+                  {externalMode
+                    ? "Canada Job Search Results"
+                    : hasCareerMemory
+                    ? "AI Matched Jobs"
+                    : "Recommended Jobs"}
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  {hasCareerMemory
+                  {externalMode
+                    ? "Live job listings powered by JSearch. Select a job to generate your package."
+                    : hasCareerMemory
                     ? "These jobs are ranked based on your Career Memory and profile."
                     : "General recommendations. Upload your resume or complete Career Memory for AI matches."}
                 </p>
@@ -265,7 +485,7 @@ export default function FindJobsPage() {
 
               <div className="text-right">
                 <p className="text-sm font-bold text-gray-600">
-                  Showing {jobsToShow.length} of {filteredJobs.length}
+                  Showing {jobsToShow.length} jobs
                 </p>
                 <p className="text-xs text-gray-400">
                   Page {page} of {totalPages}
@@ -273,25 +493,33 @@ export default function FindJobsPage() {
               </div>
             </div>
 
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               {jobsToShow.map((job, index) => (
                 <div
-                  key={job.id}
-                  className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                  key={`${job.id}-${index}`}
+                  className="flex min-h-[310px] flex-col rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
                 >
                   <div className="flex items-start justify-between">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-2xl">
-                      💼
+                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-blue-50 text-2xl">
+                      {job.logo ? (
+                        <img
+                          src={job.logo}
+                          alt={job.company}
+                          className="h-full w-full object-contain p-1"
+                        />
+                      ) : (
+                        "💼"
+                      )}
                     </div>
 
                     {job.match ? (
                       <div className="text-right">
                         {index === 0 && page === 1 && (
-                          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
-                            Best Match
+                          <span className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-bold text-green-700">
+                            Best
                           </span>
                         )}
-                        <p className="mt-2 text-lg font-extrabold text-green-600">
+                        <p className="mt-2 text-sm font-extrabold text-green-600">
                           {job.match}% Match
                         </p>
                       </div>
@@ -302,30 +530,34 @@ export default function FindJobsPage() {
                     )}
                   </div>
 
-                  <h3 className="mt-5 text-lg font-extrabold">{job.title}</h3>
-                  <p className="mt-1 text-sm text-gray-500">{job.company}</p>
-                  <p className="mt-1 text-xs text-gray-400">
-                    {job.location} · {job.mode} · {job.posted}
+                  <h3 className="mt-5 line-clamp-2 text-sm font-extrabold">
+                    {job.title}
+                  </h3>
+                  <p className="mt-1 line-clamp-1 text-xs font-semibold text-gray-500">
+                    {job.company}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-xs text-gray-400">
+                    {job.location}
                   </p>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-bold text-blue-600">
                       {job.type}
                     </span>
-                    <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-bold text-gray-500">
+                    <span className="rounded-full bg-slate-50 px-3 py-1 text-[10px] font-bold text-gray-500">
                       {job.category}
                     </span>
                   </div>
 
-                  <div className="mt-5">
-                    <h4 className="text-xs font-extrabold text-gray-700">
+                  <div className="mt-4">
+                    <h4 className="text-[11px] font-extrabold text-gray-700">
                       Why this matches you
                     </h4>
                     <div className="mt-2 space-y-1">
-                      {job.matched.map((item) => (
+                      {job.matched.slice(0, 3).map((item) => (
                         <p
                           key={item}
-                          className="text-xs font-semibold text-green-700"
+                          className="text-[11px] font-semibold text-green-700"
                         >
                           ✓ {item}
                         </p>
@@ -333,15 +565,15 @@ export default function FindJobsPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4">
-                    <h4 className="text-xs font-extrabold text-gray-700">
+                  <div className="mt-3">
+                    <h4 className="text-[11px] font-extrabold text-gray-700">
                       Missing
                     </h4>
                     <div className="mt-2 space-y-1">
-                      {job.missing.map((item) => (
+                      {job.missing.slice(0, 2).map((item) => (
                         <p
                           key={item}
-                          className="text-xs font-semibold text-red-500"
+                          className="text-[11px] font-semibold text-red-500"
                         >
                           × {item}
                         </p>
@@ -349,54 +581,59 @@ export default function FindJobsPage() {
                     </div>
                   </div>
 
-                  <a
-                    href={`/paste-job?job=${job.id}`}
-                    className="mt-5 block w-full rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white hover:bg-blue-700"
-                  >
-                    Generate Package →
-                  </a>
+                  <div className="mt-auto pt-4">
+                    <button
+                      onClick={() => openJobDetails(job)}
+                      className="block w-full rounded-xl bg-blue-600 px-4 py-3 text-center text-xs font-bold text-white hover:bg-blue-700"
+                    >
+                      View Job Details →
+                    </button>
+
+                    {job.source && (
+                      <p className="mt-2 text-center text-[10px] font-semibold text-gray-400">
+                        Source: {job.source}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
 
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-              {visibleCount < Math.min(jobsPerPage, pagedJobs.length) && (
-                <button
-                  onClick={handleMoreJobs}
-                  className="rounded-xl border border-blue-200 bg-white px-8 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
-                >
-                  + More Jobs
-                </button>
-              )}
+              <button
+                onClick={() => goToPage(page - 1)}
+                disabled={page <= 1 || isSearching}
+                className="h-10 w-10 rounded-xl border border-blue-100 bg-white text-sm font-bold text-blue-600 hover:bg-blue-50 disabled:opacity-40"
+              >
+                ‹
+              </button>
 
-              <div className="flex items-center gap-2">
-                {Array.from({ length: totalPages }).map((_, i) => (
+              {Array.from({ length: Math.min(totalPages, 5) }).map((_, i) => {
+                const pageNumber = i + 1;
+
+                return (
                   <button
-                    key={i}
-                    onClick={() => {
-                      setPage(i + 1);
-                      setVisibleCount(6);
-                    }}
+                    key={pageNumber}
+                    onClick={() => goToPage(pageNumber)}
+                    disabled={isSearching}
                     className={`h-10 w-10 rounded-xl text-sm font-bold ${
-                      page === i + 1
+                      page === pageNumber
                         ? "bg-blue-600 text-white"
                         : "border border-blue-100 bg-white text-blue-600 hover:bg-blue-50"
                     }`}
                   >
-                    {i + 1}
+                    {pageNumber}
                   </button>
-                ))}
+                );
+              })}
 
-                <button
-                  onClick={() => {
-                    setPage((prev) => Math.min(prev + 1, totalPages));
-                    setVisibleCount(6);
-                  }}
-                  className="h-10 w-10 rounded-xl border border-blue-100 bg-white text-sm font-bold text-blue-600 hover:bg-blue-50"
-                >
-                  ›
-                </button>
-              </div>
+              <button
+                onClick={() => goToPage(page + 1)}
+                disabled={isSearching}
+                className="h-10 w-10 rounded-xl border border-blue-100 bg-white text-sm font-bold text-blue-600 hover:bg-blue-50 disabled:opacity-40"
+              >
+                ›
+              </button>
             </div>
           </section>
         </section>

@@ -520,9 +520,9 @@ export default function CareerMemoryPage() {
           <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
           <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">Overview</p>
           <nav className="mt-4 space-y-2">
-            {["Dashboard", "Career Memory", "Application Center", "Job Tracker", "Analytics", "Settings"].map((item) => (
-              <a key={item} href={item === "Dashboard" ? "/dashboard" : item === "Career Memory" ? "/career-memory" : item === "Application Center" ? "/application-center" : "#"} className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${item === "Career Memory" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"}`}>
-                <span>{item === "Dashboard" ? "🏠" : item === "Career Memory" ? "🧠" : item === "Application Center" ? "📦" : item === "Job Tracker" ? "💼" : item === "Analytics" ? "📊" : "⚙️"}</span>
+            {["Dashboard", "Career Memory", "Create Package", "Job Tracker", "Analytics", "Settings"].map((item) => (
+              <a key={item} href={item === "Dashboard" ? "/dashboard" : item === "Career Memory" ? "/career-memory" : item === "Create Package" ? "/create-package" : "#"} className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${item === "Career Memory" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"}`}>
+                <span>{item === "Dashboard" ? "🏠" : item === "Career Memory" ? "🧠" : item === "Create Package" ? "📦" : item === "Job Tracker" ? "💼" : item === "Analytics" ? "📊" : "⚙️"}</span>
                 {item}
               </a>
             ))}

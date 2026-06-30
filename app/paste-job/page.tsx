@@ -1,9 +1,22 @@
 "use client";
 
 import Image from "next/image";
-import { ChangeEvent, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type PasteMode = "url" | "description" | "file";
+
+type PreviewType = "resume" | "coverLetter" | "emailDraft";
+
+type JobDetails = {
+  description: string;
+  responsibilities: string[];
+  qualifications: string[];
+  benefits: string[];
+  salary: string;
+  schedule: string;
+  applyUrl: string;
+};
 
 type JobAnalysis = {
   title: string;
@@ -17,6 +30,7 @@ type JobAnalysis = {
   requirementsMatched: number;
   keywords: string[];
   summary: string;
+  jobDetails: JobDetails;
 };
 
 type GeneratedPackage = {
@@ -48,9 +62,19 @@ const emptyAnalysis: JobAnalysis = {
   requirementsMatched: 0,
   keywords: [],
   summary: "Analyze a job posting to see the detected role, keywords, and match details.",
+  jobDetails: {
+    description: "",
+    responsibilities: [],
+    qualifications: [],
+    benefits: [],
+    salary: "",
+    schedule: "",
+    applyUrl: "",
+  },
 };
 
 export default function PasteJobPage() {
+  const router = useRouter();
   const [activeMode, setActiveMode] = useState<PasteMode>("url");
   const [jobUrl, setJobUrl] = useState("");
   const [jobDescription, setJobDescription] = useState("");
@@ -62,9 +86,8 @@ export default function PasteJobPage() {
   const [generated, setGenerated] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedPreview, setSelectedPreview] = useState<
-    "resume" | "coverLetter" | "emailDraft"
-  >("resume");
+  const [selectedPreview, setSelectedPreview] = useState<PreviewType>("resume");
+  const [showDefaultApplication, setShowDefaultApplication] = useState(false);
 
   const [packageData, setPackageData] = useState<GeneratedPackage>({
     resume: "",
@@ -73,6 +96,35 @@ export default function PasteJobPage() {
   });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const autoAnalyzeStartedRef = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get("url");
+    const title = params.get("title");
+
+    if (url) {
+      setActiveMode("url");
+      setJobUrl(url);
+      setAnalyzed(false);
+      setGenerated(false);
+      setMessage("Analyzing this job posting automatically...");
+
+      if (!autoAnalyzeStartedRef.current) {
+        autoAnalyzeStartedRef.current = true;
+        setTimeout(() => {
+          void analyzeJob(url, "url", "Analysis completed automatically from Find Jobs.");
+        }, 0);
+      }
+    }
+
+    if (title) {
+      setAnalysis((prev) => ({
+        ...prev,
+        title,
+      }));
+    }
+  }, []);
 
   function getCurrentJobText() {
     if (activeMode === "url") return jobUrl.trim();
@@ -81,94 +133,55 @@ export default function PasteJobPage() {
     return "";
   }
 
-  async function handleAnalyze() {
-    const jobText = getCurrentJobText();
-
-    if (!jobText) {
-      alert("Please add a job URL, job description, or upload a file first.");
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setMessage("");
-    setAnalyzed(false);
-    setGenerated(false);
-
-    try {
-      const isUrlMode = activeMode === "url";
-
-    const res = await fetch(isUrlMode ? "/api/analyze-job-url" : "/api/analyze-job", {
-     method: "POST",
-    headers: {
-    "Content-Type": "application/json",
-    },
-    body: JSON.stringify(
-    isUrlMode
-      ? { jobUrl: jobText }
-      : { jobText }
-    ),
-    });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to analyze job.");
-      }
-
-      setAnalysis({
-        title: data.title || "Job Posting",
-        company: data.company || "Detected Company",
-        location: data.location || "Canada",
-        type: data.type || "Full-time",
-        category: data.category || "General",
-        icon: data.icon || "💼",
-        match: data.match || "80%",
-        keywordCount: data.keywordCount || 0,
-        requirementsMatched: data.requirementsMatched || 0,
-        keywords: Array.isArray(data.keywords) ? data.keywords : [],
-        summary: data.summary || "Job posting analyzed successfully.",
-      });
-
-      setAnalyzed(true);
-      setMessage("Job posting analyzed successfully. You can now generate your package.");
-    } catch (error) {
-      console.error(error);
-      alert("AI analysis failed. Check your API key and server console.");
-      setMessage("AI analysis failed. Please check your API route and OpenAI key.");
-    } finally {
-      setIsAnalyzing(false);
-    }
+  function normalizeStringArray(value: unknown) {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
   }
 
-  function handleGeneratePackage() {
-    if (!analyzed) {
-      alert("Please analyze the job posting first.");
-      return;
-    }
+  function normalizeJobDetails(data: any, fallbackUrl = ""): JobDetails {
+    const details = data?.jobDetails || {};
 
-    setIsGenerating(true);
-    setMessage("");
+    return {
+      description:
+        details.description ||
+        data?.about ||
+        data?.description ||
+        data?.summary ||
+        "",
+      responsibilities: normalizeStringArray(
+        details.responsibilities || data?.responsibilities || data?.tasks
+      ),
+      qualifications: normalizeStringArray(
+        details.qualifications || data?.qualifications || data?.requirements
+      ),
+      benefits: normalizeStringArray(details.benefits || data?.benefits),
+      salary: details.salary || data?.salary || data?.wage || "",
+      schedule: details.schedule || data?.schedule || data?.type || "",
+      applyUrl: details.applyUrl || fallbackUrl || "",
+    };
+  }
 
-    setTimeout(() => {
-      const title = analysis.title || "this position";
-      const company = analysis.company || "your company";
-      const location = analysis.location || "Canada";
-      const keywords =
-        analysis.keywords?.length > 0
-          ? analysis.keywords.join(", ")
-          : "communication, organization, and attention to detail";
+  function buildGeneratedPackage(nextAnalysis: JobAnalysis): GeneratedPackage {
+    const title = nextAnalysis.title || "this position";
+    const company = nextAnalysis.company || "your company";
+    const location = nextAnalysis.location || "Canada";
+    const keywords =
+      nextAnalysis.keywords?.length > 0
+        ? nextAnalysis.keywords.join(", ")
+        : "communication, organization, and attention to detail";
 
-      setPackageData({
-        resume: `Professional Summary
+    return {
+      resume: `Professional Summary
 
 Detail-oriented candidate applying for ${title} at ${company}. Experienced in communication, organization, client support, document handling, and professional office tasks.
 
 Relevant Skills
-• ${analysis.keywords?.[0] || "Communication"}
-• ${analysis.keywords?.[1] || "Organization"}
-• ${analysis.keywords?.[2] || "Microsoft Office"}
-• ${analysis.keywords?.[3] || "Client Service"}
-• ${analysis.keywords?.[4] || "Attention to Detail"}
+• ${nextAnalysis.keywords?.[0] || "Communication"}
+• ${nextAnalysis.keywords?.[1] || "Organization"}
+• ${nextAnalysis.keywords?.[2] || "Microsoft Office"}
+• ${nextAnalysis.keywords?.[3] || "Client Service"}
+• ${nextAnalysis.keywords?.[4] || "Attention to Detail"}
 
 Target Role
 ${title}
@@ -184,7 +197,7 @@ Experience Highlights
 ATS Keywords
 ${keywords}`,
 
-        coverLetter: `Dear Hiring Manager,
+      coverLetter: `Dear Hiring Manager,
 
 I am writing to express my interest in the ${title} position at ${company}. After reviewing the job posting, I believe my background in administration, communication, document handling, and client support aligns well with the requirements of this role.
 
@@ -197,7 +210,7 @@ Thank you for your time and consideration. I would welcome the opportunity to di
 Sincerely,
 David Kwak`,
 
-        emailDraft: `Subject: Application for ${title}
+      emailDraft: `Subject: Application for ${title}
 
 Dear Hiring Manager,
 
@@ -209,38 +222,397 @@ Thank you for your time and consideration.
 
 Best regards,
 David Kwak`,
-      });
-
-      setGenerated(true);
-      setIsGenerating(false);
-      setMessage("Your application package is ready. Review each item before applying.");
-    }, 700);
+    };
   }
+
+  async function analyzeJob(
+    jobText: string,
+    mode: PasteMode,
+    successMessage = "Job posting analyzed successfully. Your application package is ready."
+  ) {
+    if (!jobText.trim()) {
+      alert("Please add a job URL, job description, or upload a file first.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setMessage("Analyzing job posting...");
+
+    try {
+      const isUrlMode = mode === "url";
+
+      const res = await fetch(
+        isUrlMode ? "/api/analyze-job-url" : "/api/analyze-job",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(isUrlMode ? { jobUrl: jobText } : { jobText }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to analyze job.");
+      }
+
+      const nextAnalysis: JobAnalysis = {
+        title: data.title || "Job Posting",
+        company: data.company || "Detected Company",
+        location: data.location || "Canada",
+        type: data.type || "Full-time",
+        category: data.category || "General",
+        icon: data.icon || "💼",
+        match: data.match || "80%",
+        keywordCount: data.keywordCount || (Array.isArray(data.keywords) ? data.keywords.length : 0),
+        requirementsMatched: data.requirementsMatched || 0,
+        keywords: Array.isArray(data.keywords) ? data.keywords : [],
+        summary: data.summary || "Job posting analyzed successfully.",
+        jobDetails: normalizeJobDetails(data, isUrlMode ? jobText : jobUrl.trim()),
+      };
+
+      const nextPackage = buildGeneratedPackage(nextAnalysis);
+
+      setAnalysis(nextAnalysis);
+      setPackageData(nextPackage);
+      setSelectedPreview("resume");
+      setAnalyzed(true);
+      setGenerated(true);
+      setMessage(successMessage);
+    } catch (error: any) {
+      console.error(error);
+
+      alert(
+        error?.message ||
+          "This website couldn't be analyzed automatically. Please paste the job description or upload a PDF, DOCX, or screenshot."
+      );
+
+      setMessage(
+        error?.message ||
+          "This website couldn't be analyzed automatically. Please paste the job description or upload a PDF, DOCX, or screenshot."
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function handleAnalyze() {
+    const jobText = getCurrentJobText();
+
+    await analyzeJob(
+      jobText,
+      activeMode,
+      "Job posting analyzed successfully. Your application package has been refreshed."
+    );
+  }
+
+  async function handleGeneratePackage() {
+  if (!analyzed) {
+    alert("Please analyze the job posting first.");
+    return;
+  }
+
+  try {
+    setIsGenerating(true);
+    setMessage("");
+
+    const response = await fetch("/api/generate-package", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        analysis,
+        jobText: getOriginalJobSnippet(),
+        careerMemory: localStorage.getItem("careerMemoryData"),
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to generate package.");
+    }
+
+    setPackageData({
+      resume: data.resume,
+      coverLetter: data.coverLetter,
+      emailDraft: data.emailDraft,
+    });
+
+    setSelectedPreview("resume");
+    setGenerated(true);
+
+    setMessage(
+      "Your AI-tailored application package has been generated successfully."
+    );
+  } catch (error: any) {
+    alert(error.message || "Failed to generate package.");
+  } finally {
+    setIsGenerating(false);
+  }
+}
 
   async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setSelectedFileName(file.name);
-    setAnalyzed(false);
-    setGenerated(false);
 
     if (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt")) {
       const text = await file.text();
       setFileText(text);
-      setMessage(`Selected file: ${file.name}. TXT content loaded. Click Analyze Uploaded File.`);
+      setMessage("Ready to analyze your new job posting. Click Analyze Uploaded File to update the page.");
       return;
     }
 
     setFileText(file.name);
     setMessage(
-      `Selected file: ${file.name}. File upload is selected. For PDF/DOCX/image extraction, connect server-side parsing later.`
+      "Ready to analyze your new job posting. Click Analyze Uploaded File to update the page. For PDF/DOCX/image extraction, connect server-side parsing later."
     );
   }
 
   function copyPreviewText() {
     navigator.clipboard.writeText(packageData[selectedPreview]);
     setMessage("Copied to clipboard.");
+  }
+
+  function getSavedTextByKeys(source: unknown, keys: string[]): string {
+    if (!source || typeof source !== "object") return "";
+
+    const objectValue = source as Record<string, unknown>;
+
+    for (const [key, value] of Object.entries(objectValue)) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, "");
+
+      if (
+        keys.some((targetKey) =>
+          normalizedKey.includes(targetKey.toLowerCase().replace(/[^a-z]/g, ""))
+        ) &&
+        typeof value === "string" &&
+        value.trim().length > 0
+      ) {
+        return value.trim();
+      }
+    }
+
+    for (const value of Object.values(objectValue)) {
+      if (value && typeof value === "object") {
+        const nested = getSavedTextByKeys(value, keys);
+        if (nested) return nested;
+      }
+    }
+
+    return "";
+  }
+
+  function isCompleteApplicationMaterial(text: string) {
+    const cleaned = text.trim();
+
+    if (cleaned.length < 80) return false;
+
+    const incompletePhrases = [
+      "upload resume",
+      "add resume",
+      "complete your resume",
+      "no saved resume",
+      "no resume",
+      "no saved cover",
+      "no cover letter",
+      "placeholder",
+      "example only",
+      "draft only",
+    ];
+
+    return !incompletePhrases.some((phrase) =>
+      cleaned.toLowerCase().includes(phrase)
+    );
+  }
+
+  function getSavedApplicationMaterials() {
+    const saved = localStorage.getItem("careerMemoryData");
+
+    if (!saved) {
+      return { resume: "", coverLetter: "" };
+    }
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      return {
+        resume: getSavedTextByKeys(parsed, [
+          "resume",
+          "resumetext",
+          "defaultresume",
+          "savedresume",
+          "cv",
+        ]),
+        coverLetter: getSavedTextByKeys(parsed, [
+          "coverletter",
+          "coverlettertext",
+          "defaultcoverletter",
+          "savedcoverletter",
+        ]),
+      };
+    } catch {
+      return { resume: "", coverLetter: "" };
+    }
+  }
+
+  function handleApplyNow() {
+    const { resume, coverLetter } = getSavedApplicationMaterials();
+    const hasCompleteResume = isCompleteApplicationMaterial(resume);
+    const hasCompleteCoverLetter = isCompleteApplicationMaterial(coverLetter);
+
+    if (!hasCompleteResume && !hasCompleteCoverLetter) {
+      const shouldGoToCareerMemory = window.confirm(
+        "Your saved resume or cover letter is missing or incomplete. Go to Career Memory to complete it now?"
+      );
+
+      if (shouldGoToCareerMemory) {
+        router.push("/career-memory");
+      } else {
+        setMessage(
+          "Your saved application materials are missing or incomplete. Complete Career Memory before using this option."
+        );
+      }
+
+      return;
+    }
+
+    setPackageData((prev) => ({
+      resume: hasCompleteResume ? resume : prev.resume || "No complete saved resume found.",
+      coverLetter: hasCompleteCoverLetter
+        ? coverLetter
+        : prev.coverLetter || "No complete saved cover letter found.",
+      emailDraft:
+        prev.emailDraft ||
+        `Subject: Application for ${analysis.title}
+
+Dear Hiring Manager,
+
+I hope you are doing well.
+
+I would like to apply for the ${analysis.title} position at ${analysis.company}. Please find my application materials attached.
+
+Best regards,
+David Kwak`,
+    }));
+
+    setSelectedPreview(hasCompleteResume ? "resume" : "coverLetter");
+    setGenerated(true);
+    setShowDefaultApplication(true);
+    setMessage(
+      hasCompleteResume && hasCompleteCoverLetter
+        ? "Your saved resume and cover letter are ready. Preview, edit, save, or continue to the employer website."
+        : "One complete saved application material was found. You can preview, edit, save, or continue to the employer website."
+    );
+  }
+
+  function continueToApply() {
+    const targetUrl = analysis.jobDetails.applyUrl || jobUrl.trim();
+
+    if (!targetUrl) {
+      alert("No employer apply link is available. Paste the job URL first.");
+      return;
+    }
+
+    window.open(targetUrl, "_blank", "noopener,noreferrer");
+  }
+
+  function savePackage() {
+    const savedPackage = {
+      analysis,
+      packageData,
+      savedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem("latestApplicationPackage", JSON.stringify(savedPackage));
+    setMessage("Application package saved.");
+  }
+
+  function sanitizeFileName(value: string) {
+    return value
+      .replace(/[^a-z0-9]+/gi, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 70)
+      .toLowerCase();
+  }
+
+  function getFileBaseName() {
+    const company = sanitizeFileName(analysis.company || "company");
+    const title = sanitizeFileName(analysis.title || "job_application");
+    return `${company}_${title}`;
+  }
+
+  function downloadTextFile(fileName: string, text: string, mimeType = "text/plain;charset=utf-8") {
+    const blob = new Blob([text], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadSelected(extension: "docx" | "pdf" | "txt") {
+    if (!generated) {
+      alert("Generate the package first.");
+      return;
+    }
+
+    const labelMap: Record<PreviewType, string> = {
+      resume: "resume",
+      coverLetter: "cover_letter",
+      emailDraft: "email_draft",
+    };
+
+    const mimeMap = {
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      pdf: "application/pdf",
+      txt: "text/plain;charset=utf-8",
+    };
+
+    downloadTextFile(
+      `${getFileBaseName()}_${labelMap[selectedPreview]}.${extension}`,
+      packageData[selectedPreview],
+      mimeMap[extension]
+    );
+  }
+
+  function getPreviewLabel() {
+    if (selectedPreview === "resume") return "Resume Preview";
+    if (selectedPreview === "coverLetter") return "Cover Letter Preview";
+    return "Email Draft Preview";
+  }
+
+  function getPreviewIcon() {
+    if (selectedPreview === "resume") return "📄";
+    if (selectedPreview === "coverLetter") return "✉️";
+    return "📧";
+  }
+
+  function getOriginalJobSnippet() {
+    if (analysis.jobDetails.description.trim()) return analysis.jobDetails.description.trim();
+    if (jobDescription.trim()) return jobDescription.trim();
+    if (fileText.trim() && fileText !== selectedFileName) return fileText.trim();
+    return analysis.summary;
+  }
+
+  function hasJobDetails() {
+    return (
+      Boolean(analysis.jobDetails.description) ||
+      analysis.jobDetails.responsibilities.length > 0 ||
+      analysis.jobDetails.qualifications.length > 0 ||
+      analysis.jobDetails.benefits.length > 0 ||
+      Boolean(analysis.jobDetails.salary) ||
+      Boolean(analysis.jobDetails.schedule)
+    );
   }
 
   return (
@@ -301,12 +673,12 @@ David Kwak`,
               </p>
             </div>
 
-            <a
-              href="/create-package"
+            <button
+              onClick={() => router.back()}
               className="rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm font-bold text-gray-600 shadow-sm hover:bg-blue-50"
             >
-              ← Back to Choose Method
-            </a>
+              ← Back to Results
+            </button>
           </header>
 
           <div className="grid gap-6 xl:grid-cols-12">
@@ -359,9 +731,7 @@ David Kwak`,
                           value={jobUrl}
                           onChange={(e) => {
                             setJobUrl(e.target.value);
-                            setMessage("");
-                            setAnalyzed(false);
-                            setGenerated(false);
+                            setMessage("New job detected. Click Analyze Job to update the page.");
                           }}
                           placeholder="https://www.linkedin.com/jobs/view/1234567890"
                           className="flex-1 rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500"
@@ -385,9 +755,7 @@ David Kwak`,
                         value={jobDescription}
                         onChange={(e) => {
                           setJobDescription(e.target.value);
-                          setMessage("");
-                          setAnalyzed(false);
-                          setGenerated(false);
+                          setMessage("Ready to analyze your new job posting. Click Analyze Job to update the page.");
                         }}
                         placeholder="Paste the full job description here..."
                         className="mt-3 w-full resize-none rounded-xl border border-blue-100 px-5 py-4 text-sm outline-none focus:border-blue-500"
@@ -508,74 +876,460 @@ David Kwak`,
                   </div>
                 </div>
 
-                <button
-                  onClick={handleGeneratePackage}
-                  disabled={!analyzed || isGenerating}
-                  className="mt-6 w-full rounded-xl bg-blue-600 px-7 py-4 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isGenerating
-                    ? "Generating Package..."
-                    : generated
-                    ? "✅ Package Generated"
-                    : "Generate Full Package ✨"}
-                </button>
+                <div className="mt-6 rounded-2xl border border-gray-100 bg-white p-6">
+                  <h3 className="text-xl font-extrabold">Your Saved Application</h3>
+                  <p className="mt-2 text-sm leading-6 text-gray-600">
+                    We&apos;ll use your saved Career Memory materials. Generate a tailored package below if you want a stronger version for this specific job.
+                  </p>
+
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-2xl">
+                          📄
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold">Saved Resume</h4>
+                          <p className="mt-2 text-sm leading-6 text-gray-500">
+                            Your default resume from Career Memory will be used for this application.
+                          </p>
+                          <button className="mt-3 rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50">
+                            👁 Preview
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-2xl">
+                          ✉️
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold">Saved Cover Letter</h4>
+                          <p className="mt-2 text-sm leading-6 text-gray-500">
+                            Your default cover letter from Career Memory will be used for this application.
+                          </p>
+                          <button className="mt-3 rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50">
+                            👁 Preview
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {showDefaultApplication && (
+                    <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-sm font-semibold text-blue-700">
+                      Your saved application is ready. You can continue to the employer website or generate a stronger AI-tailored package first.
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleGeneratePackage}
+                    disabled={!analyzed || isGenerating}
+                    className="mt-6 flex w-full items-center justify-between rounded-2xl bg-gradient-to-r from-purple-600 to-violet-700 px-6 py-5 text-left text-white shadow-sm transition hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/95 text-2xl text-purple-700">
+                        ✨
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-extrabold">
+                            {isGenerating
+                              ? "Generating Package..."
+                              : generated
+                              ? "✅ Package Generated"
+                              : "Generate Full Package ✨"}
+                          </h3>
+                          <span className="rounded-full bg-white/20 px-3 py-1 text-[11px] font-bold text-white">
+                            Recommended
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm font-semibold text-white/90">
+                          Generate a tailored resume, cover letter, and email draft so you&apos;re ready to apply in minutes.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold text-white">
+                            Tailored to this job
+                          </span>
+                          <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold text-white">
+                            AI-optimized content
+                          </span>
+                          <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold text-white">
+                            Apply in minutes
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-3xl">›</span>
+                  </button>
+
+                  <button
+                    onClick={handleApplyNow}
+                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-blue-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                        🛩️
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-extrabold text-gray-900">
+                            Apply with Saved Resume
+                          </h3>
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold text-blue-600">
+                            Quick
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm font-semibold text-gray-500">
+                          Apply using your saved Career Memory resume and cover letter.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-3xl text-gray-500">›</span>
+                  </button>
+
+                  <button
+                    onClick={continueToApply}
+                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                        🌐
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-extrabold text-gray-900">
+                          Apply on Employer Website ↗
+                        </h3>
+                        <p className="mt-1 text-sm font-semibold text-gray-500">
+                          Review the original job posting and complete your application on the employer's website.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-3xl text-gray-500">›</span>
+                  </button>
+                </div>
               </section>
 
               <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
-                <h2 className="text-xl font-extrabold">Generated Application Package</h2>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-extrabold">Generated Application Package</h2>
+                      {generated && (
+                        <span className="rounded-full bg-purple-50 px-3 py-1 text-xs font-bold text-purple-700">
+                          AI-tailored
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Review the original job posting beside your AI-generated application materials.
+                    </p>
+                  </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  {[
-                    ["resume", "📄", "Resume"],
-                    ["coverLetter", "✉️", "Cover Letter"],
-                    ["emailDraft", "📧", "Email Draft"],
-                  ].map(([key, icon, label]) => (
+                  {generated && (
                     <button
-                      key={key}
-                      onClick={() => {
-                        if (!generated) {
-                          alert("Generate the package first.");
-                          return;
-                        }
-                        setSelectedPreview(key as "resume" | "coverLetter" | "emailDraft");
-                      }}
-                      className={`rounded-2xl border p-5 text-left transition ${
-                        generated && selectedPreview === key
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-100 bg-slate-50 hover:bg-blue-50"
-                      }`}
+                      onClick={savePackage}
+                      className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
                     >
-                      <div className="text-3xl">{icon}</div>
-                      <h3 className="mt-3 font-extrabold">{label}</h3>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {generated ? "Ready to review" : "Generate to unlock"}
-                      </p>
+                      Save Package
                     </button>
-                  ))}
+                  )}
                 </div>
 
+                {!generated && (
+                  <div className="mt-6 rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 p-8 text-center">
+                    <div className="text-4xl">✨</div>
+                    <h3 className="mt-3 text-lg font-extrabold">Generate to unlock the preview workspace</h3>
+                    <p className="mt-2 text-sm text-gray-500">
+                      Your original job posting, tailored resume, cover letter, email draft, and download buttons will appear here.
+                    </p>
+                  </div>
+                )}
+
                 {generated && (
-                  <div className="mt-6 rounded-2xl border border-blue-100 bg-white p-5">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h3 className="font-extrabold">
-                        {selectedPreview === "resume"
-                          ? "Resume Preview"
-                          : selectedPreview === "coverLetter"
-                          ? "Cover Letter Preview"
-                          : "Email Draft Preview"}
-                      </h3>
+                  <div className="mt-6 grid gap-5 xl:grid-cols-12">
+                    <aside className="xl:col-span-4">
+                      <div className="h-full rounded-2xl border border-gray-100 bg-white shadow-sm">
+                        <div className="border-b border-gray-100 p-5">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
+                              📋
+                            </div>
+                            <div>
+                              <h3 className="font-extrabold">Original Job Posting</h3>
+                              <p className="text-xs font-semibold text-gray-400">Extracted from website</p>
+                            </div>
+                          </div>
+                        </div>
 
-                      <button
-                        onClick={copyPreviewText}
-                        className="rounded-lg border border-blue-100 px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
-                      >
-                        Copy
-                      </button>
-                    </div>
+                        <div className="max-h-[760px] overflow-y-auto p-5">
+                          <h4 className="text-lg font-extrabold">{analysis.title}</h4>
+                          <p className="mt-1 text-sm font-semibold text-gray-500">{analysis.company}</p>
+                          <p className="mt-1 text-xs text-gray-400">
+                            {analysis.location} · {analysis.type} · {analysis.category}
+                          </p>
 
-                    <pre className="whitespace-pre-wrap rounded-xl bg-slate-50 p-5 text-sm leading-7 text-gray-700">
-                      {packageData[selectedPreview]}
-                    </pre>
+                          {jobUrl && (
+                            <a
+                              href={analysis.jobDetails.applyUrl || jobUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-4 inline-flex rounded-xl border border-blue-100 px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
+                            >
+                              View original posting ↗
+                            </a>
+                          )}
+
+                          <div className="mt-6 rounded-2xl bg-slate-50 p-4">
+                            <h5 className="text-sm font-extrabold">About the Role</h5>
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-600">
+                              {getOriginalJobSnippet()}
+                            </p>
+                          </div>
+
+                          {hasJobDetails() && (
+                            <div className="mt-5 space-y-5">
+                              {analysis.jobDetails.responsibilities.length > 0 && (
+                                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                  <h5 className="text-sm font-extrabold">Key Responsibilities</h5>
+                                  <ul className="mt-3 space-y-2 text-sm leading-6 text-gray-600">
+                                    {analysis.jobDetails.responsibilities.map((item) => (
+                                      <li key={item} className="flex gap-2">
+                                        <span className="font-bold text-green-600">✓</span>
+                                        <span>{item}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {analysis.jobDetails.qualifications.length > 0 && (
+                                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                  <h5 className="text-sm font-extrabold">Qualifications</h5>
+                                  <ul className="mt-3 space-y-2 text-sm leading-6 text-gray-600">
+                                    {analysis.jobDetails.qualifications.map((item) => (
+                                      <li key={item} className="flex gap-2">
+                                        <span className="font-bold text-green-600">✓</span>
+                                        <span>{item}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {analysis.jobDetails.benefits.length > 0 && (
+                                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                  <h5 className="text-sm font-extrabold">Benefits</h5>
+                                  <ul className="mt-3 space-y-2 text-sm leading-6 text-gray-600">
+                                    {analysis.jobDetails.benefits.map((item) => (
+                                      <li key={item} className="flex gap-2">
+                                        <span className="font-bold text-green-600">✓</span>
+                                        <span>{item}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {(analysis.jobDetails.salary || analysis.jobDetails.schedule) && (
+                                <div className="grid gap-3 md:grid-cols-2">
+                                  {analysis.jobDetails.salary && (
+                                    <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                      <h5 className="text-sm font-extrabold">Salary / Wage</h5>
+                                      <p className="mt-2 text-sm leading-6 text-gray-600">
+                                        {analysis.jobDetails.salary}
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {analysis.jobDetails.schedule && (
+                                    <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                      <h5 className="text-sm font-extrabold">Schedule</h5>
+                                      <p className="mt-2 text-sm leading-6 text-gray-600">
+                                        {analysis.jobDetails.schedule}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="mt-5">
+                            <h5 className="text-sm font-extrabold">Keywords Detected</h5>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {(analysis.keywords.length > 0
+                                ? analysis.keywords
+                                : ["Communication", "Organization", "Attention to Detail"]
+                              ).map((keyword) => (
+                                <span
+                                  key={keyword}
+                                  className="rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600"
+                                >
+                                  {keyword}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </aside>
+
+                    <section className="xl:col-span-8">
+                      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-lg font-extrabold">Your Generated Application Package</h3>
+                              <span className="rounded-full bg-purple-50 px-3 py-1 text-[11px] font-bold text-purple-700">
+                                AI-tailored
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs font-semibold text-gray-400">
+                              Click Resume, Cover Letter, or Email Draft, then edit the content directly.
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={copyPreviewText}
+                              className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
+                            >
+                              Copy
+                            </button>
+
+                            {selectedPreview === "emailDraft" ? (
+                              <button
+                                onClick={() => downloadSelected("txt")}
+                                className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
+                              >
+                                Download TXT
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => downloadSelected("docx")}
+                                  className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
+                                >
+                                  Download DOCX
+                                </button>
+                                <button
+                                  onClick={() => downloadSelected("pdf")}
+                                  className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
+                                >
+                                  Download PDF
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid border-b border-gray-100 md:grid-cols-3">
+                          {[
+                            ["resume", "📄", "Resume"],
+                            ["coverLetter", "✉️", "Cover Letter"],
+                            ["emailDraft", "📧", "Email Draft"],
+                          ].map(([key, icon, label]) => (
+                            <button
+                              key={key}
+                              onClick={() => setSelectedPreview(key as PreviewType)}
+                              className={`flex items-center gap-3 px-5 py-4 text-left transition ${
+                                selectedPreview === key
+                                  ? "bg-blue-50 text-blue-700"
+                                  : "bg-white text-gray-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              <span className="text-2xl">{icon}</span>
+                              <div>
+                                <p className="font-extrabold">{label}</p>
+                                <p className="text-xs font-semibold text-gray-400">
+                                  {selectedPreview === key ? "Viewing now" : "Click to preview"}
+                                </p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="p-6">
+                          <div className="mb-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
+                                {getPreviewIcon()}
+                              </div>
+                              <div>
+                                <h3 className="font-extrabold">{getPreviewLabel()}</h3>
+                                <p className="text-xs font-semibold text-gray-400">
+                                  Tailored for {analysis.title} at {analysis.company}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <textarea
+                            value={packageData[selectedPreview]}
+                            onChange={(e) =>
+                              setPackageData((prev) => ({
+                                ...prev,
+                                [selectedPreview]: e.target.value,
+                              }))
+                            }
+                            className="min-h-[520px] w-full resize-y rounded-2xl border border-gray-100 bg-slate-50 p-6 text-sm leading-7 text-gray-700 outline-none focus:border-blue-400 focus:bg-white"
+                            placeholder="Edit your application material here..."
+                          />
+
+                          <div className="mt-5 grid gap-3 md:grid-cols-3">
+                            <button
+                              onClick={copyPreviewText}
+                              className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
+                            >
+                              Copy
+                            </button>
+
+                            {selectedPreview === "emailDraft" ? (
+                              <button
+                                onClick={() => downloadSelected("txt")}
+                                className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50 md:col-span-2"
+                              >
+                                Download Email Draft
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => downloadSelected("docx")}
+                                  className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
+                                >
+                                  Download DOCX
+                                </button>
+                                <button
+                                  onClick={() => downloadSelected("pdf")}
+                                  className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
+                                >
+                                  Download PDF
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid gap-3 md:grid-cols-2">
+                        <button
+                          onClick={savePackage}
+                          className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
+                        >
+                          Save Package
+                        </button>
+
+                        <button
+                          onClick={continueToApply}
+                          className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700"
+                        >
+                          Apply on Employer Website ↗
+                        </button>
+                      </div>
+                    </section>
                   </div>
                 )}
               </section>
@@ -589,8 +1343,8 @@ David Kwak`,
                   {[
                     ["1", "Analyze the job posting", "AI extracts role details, keywords, and requirements."],
                     ["2", "Match with your profile", "Career Élan checks how your background fits."],
-                    ["3", "Generate full package", "Resume, cover letter, and email draft are created."],
-                    ["4", "Apply directly", "You review, edit, and apply on the employer website."],
+                    ["3", "Generate full package", "AI creates a tailored resume, cover letter, and email draft."],
+                    ["4", "You’re ready to apply", "Review, edit, and apply on the employer website in minutes."],
                   ].map(([num, title, desc]) => (
                     <div key={num} className="flex gap-4">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
@@ -602,6 +1356,13 @@ David Kwak`,
                       </div>
                     </div>
                   ))}
+                </div>
+
+                <div className="mt-8 rounded-2xl bg-blue-50 p-5">
+                  <h3 className="font-extrabold text-blue-700">💡 Tip</h3>
+                  <p className="mt-2 text-sm leading-6 text-gray-600">
+                    A tailored application can help you apply faster and present a stronger profile.
+                  </p>
                 </div>
               </div>
             </aside>
