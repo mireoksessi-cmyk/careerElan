@@ -119,13 +119,14 @@ export default function HomePage() {
         <div className="pointer-events-none absolute -right-40 top-0 h-[520px] w-[520px] rounded-full bg-blue-300/40 blur-3xl" />
 
         <header className="relative z-10 mx-auto flex w-full max-w-[1440px] items-center justify-between px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
-          <Image src="/logo.png" alt="Career Élan" width={170} height={70} priority className="h-auto w-[145px] sm:w-[170px]" />
+          <Image src="/logo.png" alt="Career Élan" width={180} height={76} priority className="h-auto w-[145px] sm:w-[176px]" />
 
           <nav className="hidden items-center gap-8 text-[13px] font-bold text-slate-800 md:flex">
             <a href="#features" className="transition hover:text-blue-600">Features</a>
             <a href="#how-it-works" className="transition hover:text-blue-600">How it Works</a>
             <a href="#examples" className="transition hover:text-blue-600">Examples</a>
-            <a href="#faq" className="transition hover:text-blue-600">FAQ</a>
+            <a href="#pricing" className="transition hover:text-blue-600">Pricing</a>
+            <a href="#faq" className="transition hover:text-blue-600">Resources⌄</a>
           </nav>
 
           <div className="hidden items-center gap-4 md:flex">
@@ -141,7 +142,7 @@ export default function HomePage() {
               onClick={() => openAuth("signup")}
               className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
             >
-              Get Started
+              Get Started 
             </button>
           </div>
 
@@ -154,259 +155,210 @@ export default function HomePage() {
           </button>
         </header>
 
-        <div className="relative z-10 mx-auto grid w-full max-w-[1440px] items-center gap-8 px-5 pb-9 pt-4 sm:px-8 lg:grid-cols-[0.78fr_1.22fr] lg:px-10 xl:px-12">
-          <div className="max-w-[470px]">
+        <div className="relative z-10 mx-auto grid w-full max-w-[1440px] items-center gap-8 px-5 pb-8 pt-3 sm:px-8 lg:grid-cols-[0.78fr_1.22fr] lg:px-10 xl:px-12">
+          <div className="max-w-[520px]">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-blue-100/90 px-4 py-2 text-xs font-extrabold text-blue-700 ring-1 ring-blue-200">
-              ✦ AI-Powered Job Application Platform
+              ✦ AI-Powered Career Operating System
             </div>
 
-            <h1 className="text-[46px] font-black leading-[0.94] tracking-[-0.05em] text-slate-950 sm:text-[58px] lg:text-[68px] xl:text-[76px]">
-              Upload
+            <h1 className="text-[44px] font-black leading-[0.98] tracking-[-0.05em] text-slate-950 sm:text-[56px] lg:text-[66px] xl:text-[72px]">
+              Upload One Profile.
               <br />
-              Once.
-              <br />
-              <span className="text-blue-600">
-                Apply
-                <br />
-                Anywhere.
-              </span>
+              <span className="text-blue-600">Apply Everywhere.</span>
             </h1>
 
-            <p className="mt-6 max-w-[430px] text-[15px] leading-7 text-slate-600">
-              Paste a job URL and our AI instantly creates a tailored resume, cover letter,
-              and email draft that match the job requirements — so you can apply faster
-              and get more interviews.
+            <p className="mt-6 max-w-[500px] text-[15px] leading-7 text-slate-600">
+              Career Élan is your AI career partner that tailors your resume, cover letter,
+              and emails to every job automatically — so you never have to rewrite anything again.
             </p>
 
-            <div className="mt-6 grid gap-3 text-sm font-bold text-slate-700">
-              <span>✓ No manual rewriting</span>
-              <span>✓ ATS-optimized</span>
-              <span>✓ Humanized AI writing that sounds natural and human</span>
-              <span>✓ Job-specific documents</span>
+            <p className="mt-4 max-w-[500px] text-[15px] font-bold leading-7 text-slate-700">
+              Upload one profile. Career Élan tailors every application for you.
+            </p>
+
+            <div className="mt-5 grid gap-3 text-sm font-bold text-slate-700">
+              <span>✓ One profile for your entire career</span>
+              <span>✓ AI tailors to any job description in seconds</span>
+              <span>✓ ATS-optimized & recruiter-approved</span>
+              <span>✓ Never rewrite your resume again</span>
             </div>
 
-            <div className="mt-7 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 type="button"
                 onClick={() => openAuth("signup")}
                 className="w-fit rounded-xl bg-blue-600 px-8 py-4 text-base font-black text-white shadow-xl shadow-blue-300 transition hover:-translate-y-0.5 hover:bg-blue-700"
               >
-                Get Started →
-               </button>
+                Get Started 
+              </button>
+              <button
+                type="button"
+                onClick={() => document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" })}
+                className="w-fit rounded-xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+              >
+                See How It Works ◎
+              </button>
             </div>
-            <p className="mt-3 text-xs font-bold text-slate-500">🔒 No credit card required</p>
+            <p className="mt-3 text-xs font-bold text-slate-500"></p>
           </div>
 
-          <div id="how-it-works" className="grid gap-5 lg:grid-cols-[0.86fr_0.86fr_1.28fr]">
-            <div className="flex min-h-[390px] flex-col rounded-[1.7rem] border border-slate-200 bg-white/90 p-6 shadow-xl shadow-blue-100/70">
-              <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-lg font-black text-white">1</div>
-              <h3 className="text-lg font-black leading-tight">Paste Job URL</h3>
-              <div className="mt-7 rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xs font-bold leading-5 text-slate-600 shadow-sm">
-                🔗 linkedin.com/jobs/view/<br />1234567890
-              </div>
-              <p className="mt-5 text-center text-sm leading-6 text-slate-500">We extract the job details automatically.</p>
+          <div className="rounded-[1.7rem] border border-slate-200 bg-white/90 p-7 shadow-xl shadow-blue-100/70">
+            <div className="mb-6 flex items-center justify-between gap-4">
+              <h3 className="text-2xl font-black tracking-[-0.03em] text-slate-950">Your AI Application Package</h3>
+              <span className="rounded-full bg-green-50 px-4 py-2 text-xs font-black text-green-700">ATS Match 96%</span>
             </div>
-
-            <div className="flex min-h-[390px] flex-col rounded-[1.7rem] border border-slate-200 bg-white/90 p-6 shadow-xl shadow-blue-100/70">
-              <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-lg font-black text-white">2</div>
-              <h3 className="text-lg font-black leading-tight">AI Analyzes Job Posting</h3>
-              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-inner">
-                <p className="text-sm font-black">Marketing Coordinator</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Brighton Solutions Inc.<br />Toronto, ON · Full-time</p>
-                <p className="mt-5 text-xs font-black">Key Requirements</p>
-                <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-600">
-                  <li>✓ 2+ years of marketing experience</li>
-                  <li>✓ SEO and content management</li>
-                  <li>✓ Campaign planning and analytics</li>
-                  <li>✓ Excellent written communication</li>
-                </ul>
-                <div className="mt-5 rounded-xl bg-green-50 px-3 py-3 text-center text-xs font-black text-green-700">
-                  Match Potential: 92%
-                </div>
-              </div>
+            <div className="space-y-4">
+              <HeroPackageCard title="Optimized Resume" body="Tailored to the job description" detail="✓ Changes explained" icon={<MiniResume compact />} onClick={() => openAuth("signup")} />
+              <HeroPackageCard title="Personalized Cover Letter" body="Custom letter that speaks to" detail="the hiring manager" icon={<MiniLetter />} onClick={() => openAuth("signup")} />
+              <HeroPackageCard title="Professional Email Draft" body="Ready-to-send email draft" detail="for your application" icon={<IconBox icon="✉" />} onClick={() => openAuth("signup")} />
             </div>
-
-            <div className="min-h-[390px] rounded-[1.7rem] border border-slate-200 bg-white/90 p-6 shadow-xl shadow-blue-100/70">
-              <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-lg font-black text-white">3</div>
-              <h3 className="text-lg font-black leading-tight">AI Creates Your Tailored Package ✨</h3>
-              <div className="mt-5 space-y-4">
-                <button type="button" onClick={() => openAuth("signup")} className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                  <div className="flex gap-4">
-                    <MiniResume />
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-black">Optimized Resume</p>
-                        <span className="rounded-full bg-green-50 px-2 py-1 text-[10px] font-black text-green-700">ATS 98%</span>
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-slate-600">Full resume preview plus clear explanation of what was tailored.</p>
-                    </div>
-                  </div>
-                </button>
-
-                <button type="button" onClick={() => openAuth("signup")} className="flex w-full gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                  <IconBox icon="✎" />
-                  <div>
-                    <p className="font-black">Personalized Cover Letter</p>
-                    <p className="mt-2 text-xs leading-5 text-slate-600">Custom letter that speaks directly to the job and company.</p>
-                  </div>
-                </button>
-
-                <button type="button" onClick={() => openAuth("signup")} className="flex w-full gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                  <IconBox icon="✉" />
-                  <div>
-                    <p className="font-black">Email Draft</p>
-                    <p className="mt-2 text-xs leading-5 text-slate-600">Professional email draft ready to send with your application.</p>
-                  </div>
-                </button>
-              </div>
+            <div className="mt-6 rounded-2xl bg-slate-50 p-5 text-center">
+              <p className="text-sm font-black text-slate-800">🔒 One Profile. Unlimited Applications.</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">No rewriting. Just better applications.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="w-full bg-white px-5 py-6 sm:px-8 lg:px-10 xl:px-12">
-        <div className="mx-auto grid max-w-[1440px] gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-100 md:grid-cols-4">
+      <section className="w-full bg-white px-5 py-4 sm:px-8 lg:px-10 xl:px-12">
+        <div className="mx-auto mb-3 flex max-w-[1440px] items-center gap-6 text-center text-xs font-black uppercase tracking-widest text-slate-500">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span>Trusted by job seekers worldwide</span>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+        <div className="mx-auto grid max-w-[1440px] gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-100 md:grid-cols-5">
           <Stat icon="▣" label="Applications Generated" value="25,000+" />
           <Stat icon="◎" label="Average ATS Match" value="92%" accent="text-green-600" />
-          <Stat icon="◷" label="Average Time Saved" value="75%" accent="text-violet-600" />
-          <Stat icon="★" label="Average User Rating" value="4.9/5" accent="text-yellow-500" />
+          <Stat icon="◷" label="Average Time Saved" value="75%" accent="text-violet-600" highlight />
+          <Stat icon="☆" label="User Satisfaction" value="4.9/5" accent="text-yellow-500" />
+          <div className="text-center md:border-r md:border-slate-200 last:border-r-0">
+            <p className="text-xl font-black text-yellow-400">★★★★★</p>
+            <p className="mt-2 text-sm font-bold text-slate-700">Join our first users.</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Help shape Career Élan.</p>
+          </div>
         </div>
       </section>
 
       <section className="w-full bg-white px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
         <div className="mx-auto grid max-w-[1440px] items-center gap-6 rounded-3xl bg-slate-50/70 p-5 md:grid-cols-3">
           <Benefit title="More Accurate" body="AI matches your profile with job requirements more accurately." badge="98% ATS Match" icon="◎" />
-          <div className="rounded-[2rem] bg-blue-600 p-10 text-center text-white shadow-2xl shadow-blue-200">
-            <p className="mx-auto mb-4 w-fit rounded-full bg-white/15 px-4 py-2 text-xs font-black">Most Loved Feature</p>
-            <p className="text-lg font-black">Save Average</p>
-            <p className="mt-2 text-7xl font-black">75%</p>
-            <p className="mt-2 text-xl font-black">Application Time</p>
-            <p className="mt-5 text-yellow-300">★★★★★</p>
-            <p className="mt-4 text-sm leading-6 text-blue-50">Save hours on every application. Focus on preparing for interviews, not rewriting documents.</p>
+          <div className="rounded-[2rem] bg-blue-600 p-8 text-center text-white shadow-2xl shadow-blue-200 xl:p-9">
+            <p className="mx-auto mb-3 w-fit rounded-full bg-white px-4 py-1.5 text-xs font-black text-blue-700">Most Loved Feature</p>
+            <p className="text-base font-black">Save Average</p>
+            <p className="mt-1 text-[64px] font-black leading-none xl:text-[72px]">75%</p>
+            <p className="mt-1 text-lg font-black">Application Time</p>
+            <p className="mt-4 text-yellow-300">★★★★★</p>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-blue-50">Save hours on every application. Focus on preparing for interviews, not rewriting documents.</p>
           </div>
           <Benefit title="Human-like Writing" body="Natural, professional, and persuasive writing that sounds like you." badge="Loved by recruiters" icon="♡" />
         </div>
       </section>
 
-      <section id="examples" className="w-full bg-white px-5 pb-16 pt-10 sm:px-8 lg:px-10 xl:px-12">
-        <div className="mx-auto max-w-[1440px] text-center">
-          <Image src="/logo.png" alt="Career Élan" width={160} height={64} className="mx-auto mb-4 h-auto w-[145px]" />
-          <p className="mx-auto mb-4 w-fit rounded-full bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 ring-1 ring-blue-100">YOUR AI APPLICATION PACKAGE</p>
-          <h2 className="text-[34px] font-black leading-[1.05] tracking-[-0.04em] text-slate-950 sm:text-[48px] lg:text-[56px]">
-            Upload One Resume.
-            <br />
-            <span className="text-blue-600">Apply to Unlimited Jobs.</span>
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-500">
-            No rewriting. Just paste a job URL and let AI tailor everything for you.
-          </p>
-        </div>
-
-        <div className="mx-auto mt-10 grid max-w-[1440px] gap-6 lg:grid-cols-[1.05fr_0.82fr_0.75fr]">
-          <div className="space-y-4">
-            <ResumePreview />
-            <CoverLetterPreview />
-            <EmailDraftPreview />
+      <section id="examples" className="w-full bg-white px-5 pb-12 pt-4 sm:px-8 lg:px-10 xl:px-12">
+        <div className="mx-auto grid max-w-[1440px] gap-6 lg:grid-cols-[1.05fr_0.48fr]">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-xl shadow-slate-100">
+            <h2 className="mb-5 text-center text-2xl font-black tracking-[-0.03em] text-slate-950">
+              Career Élan Tailors Your Full Application Package
+            </h2>
+            <div className="grid gap-4 md:grid-cols-3">
+              <ResumePreview onClick={() => openAuth("signup")} />
+              <CoverLetterPreview onClick={() => openAuth("signup")} />
+              <EmailDraftPreview onClick={() => openAuth("signup")} />
+            </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-100">
-            <DocumentFeature
-              icon="▣"
-              title="Optimized Resume"
-              badge="ATS 98%"
-              items={[
-                "Highlights relevant experience and achievements",
-                "Includes job-specific keywords",
-                "ATS-friendly formatting",
-                "Humanized writing — sounds natural and professional",
-                "Ready to download and submit",
-              ]}
-              button="View Full Resume"
-              onClick={() => openAuth("signup")}
-            />
-            <div className="my-6 h-px bg-slate-200" />
-            <DocumentFeature
-              icon="✎"
-              title="Personalized Cover Letter"
-              items={[
-                "Custom letter tailored to the job and company",
-                "Highlights your relevant skills and experience",
-                "Professional tone that makes you stand out",
-                "Addresses key requirements from the job posting",
-              ]}
-              button="View Full Cover Letter"
-              onClick={() => openAuth("signup")}
-            />
-            <div className="my-6 h-px bg-slate-200" />
-            <DocumentFeature
-              icon="✉"
-              title="Email Draft"
-              items={[
-                "Professional email ready to send",
-                "Personalized and attention-grabbing",
-                "Increases your chances of getting a response",
-                "Proper follow-up and etiquette",
-              ]}
-              button="View Full Email Draft"
-              onClick={() => openAuth("signup")}
-            />
-          </div>
-
-          <aside className="rounded-3xl border border-slate-200 bg-slate-50/80 p-7 shadow-xl shadow-slate-100">
-            <div className="flex items-start gap-4">
-              <IconBox icon="☆" />
-              <div>
-                <h3 className="text-xl font-black leading-tight">Your Complete Application Package</h3>
-                <p className="mt-4 text-sm leading-6 text-slate-600">Everything you need to apply with confidence and stand out from other candidates.</p>
-              </div>
-            </div>
-            <div className="mt-10 space-y-7">
-              <PackageItem icon="▣" title="Optimized Resume" body="ATS Score: 98%" />
-              <PackageItem icon="✎" title="Personalized Cover Letter" body="Tailored to the job" />
-              <PackageItem icon="✉" title="Professional Email Draft" body="Ready to send" />
-            </div>
-            <div className="mt-10 rounded-2xl border border-green-200 bg-green-50 p-6">
-              <p className="text-sm font-black text-slate-900">Match Potential</p>
-              <p className="mt-1 text-4xl font-black text-green-700">92%</p>
-              <p className="mt-3 text-sm leading-6 text-green-800">Great match! Your experience aligns well with this position.</p>
-              <div className="mt-5 h-2 rounded-full bg-green-100">
-                <div className="h-2 w-[92%] rounded-full bg-green-600" />
-              </div>
-            </div>
+          <aside className="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-100">
+            <OptimizationItem title="ATS Optimized" body="Formatted and written to pass ATS systems with a high match rate." badge="98%" />
+            <OptimizationItem title="Human-Like Writing" body="Natural, professional, and persuasive writing that sounds like you." badge="98%" />
+            <OptimizationItem title="Job-Specific Tailoring" body="Every document is customized to the job description and company culture." />
+            <OptimizationItem title="Recruiter Approved" body="Designed to catch the eye of recruiters and hiring managers." />
             <button
               type="button"
               onClick={() => openAuth("signup")}
-              className="mt-8 w-full rounded-xl bg-blue-600 px-5 py-4 text-base font-black text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
+              className="mt-5 w-full rounded-2xl bg-blue-600 px-5 py-5 text-left text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
             >
-              Get Your Full Package 🔒
+              <span className="block text-lg font-black">🔒 Create My Application Package</span>
+              <span className="mt-2 block text-sm font-semibold leading-6 text-blue-50">Preview available. Sign up to download your complete documents. →</span>
             </button>
-            <p className="mt-4 text-center text-sm leading-6 text-slate-500">Sign up to download your documents and start applying.</p>
+            <p className="mt-3 text-center text-xs font-bold text-slate-500">Career Élan explains every optimization.</p>
           </aside>
         </div>
       </section>
 
-      <section id="faq" className="w-full bg-slate-50 px-6 py-10 sm:px-10 lg:px-16 xl:px-20">
-        <h2 className="text-center text-2xl font-black text-slate-950">Frequently Asked Questions</h2>
-        <div className="mx-auto mt-6 grid max-w-7xl gap-6 md:grid-cols-[1.3fr_1fr]">
-          <div className="space-y-2">
-            {[
-              "How does Career Élan work?",
-              "Is my data secure and private?",
-              "Can I edit the AI-generated documents?",
-              "What types of jobs does it work for?",
-              "Do I need a credit card to start?",
-            ].map((q) => (
-              <button key={q} type="button" className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 text-left text-sm font-black text-slate-800 shadow-sm">
-                {q}<span>⌄</span>
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-8 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-blue-50 text-5xl">🛡️</div>
-            <div>
-              <p className="text-xl font-black text-slate-950">Your data is 100% secure</p>
-              <p className="mt-3 text-sm leading-6 text-slate-600">We use secure authentication and never sell or share your career data.</p>
+      <section className="w-full bg-white px-5 py-4 sm:px-8 lg:px-10 xl:px-12">
+        <div className="mx-auto grid max-w-[1440px] items-center gap-6 rounded-3xl bg-slate-50/80 p-6 lg:grid-cols-[1.5fr_1fr]">
+          <div className="text-center">
+            <p className="mx-auto mb-3 w-fit rounded-full bg-blue-50 px-4 py-2 text-xs font-black text-blue-700">YOUR AI CAREER PARTNER</p>
+            <h2 className="text-3xl font-black tracking-[-0.04em] text-slate-950">One Profile. Every Application.</h2>
+            <div className="mt-7 flex flex-wrap justify-center gap-6 text-xs font-bold text-slate-600">
+              <span>▣ Resume</span>
+              <span>▣ Cover Letter</span>
+              <span>✉ Email</span>
+              <span>in LinkedIn</span>
+              <span>▣ Portfolio</span>
+              <span>▣ References</span>
             </div>
+          </div>
+          <div className="rounded-3xl border border-green-100 bg-green-50 p-6">
+            <div className="flex gap-5">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white text-4xl">🧠</div>
+              <div>
+                <h3 className="text-xl font-black text-green-700">Career Memory</h3>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">AI learns from your applications and gets better over time.</p>
+                <ul className="mt-3 space-y-1 text-sm font-bold text-green-800">
+                  <li>✓ Tracks what works</li>
+                  <li>✓ Learns your preferences</li>
+                  <li>✓ Improves your results</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" className="w-full bg-white px-5 py-8 sm:px-8 lg:px-10 xl:px-12">
+        <h2 className="text-center text-2xl font-black text-slate-950">Why Career Élan is Different</h2>
+        <div className="mx-auto mt-7 grid max-w-[1440px] gap-4 md:grid-cols-3 xl:grid-cols-6">
+          <SmallFeature icon="💡" title="Explain WHY" body="See exactly why AI added or changed each section." />
+          <SmallFeature icon="♙" title="AI Recruiter Simulation" body="Get AI feedback like a real recruiter before you apply." />
+          <SmallFeature icon="🧠" title="Career Memory" body="AI learns from your applications and improves results." />
+          <SmallFeature icon="🌐" title="Multi-Country Support" body="Tailored formats for Canada, US, UK, Australia & more." />
+          <SmallFeature icon="🛡️" title="Human Score" body="We ensure your documents sound 100% natural." />
+          <SmallFeature icon="🚀" title="Auto Apply (Coming Soon)" body="Apply to jobs automatically with one click." />
+        </div>
+      </section>
+
+      <section id="how-it-works" className="w-full bg-white px-5 py-6 sm:px-8 lg:px-10 xl:px-12">
+        <h2 className="text-center text-2xl font-black text-slate-950">How It Works</h2>
+        <div className="mx-auto mt-7 grid max-w-[1440px] gap-4 md:grid-cols-4">
+          <StepCard number="1" title="Upload Your Profile" body="Upload your resume once. AI builds your career profile." icon="⇧" />
+          <StepCard number="2" title="Find or Paste Job URL" body="Search jobs inside Career Élan or paste any job URL from any website." icon="🔗" />
+          <StepCard number="3" title="AI Analyzes & Tailors" body="AI analyzes the job and tailors your documents." icon="✦" />
+          <StepCard number="4" title="Apply & Get Hired" body="Download or auto-apply and get more interviews." icon="✓" />
+        </div>
+      </section>
+
+      <section className="w-full bg-white px-5 pt-4 sm:px-8 lg:px-10 xl:px-12">
+        <div className="mx-auto grid max-w-[1440px] gap-6 rounded-t-3xl bg-blue-600 p-8 text-white md:grid-cols-3">
+          <div>
+            <p className="text-sm font-black text-blue-100">Be Part of Something Big</p>
+            <h2 className="mt-2 text-3xl font-black tracking-[-0.04em]">Join Our Launch Community!</h2>
+            <p className="mt-3 text-sm leading-6 text-blue-50">We&apos;re building the future of job applications — and you can help shape it.</p>
+            <button type="button" onClick={() => openAuth("signup")} className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-700">Get Started →</button>
+            <p className="mt-3 text-xs font-bold text-blue-100"> · Be among the first 100 users</p>
+          </div>
+          <div className="rounded-2xl bg-white/10 p-6">
+            <p className="text-4xl">👥</p>
+            <p className="mt-4 text-xl font-black">Our First 100 Members</p>
+            <p className="mt-2 text-sm leading-6 text-blue-50">Get early access, exclusive updates, and special perks.</p>
+          </div>
+          <div className="rounded-2xl bg-white/10 p-6">
+            <p className="text-xl font-black">Help Us Build the Best</p>
+            <ul className="mt-4 space-y-2 text-sm font-bold text-blue-50">
+              <li>✓ Share feedback that shapes our product</li>
+              <li>✓ Get early access to new features</li>
+              <li>✓ Become a founding member</li>
+            </ul>
           </div>
         </div>
       </section>
@@ -414,16 +366,16 @@ export default function HomePage() {
       <footer className="bg-slate-950 px-6 py-10 text-white sm:px-10 lg:px-16 xl:px-20">
         <div className="mx-auto grid max-w-7xl gap-8 md:grid-cols-4">
           <div>
-            <Image src="/logo.png" alt="Career Élan" width={170} height={60} className="h-auto w-[150px] rounded-md bg-white/95 p-1" />
-            <p className="mt-4 text-sm text-slate-400">AI-powered job application platform.</p>
+            <Image src="/logo.png" alt="Career Élan" width={190} height={74} className="h-auto w-[170px] rounded-md bg-white/95 p-1" />
+            <p className="mt-4 text-sm text-slate-400">AI-powered career operating system.</p>
             <div className="mt-5 flex gap-3">
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">in</span>
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">𝕏</span>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">f</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">◎</span>
             </div>
           </div>
-          <FooterGroup title="Product" items={["Features", "How it Works", "Examples", "FAQ"]} />
-          <FooterGroup title="Company" items={["About", "Blog", "Careers", "Contact"]} />
+          <FooterGroup title="Product" items={["Features", "How It Works", "Examples", "Pricing"]} />
+          <FooterGroup title="Company" items={["About Us", "Blog", "Careers", "Contact"]} />
           <FooterGroup title="Legal" items={["Privacy Policy", "Terms of Service", "Cookie Policy"]} />
         </div>
         <p className="mx-auto mt-8 max-w-7xl border-t border-white/10 pt-6 text-center text-sm text-slate-500">© 2026 Career Élan. All rights reserved.</p>
@@ -479,44 +431,144 @@ export default function HomePage() {
   );
 }
 
-function Stat({ label, value, icon, accent = "text-blue-600" }: { label: string; value: string; icon?: string; accent?: string }) {
-  return <div className="text-center md:border-r md:border-slate-200 last:border-r-0"><p className={`text-3xl font-black ${accent}`}>{icon && <span className="mr-3 text-2xl">{icon}</span>}{value}</p><p className="mt-2 text-sm font-bold text-slate-700">{label}</p></div>;
+function Stat({ label, value, icon, accent = "text-blue-600", highlight = false }: { label: string; value: string; icon?: string; accent?: string; highlight?: boolean }) {
+  return (
+    <div className={`text-center md:border-r md:border-slate-200 last:border-r-0 ${highlight ? "rounded-2xl bg-blue-600 py-2 text-white md:border-r-0" : ""}`}>
+      <p className={`text-3xl font-black ${highlight ? "text-white" : accent}`}>{icon && <span className="mr-3 text-2xl">{icon}</span>}{value}</p>
+      <p className={`mt-2 text-sm font-bold ${highlight ? "text-blue-50" : "text-slate-700"}`}>{label}</p>
+    </div>
+  );
 }
 
 function Benefit({ title, body, badge, icon }: { title: string; body: string; badge: string; icon: string }) {
   return <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm"><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-2xl text-blue-600">{icon}</div><p className="text-xl font-black text-slate-950">{title}</p><p className="mt-4 text-sm leading-6 text-slate-600">{body}</p><p className="mt-6 w-fit rounded-full bg-blue-50 px-4 py-2 text-xs font-black text-blue-700">{badge}</p></div>;
 }
 
+function HeroPackageCard({ title, body, detail, icon, onClick }: { title: string; body: string; detail: string; icon: React.ReactNode; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-5 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      {icon}
+      <div className="min-w-0 flex-1">
+        <p className="font-black text-slate-950">{title}</p>
+        <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{body}</p>
+        <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{detail}</p>
+      </div>
+      <span className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700">Preview</span>
+      <span className="font-black text-blue-700">›</span>
+    </button>
+  );
+}
+
 function IconBox({ icon }: { icon: string }) {
   return <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl font-black text-blue-600">{icon}</div>;
 }
 
-function MiniResume() {
-  return <div className="h-28 w-20 shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-2 text-[5px] leading-tight text-slate-400"><p className="font-black text-slate-700">ALEX CARTER</p><p className="text-blue-600">Marketing Coordinator</p><br /><p className="font-black">Summary</p><p>Results-driven professional...</p><br /><p className="font-black">Experience</p><p>Brighton Solutions Inc.</p><div className="mt-2 space-y-1"><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /></div></div>;
+function MiniResume({ compact = false }: { compact?: boolean }) {
+  return <div className={`${compact ? "h-20 w-16" : "h-28 w-20"} shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-2 text-[5px] leading-tight text-slate-400`}><p className="font-black text-slate-700">ALEX CARTER</p><p className="text-blue-600">Marketing Coordinator</p><br /><p className="font-black">Summary</p><p>Results-driven professional...</p><br /><p className="font-black">Experience</p><p>Brighton Solutions Inc.</p><div className="mt-2 space-y-1"><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /></div></div>;
 }
 
-function ResumePreview() {
-  return <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs leading-5 text-slate-700 shadow-lg shadow-slate-100"><div className="border-t-4 border-blue-600 pt-3"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xl font-black text-slate-950">ALEX CARTER</p><p className="font-black text-blue-600">Marketing Coordinator</p></div><div className="text-[10px] leading-5 text-slate-500"><p>Toronto, ON</p><p>alexcarter@email.com</p><p>linkedin.com/in/alexcarter</p></div></div><hr className="my-4" /><p className="font-black text-slate-900">PROFESSIONAL SUMMARY</p><p className="mt-2">Marketing professional with 4+ years of experience in digital marketing, campaign management, and content strategy. Proven track record of increasing brand engagement and driving measurable results through data-driven initiatives.</p><p className="mt-4 font-black text-slate-900">EXPERIENCE</p><div className="mt-2 flex justify-between gap-4"><div><p className="font-black">Marketing Specialist</p><p>Brighton Solutions Inc. · Toronto, ON</p></div><p className="shrink-0">Jan 2021 – Present</p></div><ul className="mt-2 list-disc pl-5"><li>Managed multi-channel marketing campaigns that increased engagement by 35%.</li><li>Developed data-driven strategies resulting in 25% growth in qualified leads.</li></ul></div></div>;
+function MiniLetter() {
+  return <div className="h-20 w-16 shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-2 text-[5px] leading-tight text-slate-400"><p className="font-black text-blue-600">LETTER</p><br /><div className="space-y-1"><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /><div className="h-px bg-slate-300" /></div></div>;
 }
 
-function CoverLetterPreview() {
-  return <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs leading-5 text-slate-700 shadow-lg shadow-slate-100"><p className="font-black text-blue-600">▣ PERSONALIZED COVER LETTER</p><div className="mt-3 flex justify-between text-[10px] text-slate-500"><span>Toronto, ON · alexcarter@email.com · (416) 555-9876</span><span>May 21, 2024</span></div><p className="mt-4">Dear Hiring Manager,</p><p className="mt-2">I am excited to apply for the Marketing Coordinator position at Brighton Solutions Inc. With over 4 years of experience in digital marketing and campaign management, I have developed a strong ability to create data-driven strategies that drive engagement and support business growth.</p><p className="mt-2">In my current role at BrightWave Digital, I successfully managed multi-channel campaigns that increased customer engagement by 35% and improved lead generation by 25%.</p><p className="mt-2">Thank you for your time and consideration.</p><p className="mt-2">Sincerely,<br />Alex Carter</p></div>;
+function ResumePreview({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="group relative h-[460px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left text-[10px] leading-4 text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+      <div className="flex items-start justify-between gap-3"><p className="font-black text-slate-950">AI-Optimized Resume</p><span className="rounded-full bg-green-50 px-3 py-1 text-[10px] font-black text-green-700">ATS Match 98%</span></div>
+      <div className="mt-4">
+        <p className="text-2xl font-black leading-none text-slate-950">ALEX CARTER</p>
+        <p className="mt-1 font-black text-blue-600">Marketing Coordinator</p>
+        <p className="mt-2 text-[8px] text-slate-500">Toronto, ON · alexcarter@email.com · (416) 555-9876 · linkedin.com/in/alexcarter</p>
+        <hr className="my-3" />
+        <p className="font-black text-slate-900">PROFESSIONAL SUMMARY</p>
+        <p className="mt-1">Marketing professional with 4+ years of experience in digital marketing, campaign management, content strategy, SEO, paid media, CRM automation, and conversion-focused communications.</p>
+        <p className="mt-3 font-black text-slate-900">CORE COMPETENCIES</p>
+        <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1">
+          <p>• Digital Marketing</p><p>• Email Marketing</p><p>• Campaign Management</p><p>• Marketing Automation</p><p>• Content Strategy</p><p>• Data Analysis & Reporting</p><p>• SEO / SEM</p><p>• Google Analytics</p>
+        </div>
+        <p className="mt-3 font-black text-slate-900">PROFESSIONAL EXPERIENCE</p>
+        <div className="mt-1 flex justify-between"><p className="font-black">Marketing Coordinator | Brighton Solutions Inc.</p><p>Jan 2021 – Present</p></div>
+        <ul className="mt-1 list-disc pl-4"><li>Managed end-to-end digital marketing campaigns across multiple channels.</li><li>Increased website traffic by 40% and lead generation by 35% within 6 months.</li><li>Collaborated with sales team to create targeted content and email sequences.</li></ul>
+        <div className="mt-2 flex justify-between"><p className="font-black">Marketing Assistant | CreativeWay Agency</p><p>May 2020 – Dec 2020</p></div>
+        <ul className="mt-1 list-disc pl-4"><li>Assisted in planning and executing social media and SEO strategies.</li><li>Created content calendars and optimized copy for landing pages.</li><li>Tracked KPIs and prepared performance reports using Google Analytics.</li></ul>
+        <p className="mt-3 font-black text-slate-900">EDUCATION</p>
+        <div className="mt-1 flex justify-between"><p>Bachelor of Business Administration<br />University of Toronto · Toronto, ON</p><p>2016 – 2020</p></div>
+        <p className="mt-3 font-black text-slate-900">SKILLS</p>
+        <div className="mt-1 flex flex-wrap gap-1">{["Digital Marketing", "SEO", "Google Analytics", "Google Ads", "Meta Ads", "Content Strategy", "Email Marketing", "Marketing Automation", "Data Analysis", "Copywriting", "CRM", "Excel", "PowerPoint", "Canva"].map((s) => <span key={s} className="rounded bg-slate-100 px-2 py-1 text-[8px]">{s}</span>)}</div>
+      </div>
+      <PreviewLock label="Unlock full resume" />
+    </button>
+  );
 }
 
-function EmailDraftPreview() {
-  return <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-xs leading-5 text-slate-700 shadow-lg shadow-slate-100"><div className="flex gap-2 bg-slate-900 px-4 py-2"><span className="h-3 w-3 rounded-full bg-red-400" /><span className="h-3 w-3 rounded-full bg-yellow-400" /><span className="h-3 w-3 rounded-full bg-green-400" /></div><div className="p-5"><p>To: hiring.manager@brightonsolutions.com</p><p>Subject: Application for Marketing Coordinator Position</p><hr className="my-3" /><p>Hi [Hiring Manager Name],</p><p className="mt-2">I hope this email finds you well. I am very interested in the Marketing Coordinator position at Brighton Solutions Inc. and would love the opportunity to contribute to your team.</p><p className="mt-2">I have attached my resume and cover letter for your review. My experience in digital marketing, content strategy, and campaign management aligns well with the requirements of this role.</p><p className="mt-2">Best regards,<br />Alex Carter</p></div></div>;
+function CoverLetterPreview({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="group relative h-[460px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left text-[11px] leading-5 text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+      <p className="font-black text-slate-950">Personalized Cover Letter</p>
+      <p className="mt-5">Dear Hiring Manager,</p>
+      <p className="mt-3">I am excited to apply for the Marketing Coordinator position at Brighton Solutions Inc.</p>
+      <p className="mt-3">With over 4 years of experience in digital marketing and campaign management, I have developed a strong ability to create data-driven strategies that drive engagement and deliver measurable results.</p>
+      <p className="mt-3">In my current role at Brighton Solutions, I successfully increased website traffic by 60% and lead generation by 40% through targeted content and performance-driven campaigns.</p>
+      <p className="mt-3">I am particularly drawn to Brighton Solutions because of your commitment to innovation and your focus on delivering exceptional results for clients.</p>
+      <p className="mt-3">I look forward to the opportunity to contribute to your team.</p>
+      <p className="mt-3">Sincerely,<br />Alex Carter</p>
+      <PreviewLock label="Unlock full letter" />
+    </button>
+  );
 }
 
-function DocumentFeature({ icon, title, badge, items, button, onClick }: { icon: string; title: string; badge?: string; items: string[]; button: string; onClick: () => void }) {
-  return <div><div className="flex flex-wrap items-center gap-3"><IconBox icon={icon} /><p className="text-xl font-black text-slate-950">{title}</p>{badge && <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700">{badge}</span>}</div><ul className="mt-5 space-y-3 text-sm font-semibold leading-6 text-slate-600">{items.map((item) => <li key={item} className="flex gap-3"><span className="text-green-600">✓</span><span>{item}</span></li>)}</ul><button type="button" onClick={onClick} className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-100 transition hover:bg-blue-700">→ {button} 🔒</button></div>;
+function EmailDraftPreview({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="group relative h-[460px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left text-[11px] leading-5 text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+      <p className="font-black text-slate-950">Professional Email Draft</p>
+      <p className="mt-5">To: hiring.manager@brightonsolutions.com</p>
+      <p>Subject: Application for Marketing Coordinator Position</p>
+      <hr className="my-4" />
+      <p>Hi Hiring Manager,</p>
+      <p className="mt-3">I hope this email finds you well. I am very interested in the Marketing Coordinator position at Brighton Solutions Inc. and would love the opportunity to contribute to your team.</p>
+      <p className="mt-3">I have attached my resume and cover letter for your review.</p>
+      <p className="mt-3">My experience in digital marketing, content strategy, and campaign management aligns well with the requirements of this role.</p>
+      <p className="mt-3">Thank you for your time and consideration. I look forward to the possibility of discussing how I can contribute to Brighton Solutions.</p>
+      <p className="mt-3">Best regards,<br />Alex Carter</p>
+      <PreviewLock label="Unlock full email" />
+    </button>
+  );
 }
 
-function PackageItem({ icon, title, body }: { icon: string; title: string; body: string }) {
-  return <div className="flex gap-4"><IconBox icon={icon} /><div><p className="font-black text-slate-950">{title}</p><p className="mt-1 text-sm text-slate-500">{body}</p></div></div>;
+function PreviewLock({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[46%] bg-gradient-to-b from-white/10 via-white/80 to-white">
+      <div className="absolute inset-x-5 bottom-16 border-t border-dashed border-blue-300" />
+      <div className="absolute inset-x-0 bottom-6 text-center">
+        <p className="text-xs font-semibold text-slate-500">Preview Only</p>
+        <p className="mt-1 text-xs font-black text-blue-600">🔒 {label}</p>
+      </div>
+      <div className="absolute inset-x-5 top-10 h-20 rounded-2xl backdrop-blur-[3px]" />
+    </div>
+  );
 }
 
-function Feature({ title, body }: { title: string; body: string }) {
-  return <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm"><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-xl">✦</div><p className="text-lg font-black text-slate-950">{title}</p><p className="mt-3 text-sm leading-6 text-slate-600">{body}</p><button type="button" className="mt-5 text-sm font-black text-blue-600">Learn more →</button></div>;
+function OptimizationItem({ title, body, badge }: { title: string; body: string; badge?: string }) {
+  return (
+    <div className="mb-7 flex gap-4">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">✓</div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-black text-slate-950">{title}</p>
+          {badge && <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700">{badge}</span>}
+        </div>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">{body}</p>
+      </div>
+    </div>
+  );
+}
+
+function SmallFeature({ icon, title, body }: { icon: string; title: string; body: string }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm"><p className="text-3xl">{icon}</p><p className="mt-4 font-black text-slate-950">{title}</p><p className="mt-3 text-xs font-semibold leading-5 text-slate-600">{body}</p></div>;
+}
+
+function StepCard({ number, title, body, icon }: { number: string; title: string; body: string; icon: string }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center gap-4"><div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-3xl text-blue-600">{icon}</div><p className="text-sm font-black text-blue-600">{number}</p><p className="font-black text-slate-950">{title}</p></div><p className="mt-3 text-sm leading-6 text-slate-600">{body}</p></div>;
 }
 
 function FooterGroup({ title, items }: { title: string; items: string[] }) {
