@@ -124,11 +124,11 @@ export default function CareerMemoryPage() {
   }
 
   function hasWorkExperience() {
-    return memoryData.workExperience.some((x) => x.company.trim() || x.jobTitle.trim() || x.description.trim());
+    return memoryData.workExperience.some((x) => x.company?.trim() || x.jobTitle?.trim() || x.description?.trim());
   }
 
   function hasVolunteerExperience() {
-    return memoryData.volunteerExperience.some((x) => x.organization.trim() || x.role.trim() || x.description.trim());
+    return memoryData.volunteerExperience.some((x) => x.organization?.trim() || x.role?.trim() || x.description?.trim());
   }
 
   function hasExperience() {
@@ -136,7 +136,11 @@ export default function CareerMemoryPage() {
   }
 
   function hasSkills() {
-    return Boolean(memoryData.skills.trim());
+  if (Array.isArray(memoryData.skills)) {
+    return memoryData.skills.length > 0;
+  }
+
+  return Boolean(memoryData.skills?.trim());
   }
 
   function requiredCompletedCount() {
@@ -152,11 +156,15 @@ export default function CareerMemoryPage() {
     if (hasPersonalInfo()) score += 30;
     if (hasExperience()) score += 35;
     if (hasSkills()) score += 25;
-    if (memoryData.education.some((x) => x.school.trim() || x.program.trim())) score += 2;
-    if (memoryData.languages.some((x) => x.language.trim())) score += 2;
-    if (memoryData.certifications.some((x) => x.name.trim())) score += 2;
-    if (memoryData.projects.some((x) => x.name.trim())) score += 2;
-    if (memoryData.targetRoles.trim() || memoryData.careerGoalSummary.trim()) score += 2;
+    if (memoryData.education.some((x) => x.school?.trim() || x.program?.trim())) score += 2;
+
+    if (memoryData.languages.some((x) => x.language?.trim())) score += 2;
+
+    if (memoryData.certifications.some((x) => x.name?.trim())) score += 2;
+
+    if (memoryData.projects.some((x) => x.name?.trim())) score += 2;
+
+    if (memoryData.targetRoles?.trim() || memoryData.careerGoalSummary?.trim()) score += 2;
     return Math.min(score, 100);
   }
 
@@ -251,44 +259,36 @@ export default function CareerMemoryPage() {
   }
 
   async function handleResumeUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const file = event.target.files?.[0];
+  if (!file) return;
 
-    const kind = guessFileKind(file);
-    const objectUrl = URL.createObjectURL(file);
+  const formData = new FormData();
+  formData.append("file", file);
 
-    if (uploadedResumeUrl) URL.revokeObjectURL(uploadedResumeUrl);
-    setUploadedResumeUrl(objectUrl);
-    setUploadedResumeKind(kind);
-    updateMemory("uploadedResumeName", file.name);
-    updateMemory("resumeSource", "uploaded");
-    setImportStage("uploaded");
-    setImportMessage("Resume uploaded. Preview will show your original file. Career Memory extraction runs only when text is available.");
+  setImportStage("parsing");
+  setImportMessage("Analyzing resume with AI...");
 
-    let text = "";
-    if (kind === "txt") {
-      text = await file.text();
-      updateMemory("uploadedResumeText", text);
-    }
+  const response = await fetch("/api/analyze-resume", {
+    method: "POST",
+    body: formData,
+  });
 
-    setTimeout(() => {
-      setImportStage("parsing");
-      setImportMessage(kind === "txt" ? "Reading TXT resume... extracting personal information, experience, and skills." : "Original resume preview is ready. PDF/DOCX AI parsing requires backend extraction before fields can be auto-filled.");
-    }, 350);
+  const result = await response.json();
 
-    setTimeout(() => {
-      if (kind === "txt") {
-        parseTxtResume(text, file.name);
-        setImportMessage("TXT resume analyzed. Required sections were filled where possible. Review your style, then preview your resume.");
-      } else if (kind === "pdf") {
-        setImportMessage("PDF preview is ready. The content shown in Preview is your actual uploaded resume. Connect backend PDF parsing to auto-fill Career Memory fields.");
-      } else if (kind === "docx") {
-        setImportMessage("DOCX uploaded. Browsers cannot preview DOCX directly here. Connect backend DOCX parsing/conversion to show full content and auto-fill fields.");
-      } else {
-        setImportMessage("File uploaded, but this file type cannot be parsed or previewed. Please upload PDF, DOCX, or TXT.");
-      }
-      setImportStage("parsed");
-    }, 1000);
+  if (result.success) {
+    setMemoryData((prev) => ({
+      ...prev,
+      ...result.data,
+    }));
+
+    setImportStage("parsed");
+    setImportMessage("Resume analyzed successfully.");
+    return;
+  } else {
+    alert(result.message);
+    return;
+  }
+    
   }
 
   function getThemeClass() {
@@ -331,7 +331,11 @@ export default function CareerMemoryPage() {
         <div className="border-b pb-4">
           <h3 className="text-2xl font-extrabold">{memoryData.firstName || "First"} {memoryData.lastName || "Last"}</h3>
           <p className="mt-1 text-sm text-gray-600">{memoryData.email || "email@example.com"} · {memoryData.phone || "Phone"} · {memoryData.location || "Location"}</p>
-          <p className="mt-2 font-bold">{memoryData.headline || "Professional Headline"}</p>
+          {memoryData.headline.trim() && (
+         <p className="mt-2 font-bold">
+          {memoryData.headline}
+        </p>
+  )}
         </div>
         <div className={memoryData.layout === "Two Column" ? "mt-5 grid gap-5 md:grid-cols-2" : "mt-5 space-y-5"}>
           <div><h4 className="font-extrabold">Summary</h4><p className="mt-2 text-sm leading-6 text-gray-600">{memoryData.summary || "Your professional summary will appear here."}</p></div>
@@ -368,7 +372,7 @@ export default function CareerMemoryPage() {
       <div className="mx-auto min-h-[960px] w-full max-w-[760px] bg-white p-8 shadow-xl sm:p-10">
         <div className="border-b-4 border-blue-600 pb-5">
           <h1 className="break-words text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{memoryData.firstName || "First"} {memoryData.lastName || "Last"}</h1>
-          <p className="mt-2 break-words text-lg font-bold text-blue-600">{memoryData.headline || "Professional Headline"}</p>
+          
           <p className="mt-3 break-words text-sm text-slate-500">{memoryData.location || "Location"} · {memoryData.email || "email@example.com"} · {memoryData.phone || "Phone"} · {memoryData.linkedin || "LinkedIn"}</p>
         </div>
         <ResumeSection title="Professional Summary"><p>{memoryData.summary || "Your professional summary will appear here."}</p></ResumeSection>
@@ -441,7 +445,7 @@ export default function CareerMemoryPage() {
 
   function renderStepForm() {
     if (currentStep === 0) return (
-      <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Input placeholder="Professional Headline" value={memoryData.headline} onChange={(v) => updateMemory("headline", v)} className="md:col-span-2" /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
+      <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
     );
     if (currentStep === 1) return <ArraySection title="Education" items={memoryData.education} section="education" emptyItem={emptyEducation} addLabel="+ Add Education" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="School Name" value={item.school} onChange={(v) => updateArrayItem<EducationItem>("education", index, "school", v)} /><Input placeholder="Program / Degree" value={item.program} onChange={(v) => updateArrayItem<EducationItem>("education", index, "program", v)} /><Input placeholder="Dates Attended" value={item.dates} onChange={(v) => updateArrayItem<EducationItem>("education", index, "dates", v)} /><Input placeholder="GPA / Honours" value={item.gpa} onChange={(v) => updateArrayItem<EducationItem>("education", index, "gpa", v)} /><Textarea rows={4} placeholder="Relevant coursework, awards, academic achievements..." value={item.coursework} onChange={(v) => updateArrayItem<EducationItem>("education", index, "coursework", v)} className="md:col-span-2" /></div>} />;
     if (currentStep === 2) return (
