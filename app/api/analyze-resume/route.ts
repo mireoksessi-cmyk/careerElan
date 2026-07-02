@@ -2,21 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import pdf from "pdf-parse-new";
 import mammoth from "mammoth";
+import { fromBuffer } from "pdf2pic";
 
 function normalizeSkills(data: any) {
   if (!data) return "";
 
   if (Array.isArray(data)) {
-    return data
-      .map((x: any) => {
-        if (typeof x === "string") return x;
-        return x.name || x.skill || "";
-      })
-      .filter(Boolean)
-      .join(", ");
+    return [...new Set(
+      data
+        .map((x: any) => typeof x === "string" ? x : x.name || x.skill || "")
+        .filter(Boolean)
+    )].join(", ");
   }
 
-  return String(data);
+  return String(data)
+    .replace(/([a-z])([A-Z])/g, "$1, $2")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function normalizeLanguages(data: any) {
@@ -101,6 +103,82 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+async function extractPdfText(buffer: Buffer) {
+  try {
+    const parsed = await pdf(buffer);
+
+    if (parsed.text && parsed.text.trim().length > 300) {
+      return parsed.text;
+    }
+  } catch {}
+
+  return "";
+}
+
+async function pdfToImages(buffer: Buffer) {
+  const convert = fromBuffer(buffer, {
+    density: 220,
+    format: "png",
+    width: 1700,
+    height: 2200,
+  });
+
+  const images: string[] = [];
+
+  let page = 1;
+
+  while (true) {
+    try {
+      const result = await convert(page, {
+        responseType: "base64",
+      });
+
+      if (!result.base64) break;
+
+      images.push(result.base64);
+
+      page++;
+    } catch {
+      break;
+    }
+  }
+
+  return images;
+}
+
+async function visionOCR(images: string[]) {
+  let text = "";
+
+  for (const img of images) {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4.1",
+
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "Extract every visible word from this resume. Preserve line breaks. Do not summarize.",
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/png;base64,${img}`,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    text +=
+      (res.choices[0].message.content || "") + "\n";
+  }
+
+  return text;
+}
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -122,9 +200,24 @@ export async function POST(req: NextRequest) {
     let resumeText = "";
 
     if (file.name.toLowerCase().endsWith(".pdf")) {
-  const parsedPdf = await pdf(buffer);
-  resumeText = parsedPdf.text;
-} else if (file.name.toLowerCase().endsWith(".docx")) {
+
+  // 1차 : 일반 PDF 텍스트 추출
+  resumeText = await extractPdfText(buffer);
+
+  // 2차 : 텍스트가 거의 없으면 OCR 수행
+  if (resumeText.trim().length < 300) {
+
+    console.log("PDF appears scanned. Running Vision OCR...");
+
+    const images = await pdfToImages(buffer);
+
+    resumeText = await visionOCR(images);
+
+    console.log("Vision OCR complete.");
+  }
+
+   
+   } else if (file.name.toLowerCase().endsWith(".docx")) {
   
       const doc = await mammoth.extractRawText({
         buffer,
@@ -152,7 +245,77 @@ export async function POST(req: NextRequest) {
         { status:400 }
       );
     }
+     resumeText = resumeText
+  .replace(/\r/g, "")
+  .replace(/[ \t]+/g, " ")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+ const cleanedResume = await openai.chat.completions.create({
+  model: "gpt-4.1-mini",
+  temperature: 0,
+  messages: [
+    {
+      role: "system",
+      content: `
+You are an expert resume reconstruction engine.
 
+Your job is NOT to summarize.
+
+Your job is to rebuild the resume exactly as a human would type it.
+
+Rules:
+
+1. Never invent information.
+2. Never delete information.
+3. Restore all section headings.
+4. Restore proper line breaks.
+5. Restore bullet points using "- ".
+6. Put every responsibility on its own line.
+7. Put every job into this format:
+
+Job Title
+Dates
+Company
+
+- bullet
+- bullet
+- bullet
+
+8. Put every education entry into this format:
+
+Degree
+School
+Dates
+
+9. Restore skills into a comma-separated list.
+
+10. Preserve emails, phone numbers and LinkedIn exactly.
+
+11. If OCR merged sentences together, split them naturally.
+
+12. If text order looks wrong, rearrange it logically.
+
+13. Never output JSON.
+
+Output only the reconstructed resume.
+      `,
+    },
+    {
+      role: "user",
+      content: resumeText,
+    },
+  ],
+});
+
+
+
+resumeText =
+  cleanedResume.choices[0].message.content || resumeText;
+console.log(resumeText);
+
+
+
+    
     const numberedResume = resumeText
   .split("\n")
   .map((line, i) => `${i + 1}. ${line}`)
@@ -161,42 +324,58 @@ export async function POST(req: NextRequest) {
 const prompt = `
 You are an expert resume parser.
 
+Your task is to extract structured information from the resume.
+
+Return ONLY valid JSON.
+
 The resume may have ANY layout.
 
-Do NOT rely on section titles.
+Do NOT rely on section headings.
 
 The resume may not contain headings like:
 - Skills
 - Work Experience
-- Professional Experience
 - Education
 - Languages
 - Certifications
 - Projects
 
-Instead, infer the meaning of each line using context.
+Instead, infer each piece of information from context.
 
-For every piece of information determine whether it belongs to:
+Rules:
 
-- Personal Information
-- Professional Summary
-- Work Experience
-- Volunteer Experience
-- Education
-- Skills
-- Languages
-- Certifications
-- Projects
+- Extract ALL information from the resume.
+- Never invent information.
+- Never discard information.
+- Never summarize work experience.
+- Never rewrite sentences.
+- Preserve all skills.
+- Preserve all education.
+- Preserve all work experience.
+- Preserve all volunteer experience.
+- Preserve all certifications.
+- Preserve all projects.
 
-Important rules:
+If multiple responsibilities exist,
+combine them into ONE description separated by newline characters.
 
-- Extract information even if there are no section headings.
-- Infer skills from software, tools, technologies and abilities mentioned anywhere.
-- Infer languages from proficiency statements or language names.
-- Decide whether experience is Work, Volunteer, Internship or Project based on context.
-- Never discard useful information.
-- If information appears inside another section, still classify it correctly.
-- Return empty arrays only if the information truly does not exist.
+Never leave description empty if responsibilities exist.
+
+If a company and job title exist,
+create a workExperience object even if dates are missing.
+
+If a school and degree exist,
+create an education object even if dates are missing.
+
+If dates are missing,
+return an empty string.
+
+Never output placeholders such as:
+
+- "Dates"
+- "Location"
+- "Experience details"
+- "Description here"
 
 Return ONLY valid JSON.
 
@@ -211,13 +390,55 @@ JSON format:
   "linkedin":"",
   "headline":"",
   "summary":"",
-  "skills":[],
-  "education":[],
-  "workExperience":[],
-  "volunteerExperience":[],
-  "languages":[],
-  "certifications":[],
-  "projects":[]
+  "skills":[
+    ""
+  ],
+  "education":[
+    {
+      "school":"",
+      "program":"",
+      "dates":"",
+      "gpa":"",
+      "coursework":""
+    }
+  ],
+  "workExperience":[
+    {
+      "company":"",
+      "jobTitle":"",
+      "dates":"",
+      "description":""
+    }
+  ],
+  "volunteerExperience":[
+    {
+      "organization":"",
+      "role":"",
+      "dates":"",
+      "description":""
+    }
+  ],
+  "languages":[
+    {
+      "language":"",
+      "proficiency":""
+    }
+  ],
+  "certifications":[
+    {
+      "name":"",
+      "issuer":"",
+      "date":""
+    }
+  ],
+  "projects":[
+    {
+      "name":"",
+      "description":"",
+      "technologies":"",
+      "link":""
+    }
+  ]
 }
 
 Resume:
@@ -258,6 +479,61 @@ ${numberedResume}
   parsed.volunteerExperience = normalizeVolunteer(parsed.volunteerExperience);
   parsed.certifications = normalizeCertifications(parsed.certifications);
   parsed.projects = normalizeProjects(parsed.projects);
+  const verify = await openai.chat.completions.create({
+  model: "gpt-4.1-mini",
+  temperature: 0,
+  response_format: {
+    type: "json_object",
+  },
+  messages: [
+    {
+      role: "system",
+      content: `
+You verify resume JSON.
+
+Never invent information.
+
+Only correct obvious OCR mistakes.
+
+Remove duplicate skills.
+
+Remove placeholder text.
+
+If email obviously contains OCR mistakes
+(example: gmall.com -> gmail.com)
+correct it.
+
+Never change facts.
+
+Return ONLY valid JSON.
+`,
+    },
+    {
+  role: "user",
+  content: `
+Original Resume:
+
+${numberedResume}
+
+Parsed JSON:
+
+${JSON.stringify(parsed, null, 2)}
+
+Compare the original resume with the parsed JSON.
+
+Correct only obvious extraction mistakes.
+
+Do not invent information.
+
+Return ONLY valid JSON.
+`,
+},
+  ],
+});
+
+parsed = JSON.parse(
+  verify.choices[0].message.content || "{}"
+);
 } catch (error) {
   return NextResponse.json(
     {
