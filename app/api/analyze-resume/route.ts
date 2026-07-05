@@ -1,8 +1,9 @@
+
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import pdf from "pdf-parse-new";
 import mammoth from "mammoth";
-import { fromBuffer } from "pdf2pic";
+
 
 function normalizeSkills(data: any) {
   if (!data) return "";
@@ -115,70 +116,13 @@ async function extractPdfText(buffer: Buffer) {
   return "";
 }
 
-async function pdfToImages(buffer: Buffer) {
-  const convert = fromBuffer(buffer, {
-    density: 220,
-    format: "png",
-    width: 1700,
-    height: 2200,
-  });
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-  const images: string[] = [];
 
-  let page = 1;
 
-  while (true) {
-    try {
-      const result = await convert(page, {
-        responseType: "base64",
-      });
 
-      if (!result.base64) break;
-
-      images.push(result.base64);
-
-      page++;
-    } catch {
-      break;
-    }
-  }
-
-  return images;
-}
-
-async function visionOCR(images: string[]) {
-  let text = "";
-
-  for (const img of images) {
-    const res = await openai.chat.completions.create({
-      model: "gpt-4.1",
-
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Extract every visible word from this resume. Preserve line breaks. Do not summarize.",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/png;base64,${img}`,
-              },
-            },
-          ],
-        },
-      ],
-    });
-
-    text +=
-      (res.choices[0].message.content || "") + "\n";
-  }
-
-  return text;
-}
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -189,7 +133,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message: "Resume file is missing.",
+          message: "Please upload a resume in PDF (text-based), DOCX, or TXT format.",
         },
         { status: 400 }
       );
@@ -206,15 +150,15 @@ export async function POST(req: NextRequest) {
 
   // 2차 : 텍스트가 거의 없으면 OCR 수행
   if (resumeText.trim().length < 300) {
-
-    console.log("PDF appears scanned. Running Vision OCR...");
-
-    const images = await pdfToImages(buffer);
-
-    resumeText = await visionOCR(images);
-
-    console.log("Vision OCR complete.");
-  }
+  return NextResponse.json(
+    {
+      success: false,
+      message:
+        "We couldn't accurately read this resume. For the best results, please upload the original digital version of your resume in PDF (text-based), DOCX, or TXT format.",
+    },
+    { status: 400 }
+  );
+}
 
    
    } else if (file.name.toLowerCase().endsWith(".docx")) {
@@ -534,6 +478,16 @@ Return ONLY valid JSON.
 parsed = JSON.parse(
   verify.choices[0].message.content || "{}"
 );
+
+// 다시 정규화
+parsed.skills = normalizeSkills(parsed.skills);
+parsed.languages = normalizeLanguages(parsed.languages);
+parsed.education = normalizeEducation(parsed.education);
+parsed.workExperience = normalizeWork(parsed.workExperience);
+parsed.volunteerExperience = normalizeVolunteer(parsed.volunteerExperience);
+parsed.certifications = normalizeCertifications(parsed.certifications);
+parsed.projects = normalizeProjects(parsed.projects);
+
 } catch (error) {
   return NextResponse.json(
     {

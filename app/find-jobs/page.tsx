@@ -161,9 +161,14 @@ export default function FindJobsPage() {
   const [externalTotalPages, setExternalTotalPages] = useState(1);
 
   useEffect(() => {
-    const saved = localStorage.getItem("careerMemoryData");
-    setHasCareerMemory(Boolean(saved));
-  }, []);
+  const saved = localStorage.getItem("careerMemoryData");
+  setHasCareerMemory(Boolean(saved));
+
+  console.log(
+    "recommendedJobs =",
+    sessionStorage.getItem("recommendedJobs")
+  );
+}, []);
 
   useEffect(() => {
     const saved = sessionStorage.getItem("findJobsState");
@@ -186,7 +191,27 @@ export default function FindJobsPage() {
     }
   }, []);
 
-  const baseJobs = hasCareerMemory ? aiJobs : neutralJobs;
+  const savedRecommendedJobs =
+  typeof window !== "undefined"
+    ? sessionStorage.getItem("recommendedJobs")
+    : null;
+
+const baseJobs: Job[] =
+  hasCareerMemory && savedRecommendedJobs
+    ? JSON.parse(savedRecommendedJobs).map((job: any, index: number) => ({
+        id: index + 1,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        type: job.type,
+        mode: "Hybrid",
+        category: job.tags?.[0] || "General",
+        match: Number(String(job.match).replace("%", "")),
+        matched: job.matched || [],
+        missing: job.missing || [],
+        posted: "Today",
+      }))
+    : neutralJobs;
 
   const filteredLocalJobs = useMemo(() => {
     return baseJobs.filter((job) => {

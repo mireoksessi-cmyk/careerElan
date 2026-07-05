@@ -1,7 +1,9 @@
 "use client";
-
+import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 const menuItems = [
   "Dashboard",
@@ -14,10 +16,10 @@ const menuItems = [
 ];
 
 const progressCards = [
-  { title: "Career Memory", value: "82%", change: "+6%", note: "profile improved this week", icon: "🧠" },
-  { title: "Application Packages", value: "14", change: "+3", note: "new packages created this week", icon: "📦" },
-  { title: "Applications Sent", value: "27", change: "+5", note: "applications submitted this month", icon: "📤" },
-  { title: "Interviews", value: "8", change: "+2", note: "interviews scheduled", icon: "🗓️" },
+  { title: "Career Memory", change: "+6%", note: "profile improved this week", icon: "🧠" },
+  { title: "Application Packages", change: "+3", note: "new packages created this week", icon: "📦" },
+  { title: "Applications Sent", change: "+5", note: "applications submitted this month", icon: "📤" },
+  { title: "Interviews", change: "+2", note: "interviews scheduled", icon: "🗓️" },
 ];
 
 type JobItem = {
@@ -103,39 +105,156 @@ function getMenuIcon(item: string) {
 }
 
 export default function DashboardPage() {
+  const careerMemoryStrength = Number(localStorage.getItem("careerMemoryStrength") ?? 0);
   const [careerMemoryCompleted, setCareerMemoryCompleted] = useState(false);
+  const [careerMemory, setCareerMemory] = useState<any>(null); const [memoryStrength, setMemoryStrength] = useState(0);
   const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
+  const [stats, setStats] = useState({ packages: 0, applications: 0, interviews: 0 });
   const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
   const [showTour, setShowTour] = useState(false);
   const [visibleJobs, setVisibleJobs] = useState(6);
-  const [recommendedJobs, setRecommendedJobs] = useState<JobItem[]>(neutralJobs);
+  const [recommendedJobs, setRecommendedJobs] =
+  useState<JobItem[]>([]);
   const [insightItems, setInsightItems] = useState(defaultInsightItems);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
-    const saved = localStorage.getItem("careerMemoryData");
-    const tourSeen = localStorage.getItem("careerElanTourSeen");
+  const saved = localStorage.getItem("careerMemoryData");
+  const tourSeen = localStorage.getItem("careerElanTourSeen");
+  const strength = localStorage.getItem("careerMemoryStrength");
+  
+  if (!tourSeen) {
+    setShowTour(true);
+  }
 
-    if (!tourSeen) setShowTour(true);
+  if (strength) {
+    setMemoryStrength(Number(strength));
+  }
 
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const hasMemory =
-        parsed.firstName ||
-        parsed.summary ||
-        parsed.skills ||
-        parsed.targetRoles ||
-        parsed.education?.[0]?.school ||
-        parsed.workExperience?.[0]?.company;
+  if (!saved) return;
 
-      if (hasMemory) {
-        setCareerMemoryCompleted(true);
-        setCareerFairs(personalizedCareerFairs);
-        setRecommendedJobs(personalizedJobs);
-        setInsightItems(personalizedInsightItems);
+  const parsed = JSON.parse(saved);
+  setCareerMemory(parsed);
+
+  const completed =
+    localStorage.getItem("careerMemoryRequiredCompleted") === "true";
+
+  console.log("careerMemoryRequiredCompleted =", completed);
+  console.log("careerMemoryData =", saved);
+
+  setCareerMemoryCompleted(completed);
+
+  if (!completed) return;
+
+  setCareerFairs(personalizedCareerFairs);
+  setInsightItems(personalizedInsightItems);
+
+  console.log("ABOUT TO FETCH");
+
+  fetch("/api/recommend-jobs", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: saved,
+})
+  .then(async (res) => {
+    const data = await res.json();
+
+    if (!data.jobs?.length) return;
+
+    const realJobs = (
+  await Promise.all(
+    data.jobs.slice(0, 6).map(async (aiJob: any) => {
+      try {
+        const result = await searchJobs({
+          query: aiJob.title,
+          location: aiJob.location || "Canada",
+        });
+
+        if (!result.jobs.length) return null;
+
+        const real = result.jobs[0];
+
+        return {
+          title: real.title,
+          company: real.company,
+          location: real.location,
+          type: real.type,
+          tags: [real.category],
+          match: aiJob.match,
+          matched: aiJob.matched,
+          missing: aiJob.missing,
+          url: real.url,
+          logo: real.logo,
+          source: real.source,
+        };
+      } catch (err) {
+        console.error("Search failed:", aiJob.title, err);
+        return null;
       }
-    }
-  }, []);
+    })
+  )
+).filter(Boolean);
+
+setRecommendedJobs(realJobs);
+
+sessionStorage.setItem(
+  "recommendedJobs",
+  JSON.stringify(realJobs)
+);
+
+console.log("Saved real recommended jobs");
+
+    setRecommendedJobs(realJobs);
+
+    sessionStorage.setItem(
+      "recommendedJobs",
+      JSON.stringify(realJobs)
+    );
+
+    console.log("Saved real recommended jobs");
+  })
+  .catch((err) => {
+    console.error("recommend-jobs error =", err);
+  });
+}, []);
+  useEffect(() => {
+  async function loadStats() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { count: packages } = await supabase
+      .from("applications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "package_generated");
+
+    const { count: applications } = await supabase
+      .from("applications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "applied");
+
+    const { count: interviews } = await supabase
+      .from("applications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "interview");
+
+    setStats({
+      packages: packages ?? 0,
+      applications: applications ?? 0,
+      interviews: interviews ?? 0,
+    });
+  }
+
+  loadStats();
+}, []);
 
   function closeTour() {
     localStorage.setItem("careerElanTourSeen", "true");
@@ -145,7 +264,9 @@ export default function DashboardPage() {
   function handleCareerFairSearch() {
     setCareerFairs(careerMemoryCompleted ? personalizedCareerFairs : defaultCareerFairs);
   }
-
+   console.log("recommendedJobs state =", recommendedJobs);
+   console.log("recommendedJobs length =", recommendedJobs.length);
+   console.table(recommendedJobs);
   return (
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       {showPackageChoice && (
@@ -285,7 +406,7 @@ export default function DashboardPage() {
         <section className="flex-1">
           <header className="flex items-center justify-between px-8 py-6">
             <div>
-              <h1 className="text-2xl font-extrabold">Good morning, David! 👋</h1>
+              <h1 className="text-2xl font-extrabold">Good morning, {careerMemory?.firstName || "there"}! 👋</h1>
               <p className="mt-1 text-sm text-gray-500">
                 Find jobs faster. Generate a tailored package in minutes.{" "}
                 <span className="font-bold text-blue-600">You apply. We prepare.</span>
@@ -305,7 +426,7 @@ export default function DashboardPage() {
               <a href="/settings" className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-blue-50">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">D</div>
                 <div>
-                  <p className="text-sm font-bold">David Kwak</p>
+                  <p className="text-sm font-bold">{careerMemory ? `${careerMemory.firstName} ${careerMemory.lastName}` : "Guest"}</p>
                   <p className="text-xs text-gray-500">Career Élan User</p>
                 </div>
               </a>
@@ -323,7 +444,7 @@ export default function DashboardPage() {
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-sm font-semibold text-gray-500">{card.title}</p>
-                          <h3 className="mt-3 text-3xl font-extrabold">{card.value}</h3>
+                         <h3 className="mt-3 text-3xl font-extrabold">{card.title === "Application Packages" ? stats.packages : card.title === "Applications Sent" ? stats.applications : card.title === "Interviews" ? stats.interviews : `${careerMemoryStrength}%`}</h3>
                         </div>
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">{card.icon}</div>
                       </div>
@@ -443,9 +564,21 @@ export default function DashboardPage() {
                         </div>
                       </div>
 
-                      <a href="/find-jobs" className="mt-5 block w-full rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white">
-                        Generate Package →
-                      </a>
+                      <button
+                      onClick={() => {
+                     sessionStorage.setItem(
+                      "recommendedJobs",
+                   JSON.stringify(recommendedJobs)
+                  );
+
+                    router.push(
+                    `/paste-job?url=${encodeURIComponent((job as any).url || "")}`
+                  );
+                   }}
+                  className="mt-5 block w-full rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white"
+                  >
+                 Generate Package →
+                 </button>
                     </div>
                   ))}
                 </div>
@@ -536,7 +669,7 @@ export default function DashboardPage() {
                   <div>
                     <div className="flex justify-between text-xs font-bold text-gray-500">
                       <span>Memory Completed</span>
-                      <span>{careerMemoryCompleted ? "82%" : "11%"}</span>
+                      <span>{careerMemoryStrength}%</span>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-gray-100">
                       <div className="h-2 rounded-full bg-blue-600" style={{ width: careerMemoryCompleted ? "82%" : "11%" }} />

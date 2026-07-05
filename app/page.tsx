@@ -24,6 +24,7 @@ export default function HomePage() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
 
   function openAuth(mode: AuthMode = "login") {
@@ -58,27 +59,49 @@ export default function HomePage() {
   }
 
   async function handleEmailLogin() {
-    setLoading(true);
-    setMessage("");
+  setLoading(true);
+  setMessage("");
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: loginEmail,
-      password: loginPassword,
-    });
+  const { data, error: profileError } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("login_id", loginEmail)
+    .single();
 
-    if (error) {
-      setMessage(error.message);
-      setLoading(false);
-      return;
-    }
-
-    router.push("/dashboard");
+  if (profileError || !data) {
+    setMessage("Invalid ID or password.");
+    setLoading(false);
+    return;
   }
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email: data.email,
+    password: loginPassword,
+  });
+
+  if (error) {
+    setMessage("Invalid ID or password.");
+    setLoading(false);
+    return;
+  }
+
+  router.push("/dashboard");
+}
 
   async function handleEmailSignup() {
     setLoading(true);
     setMessage("");
+    const { data: existing } = await supabase
+  .from("profiles")
+  .select("id")
+  .eq("login_id", loginId)
+  .maybeSingle();
 
+if (existing) {
+  setMessage("This ID is already taken. Please choose another one.");
+  setLoading(false);
+  return;
+}
     const { data, error } = await supabase.auth.signUp({
       email: signupEmail,
       password: signupPassword,
@@ -101,6 +124,7 @@ export default function HomePage() {
     if (data.user) {
       await supabase.from("profiles").upsert({
         id: data.user.id,
+        login_id: loginId, 
         full_name: fullName,
         phone,
         email: signupEmail,
@@ -401,20 +425,82 @@ export default function HomePage() {
             <div className="my-6 flex items-center gap-4"><div className="h-px flex-1 bg-slate-200" /><span className="text-sm font-bold text-slate-400">or</span><div className="h-px flex-1 bg-slate-200" /></div>
 
             {authMode === "signup" ? (
-              <form className="space-y-4">
-                <Input value={fullName} onChange={setFullName} placeholder="Full name" icon="👤" />
-                <Input value={phone} onChange={setPhone} placeholder="Phone number" icon="📞" />
-                <Input value={signupEmail} onChange={setSignupEmail} placeholder="Email address" icon="✉️" type="email" />
-                <Input value={signupPassword} onChange={setSignupPassword} placeholder="Create password" icon="🔒" type="password" />
-                <button type="button" onClick={handleEmailSignup} disabled={loading} className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700">Create Account</button>
-              </form>
-            ) : (
-              <form className="space-y-4">
-                <Input value={loginEmail} onChange={setLoginEmail} placeholder="Email address" icon="✉️" type="email" />
-                <Input value={loginPassword} onChange={setLoginPassword} placeholder="Password" icon="🔒" type="password" />
-                <button type="button" onClick={handleEmailLogin} disabled={loading} className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700">Continue</button>
-              </form>
-            )}
+  <form className="space-y-4">
+    <Input
+      value={fullName}
+      onChange={setFullName}
+      placeholder="Full name"
+      icon="👤"
+    />
+
+    <Input
+      value={phone}
+      onChange={setPhone}
+      placeholder="Phone number"
+      icon="📞"
+    />
+
+    <Input
+      value={loginId}
+      onChange={setLoginId}
+      placeholder="Create ID"
+      icon="🆔"
+      type="text"
+    />
+
+    <Input
+      value={signupEmail}
+      onChange={setSignupEmail}
+      placeholder="Email address"
+      icon="✉️"
+      type="email"
+    />
+
+    <Input
+      value={signupPassword}
+      onChange={setSignupPassword}
+      placeholder="Create password"
+      icon="🔒"
+      type="password"
+    />
+
+    <button
+      type="button"
+      onClick={handleEmailSignup}
+      disabled={loading}
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700"
+    >
+      Create Account
+    </button>
+  </form>
+) : (
+  <form className="space-y-4">
+    <Input
+      value={loginEmail}
+      onChange={setLoginEmail}
+      placeholder="ID"
+      icon="🆔"
+      type="text"
+    />
+
+    <Input
+      value={loginPassword}
+      onChange={setLoginPassword}
+      placeholder="Password"
+      icon="🔒"
+      type="password"
+    />
+
+    <button
+      type="button"
+      onClick={handleEmailLogin}
+      disabled={loading}
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700"
+    >
+      Continue
+    </button>
+  </form>
+)}
 
             {message && <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-600">{message}</p>}
 

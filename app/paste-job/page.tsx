@@ -1,5 +1,5 @@
 "use client";
-
+import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
@@ -344,6 +344,19 @@ David Kwak`,
 
     setSelectedPreview("resume");
     setGenerated(true);
+    const {
+  data: { user },
+ } = await supabase.auth.getUser();
+
+   if (user) {
+   await supabase.from("applications").insert({
+    user_id: user.id,
+    company: analysis.company,
+    job_title: analysis.title,
+    status: "package_generated",
+    applied_date: new Date().toISOString().split("T")[0],
+    });
+   }
 
     setMessage(
       "Your AI-tailored application package has been generated successfully."
