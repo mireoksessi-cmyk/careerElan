@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import pdf from "pdf-parse-new";
+import pdf from "pdf-parse";
 import mammoth from "mammoth";
 
 
