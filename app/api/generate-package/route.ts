@@ -69,7 +69,17 @@ Rules:
 - Make the resume targeted to the job posting.
 - Do not invent fake degrees, licences, certifications, employers, or dates.
 - If Career Memory is limited, write carefully using transferable skills.
-- Resume should include: Professional Summary, Relevant Skills, Experience Highlights, Education/Training if available, ATS Keywords.
+- Resume should include:
+  • Professional Summary
+  • Relevant Skills
+  • Experience Highlights
+  • Education/Training (if available)
+- Do NOT include an ATS Keywords section.
+- Do NOT output any keyword list at the end of the resume.
+- Naturally integrate important keywords into the resume instead.
+- Keep the resume to approximately one A4 page.
+- Keep the cover letter to approximately one A4 page.
+- Use clean resume formatting without unnecessary sections.
 - Cover letter should be concise, specific to the role, and professional.
 - Email draft should be short and ready to send with attachments.
 - Use the applicant name David Kwak unless another name is provided in Career Memory.

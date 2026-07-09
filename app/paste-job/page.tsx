@@ -1,6 +1,10 @@
 "use client";
+import jsPDF from "jspdf";
+import { Document, Packer, Paragraph } from "docx";
+import { saveAs } from "file-saver";
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
+import A4Preview from "../job-tracker/A4Preview";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
@@ -72,6 +76,21 @@ const emptyAnalysis: JobAnalysis = {
     applyUrl: "",
   },
 };
+async function getCareerMemory() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("career_memory")
+    .select("*")
+    .eq("user_id", user.id)
+    .single();
+
+  return data;
+}
 
 export default function PasteJobPage() {
   const router = useRouter();
@@ -273,14 +292,10 @@ David Kwak`,
         jobDetails: normalizeJobDetails(data, isUrlMode ? jobText : jobUrl.trim()),
       };
 
-      const nextPackage = buildGeneratedPackage(nextAnalysis);
-
       setAnalysis(nextAnalysis);
-      setPackageData(nextPackage);
-      setSelectedPreview("resume");
-      setAnalyzed(true);
-      setGenerated(true);
-      setMessage(successMessage);
+    setAnalyzed(true);
+    setGenerated(false);
+    setMessage(successMessage);
     } catch (error: any) {
       console.error(error);
 
@@ -317,7 +332,7 @@ David Kwak`,
   try {
     setIsGenerating(true);
     setMessage("");
-
+    const careerMemory = await getCareerMemory();
     const response = await fetch("/api/generate-package", {
       method: "POST",
       headers: {
@@ -326,7 +341,7 @@ David Kwak`,
       body: JSON.stringify({
         analysis,
         jobText: getOriginalJobSnippet(),
-        careerMemory: localStorage.getItem("careerMemoryData"),
+        careerMemory,
       }),
     });
 
@@ -444,38 +459,28 @@ David Kwak`,
     );
   }
 
-  function getSavedApplicationMaterials() {
-    const saved = localStorage.getItem("careerMemoryData");
+  async function getSavedApplicationMaterials() {
+  const data = await getCareerMemory();
 
-    if (!saved) {
-      return { resume: "", coverLetter: "" };
-    }
-
-    try {
-      const parsed = JSON.parse(saved);
-
-      return {
-        resume: getSavedTextByKeys(parsed, [
-          "resume",
-          "resumetext",
-          "defaultresume",
-          "savedresume",
-          "cv",
-        ]),
-        coverLetter: getSavedTextByKeys(parsed, [
-          "coverletter",
-          "coverlettertext",
-          "defaultcoverletter",
-          "savedcoverletter",
-        ]),
-      };
-    } catch {
-      return { resume: "", coverLetter: "" };
-    }
+  if (!data) {
+    return {
+      resume: "",
+      coverLetter: "",
+    };
   }
 
-  function handleApplyNow() {
-    const { resume, coverLetter } = getSavedApplicationMaterials();
+  return {
+    resume: data.resume || "",
+    coverLetter: data.cover_letter || "",
+  };
+}
+
+   
+  
+
+  async function handleApplyNow() {
+    const { resume, coverLetter } =
+  await getSavedApplicationMaterials();
     const hasCompleteResume = isCompleteApplicationMaterial(resume);
     const hasCompleteCoverLetter = isCompleteApplicationMaterial(coverLetter);
 
@@ -534,17 +539,87 @@ David Kwak`,
 
     window.open(targetUrl, "_blank", "noopener,noreferrer");
   }
+  
+function downloadPdf() {
+  const pdf = new jsPDF();
 
-  function savePackage() {
-    const savedPackage = {
-      analysis,
-      packageData,
-      savedAt: new Date().toISOString(),
-    };
+  const text =
+    selectedPreview === "resume"
+      ? packageData.resume
+      : selectedPreview === "coverLetter"
+      ? packageData.coverLetter
+      : packageData.emailDraft;
 
-    localStorage.setItem("latestApplicationPackage", JSON.stringify(savedPackage));
-    setMessage("Application package saved.");
+  pdf.setFontSize(10);
+
+  const lines = pdf.splitTextToSize(text, 170);
+
+  pdf.text(lines, 20, 20);
+
+  pdf.save(
+    `${analysis.company}-${selectedPreview}.pdf`
+  );
+}
+
+async function downloadDocx() {
+  const text = packageData[selectedPreview];
+
+  const doc = new Document({
+    sections: [
+      {
+        children: text.split("\n").map(
+          (line) =>
+            new Paragraph({
+              text: line,
+            })
+        ),
+      },
+    ],
+  });
+
+  const blob = await Packer.toBlob(doc);
+
+  saveAs(
+    blob,
+    `${getFileBaseName()}_${selectedPreview}.docx`
+  );
+}
+
+  async function savePackage() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return;
+
+  const { error } = await supabase
+    .from("applications")
+    .update({
+      job_url: jobUrl,
+      location: analysis.location,
+      job_type: analysis.type,
+
+      resume_text: packageData.resume,
+      cover_letter_text: packageData.coverLetter,
+      email_draft: packageData.emailDraft,
+
+      job_analysis: analysis,
+
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", user.id)
+    .eq("company", analysis.company)
+    .eq("job_title", analysis.title);
+
+  if (error) {
+    alert(error.message);
+    return;
   }
+
+  alert("Application package has been saved successfully!");
+
+  setMessage("Application package saved to cloud.");
+}
 
   function sanitizeFileName(value: string) {
     return value
@@ -1223,13 +1298,13 @@ David Kwak`,
                             ) : (
                               <>
                                 <button
-                                  onClick={() => downloadSelected("docx")}
+                                  onClick={downloadDocx}
                                   className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
                                 >
                                   Download DOCX
                                 </button>
                                 <button
-                                  onClick={() => downloadSelected("pdf")}
+                                  onClick={downloadPdf}
                                   className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50"
                                 >
                                   Download PDF
@@ -1265,7 +1340,7 @@ David Kwak`,
                           ))}
                         </div>
 
-                        <div className="p-6">
+                        <div className="h-[900px] overflow-y-auto p-6 bg-gray-100">
                           <div className="mb-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
@@ -1280,17 +1355,34 @@ David Kwak`,
                             </div>
                           </div>
 
-                          <textarea
-                            value={packageData[selectedPreview]}
-                            onChange={(e) =>
-                              setPackageData((prev) => ({
-                                ...prev,
-                                [selectedPreview]: e.target.value,
-                              }))
-                            }
-                            className="min-h-[520px] w-full resize-y rounded-2xl border border-gray-100 bg-slate-50 p-6 text-sm leading-7 text-gray-700 outline-none focus:border-blue-400 focus:bg-white"
-                            placeholder="Edit your application material here..."
-                          />
+                          {selectedPreview === "emailDraft" ? (
+
+  <textarea
+    value={packageData.emailDraft}
+    onChange={(e) =>
+      setPackageData((prev) => ({
+        ...prev,
+        emailDraft: e.target.value,
+      }))
+    }
+    className="min-h-[520px] w-full resize-y rounded-2xl border border-gray-100 bg-slate-50 p-6 text-sm leading-7 text-gray-700 outline-none"
+  />
+
+) : (
+
+  <div className="flex justify-center">
+    <A4Preview
+        text={packageData[selectedPreview]}
+        onChange={(value)=>
+            setPackageData(prev=>({
+                ...prev,
+                [selectedPreview]: value,
+            }))
+        }
+    />
+</div>
+
+)}
 
                           <div className="mt-5 grid gap-3 md:grid-cols-3">
                             <button
@@ -1310,13 +1402,13 @@ David Kwak`,
                             ) : (
                               <>
                                 <button
-                                  onClick={() => downloadSelected("docx")}
+                                  onClick={downloadDocx}
                                   className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
                                 >
                                   Download DOCX
                                 </button>
                                 <button
-                                  onClick={() => downloadSelected("pdf")}
+                                  onClick={downloadPdf}
                                   className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
                                 >
                                   Download PDF

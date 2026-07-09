@@ -83,7 +83,7 @@ export default function CareerMemoryPage() {
   const [memoryData, setMemoryData] = useState<CareerMemoryData>(defaultMemoryData);
   const [coverLetterUploadProgress, setCoverLetterUploadProgress] =
   useState(0);
-
+ 
   const [coverLetterImportStage, setCoverLetterImportStage] =
   useState<
     "idle" | "uploaded" | "parsing" | "parsed"
@@ -107,6 +107,8 @@ export default function CareerMemoryPage() {
   
   
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+ const [profileStrength, setProfileStrength] = useState(0);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
   const isReviewStep = mode === "build" && currentStep === steps.length - 1;
 async function loadCareerMemory() {
@@ -123,7 +125,8 @@ async function loadCareerMemory() {
     .single();
 
   if (error || !data) return;
-
+   
+setProfileStrength(data.profile_strength ?? 0);
   setMemoryData((prev) => ({
     ...prev,
 
@@ -158,6 +161,9 @@ async function loadCareerMemory() {
     layout: data.layout ?? "One Column",
     coverLetterTone: data.tone ?? "Formal",
   }));
+   
+
+  setIsUnlocked(data.required_completed ?? false);
 }
   
   useEffect(() => {
@@ -165,6 +171,9 @@ async function loadCareerMemory() {
       if (uploadedResumeUrl) URL.revokeObjectURL(uploadedResumeUrl);
     };
   }, [uploadedResumeUrl]);
+  useEffect(() => {
+  loadCareerMemory();
+ }, []);
 
   function updateMemory(field: keyof CareerMemoryData, value: string | boolean) {
     setMemoryData((prev) => ({ ...prev, [field]: value }));
@@ -242,7 +251,7 @@ async function loadCareerMemory() {
 
   const strength = memoryStrength();
   const requiredCount = requiredCompletedCount();
-
+  
   async function persistMemory() {
   console.log("========== persistMemory START ==========");
 
@@ -305,6 +314,10 @@ async function loadCareerMemory() {
       tone: memoryData.coverLetterTone,
 
       profile_strength: memoryStrength(),
+      required_completed:
+  hasPersonalInfo() &&
+  hasExperience() &&
+  hasSkills(),
     },
     {
       onConflict: "user_id",
@@ -350,7 +363,7 @@ router.push("/dashboard");
       return;
     }
     const path = item === "Dashboard" ? "/dashboard" : item === "Create Package" ? "/create-package" : item === "Analytics" ? "/analytics" : "#";
-    if (!canUseService()) {
+    if (!isUnlocked) {
       setLockedMessage(`${item} is locked until you complete Personal Information, Experience, and Skills.`);
       return;
     }
@@ -1265,10 +1278,11 @@ if (template === "Creative") {
         <section className="flex-1 px-8 py-6">
           {mode === "start" ? (
             <StartScreen
-            strength={strength}
+             strength={profileStrength}
             requiredCount={requiredCount}
             canUseService={canUseService()}
             onImport={() => setMode("import")}
+            isUnlocked={isUnlocked}
             onBuild={() => setMode("build")}
             onContinue={continueToDashboard}
             onSaveCoverLetter={() => {
@@ -1317,6 +1331,7 @@ function StartScreen({
   strength,
   requiredCount,
   canUseService,
+  isUnlocked,
   onImport,
   onBuild,
   onContinue,
@@ -1332,6 +1347,7 @@ function StartScreen({
   strength: number;
   requiredCount: number;
   canUseService: boolean;
+  isUnlocked: boolean;
   onImport: () => void;
   onBuild: () => void;
   onContinue: () => void;
@@ -1358,7 +1374,7 @@ function StartScreen({
   return (
     <div className="mx-auto max-w-[1280px]">
       <div className="mb-8 flex items-start justify-between gap-6"><div><h1 className="text-4xl font-black tracking-tight text-slate-950">Build Your Career Memory ✨</h1><p className="mt-3 max-w-2xl text-base leading-7 text-slate-500">Complete the required sections first. Then Career Élan can create resumes, cover letters, and job application packages from your profile.</p><div className="mt-6 flex flex-wrap gap-3">{["Personal Info", "Experience", "Skills", "Education", "Projects", "Certifications", "Preferences", "Achievements"].map((item, i) => <span key={item} className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm"><span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-white ${i < 3 ? "bg-blue-600" : "bg-slate-300"}`}>{i < 3 ? "!" : "+"}</span>{item}</span>)}</div></div><div className="hidden text-sm text-slate-500 lg:block">Need help?⌄</div></div>
-      <div className="mb-6 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-sm font-black uppercase tracking-wide text-blue-600">Required to unlock Career Élan</p><h2 className="mt-1 text-2xl font-black text-slate-950">Required sections: {requiredCount}/3</h2><p className="mt-2 text-sm leading-6 text-slate-500">Personal Information, Experience, and Skills are enough to start. Optional sections can be completed later.</p></div><button onClick={onContinue} disabled={!canUseService} className={`rounded-xl px-6 py-4 font-black transition ${canUseService ? "bg-blue-600 text-white shadow-lg shadow-blue-100 hover:bg-blue-700" : "cursor-not-allowed bg-slate-100 text-slate-400"}`}>Continue to Dashboard →</button></div></div>
+      <div className="mb-6 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-sm font-black uppercase tracking-wide text-blue-600">Required to unlock Career Élan</p><h2 className="mt-1 text-2xl font-black text-slate-950">Required sections: {requiredCount}/3</h2><p className="mt-2 text-sm leading-6 text-slate-500">Personal Information, Experience, and Skills are enough to start. Optional sections can be completed later.</p></div><button onClick={onContinue} disabled={!isUnlocked} className={`rounded-xl px-6 py-4 font-black transition ${canUseService ? "bg-blue-600 text-white shadow-lg shadow-blue-100 hover:bg-blue-700" : "cursor-not-allowed bg-slate-100 text-slate-400"}`}>Continue to Dashboard →</button></div></div>
       <div className="grid gap-6 xl:grid-cols-[2fr_310px]">
 
   {/* LEFT */}
@@ -1545,7 +1561,7 @@ onClick={() => setCoverLetterPreview(true)}
         <div className="text-center">
 
           <p className="text-3xl font-black">
-            {strength}%
+               {strength}%
           </p>
 
           <p className="text-xs text-slate-500">

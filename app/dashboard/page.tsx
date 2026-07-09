@@ -31,6 +31,7 @@ type JobItem = {
   match?: string;
   matched?: string[];
   missing?: string[];
+  fallback?: boolean;
 };
 
 const neutralJobs: JobItem[] = [
@@ -105,7 +106,7 @@ function getMenuIcon(item: string) {
 }
 
 export default function DashboardPage() {
-  const careerMemoryStrength = Number(localStorage.getItem("careerMemoryStrength") ?? 0);
+  
   const [careerMemoryCompleted, setCareerMemoryCompleted] = useState(false);
   const [careerMemory, setCareerMemory] = useState<any>(null); const [memoryStrength, setMemoryStrength] = useState(0);
   const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
@@ -115,112 +116,140 @@ export default function DashboardPage() {
   const [visibleJobs, setVisibleJobs] = useState(6);
   const [recommendedJobs, setRecommendedJobs] =
   useState<JobItem[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
   const [insightItems, setInsightItems] = useState(defaultInsightItems);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
+async function loadDashboard() {
+  const cachedJobs = sessionStorage.getItem("recommendedJobs");
+  const cachedTime = sessionStorage.getItem("recommendedJobsTime");
 
-  useEffect(() => {
-  const saved = localStorage.getItem("careerMemoryData");
-  const tourSeen = localStorage.getItem("careerElanTourSeen");
-  const strength = localStorage.getItem("careerMemoryStrength");
-  
-  if (!tourSeen) {
-    setShowTour(true);
-  }
+if (cachedJobs) {
+  setRecommendedJobs(JSON.parse(cachedJobs));
+}
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (strength) {
-    setMemoryStrength(Number(strength));
-  }
+  if (!user) return;
 
-  if (!saved) return;
+  const { data, error } = await supabase
+    .from("career_memory")
+    .select("*")
+    .eq("user_id", user.id)
+    .single();
 
-  const parsed = JSON.parse(saved);
-  setCareerMemory(parsed);
+  if (error || !data) return;
 
-  const completed =
-    localStorage.getItem("careerMemoryRequiredCompleted") === "true";
+  setCareerMemory(data);
+  setCareerMemoryCompleted(data.required_completed ?? false);
+  setMemoryStrength(data.profile_strength ?? 0);
 
-  console.log("careerMemoryRequiredCompleted =", completed);
-  console.log("careerMemoryData =", saved);
-
-  setCareerMemoryCompleted(completed);
-
-  if (!completed) return;
+  if (!data.required_completed) return;
 
   setCareerFairs(personalizedCareerFairs);
   setInsightItems(personalizedInsightItems);
 
   console.log("ABOUT TO FETCH");
 
-  fetch("/api/recommend-jobs", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: saved,
-})
+ if (
+  !cachedJobs ||
+  !cachedTime ||
+  Date.now() - Number(cachedTime) > 1000 * 60 * 60
+) {
+  setLoadingJobs(true);
+}
+
+fetch("/api/recommend-jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  })
+  
   .then(async (res) => {
     const data = await res.json();
 
     if (!data.jobs?.length) return;
 
     const realJobs = (
-  await Promise.all(
-    data.jobs.slice(0, 6).map(async (aiJob: any) => {
-      try {
-        const result = await searchJobs({
-          query: aiJob.title,
-          location: aiJob.location || "Canada",
-        });
+      await Promise.all(
+        data.jobs.slice(0, 6).map(async (aiJob: any) => {
+          try {
+            const result = await searchJobs({
+              query: aiJob.title,
+              location: aiJob.location || "Canada",
+            });
 
-        if (!result.jobs.length) return null;
+            if (!result.jobs.length) {
+  return {
+    title: aiJob.title,
+    company: "No live posting found",
+    location: aiJob.location || "Canada",
+    type: "Recommended",
+    tags: ["AI"],
+    match: aiJob.match,
+    matched: aiJob.matched,
+    missing: aiJob.missing,
+    url: "",
+    fallback: true,
+  };
+}
 
-        const real = result.jobs[0];
+            const real = result.jobs[0];
 
-        return {
-          title: real.title,
-          company: real.company,
-          location: real.location,
-          type: real.type,
-          tags: [real.category],
-          match: aiJob.match,
-          matched: aiJob.matched,
-          missing: aiJob.missing,
-          url: real.url,
-          logo: real.logo,
-          source: real.source,
-        };
-      } catch (err) {
-        console.error("Search failed:", aiJob.title, err);
-        return null;
-      }
-    })
-  )
-).filter(Boolean);
-
-setRecommendedJobs(realJobs);
-
-sessionStorage.setItem(
-  "recommendedJobs",
-  JSON.stringify(realJobs)
-);
-
-console.log("Saved real recommended jobs");
+            return {
+              title: real.title,
+              company: real.company,
+              location: real.location,
+              type: real.type,
+              tags: [real.category],
+              match: aiJob.match,
+              matched: aiJob.matched,
+              missing: aiJob.missing,
+              url: real.url,
+              logo: real.logo,
+              source: real.source,
+            };
+          } catch (err) {
+            console.error(err);
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean);
 
     setRecommendedJobs(realJobs);
 
-    sessionStorage.setItem(
+    setLoadingJobs(false);
+
+     sessionStorage.setItem(
       "recommendedJobs",
       JSON.stringify(realJobs)
     );
-
-    console.log("Saved real recommended jobs");
+    sessionStorage.setItem(
+  "recommendedJobsTime",
+  Date.now().toString()
+);
   })
   .catch((err) => {
-    console.error("recommend-jobs error =", err);
-  });
+  console.error(err);
+  setLoadingJobs(false);
+});
+}
+
+useEffect(() => {
+  const tourSeen = localStorage.getItem("careerElanTourSeen");
+
+  if (!tourSeen) {
+    setShowTour(true);
+  }
+
+  loadDashboard();
 }, []);
-  useEffect(() => {
+  
+useEffect(() => {
   async function loadStats() {
     const {
       data: { user },
@@ -255,6 +284,8 @@ console.log("Saved real recommended jobs");
 
   loadStats();
 }, []);
+  
+  
 
   function closeTour() {
     localStorage.setItem("careerElanTourSeen", "true");
@@ -444,7 +475,7 @@ console.log("Saved real recommended jobs");
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-sm font-semibold text-gray-500">{card.title}</p>
-                         <h3 className="mt-3 text-3xl font-extrabold">{card.title === "Application Packages" ? stats.packages : card.title === "Applications Sent" ? stats.applications : card.title === "Interviews" ? stats.interviews : `${careerMemoryStrength}%`}</h3>
+                         <h3 className="mt-3 text-3xl font-extrabold">{card.title === "Application Packages" ? stats.packages : card.title === "Applications Sent" ? stats.applications : card.title === "Interviews" ? stats.interviews : `${memoryStrength}%`}</h3>
                         </div>
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">{card.icon}</div>
                       </div>
@@ -522,77 +553,140 @@ console.log("Saved real recommended jobs");
                 </div>
 
                 <div className="grid gap-5 md:grid-cols-3">
-                  {recommendedJobs.slice(0, visibleJobs).map((job) => (
-                    <div key={`${job.title}-${job.company}`} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                      <div className="flex items-start justify-between">
-                        <div className="text-3xl">💼</div>
-                        <div className="text-right">
-                          {job.match && <p className="text-2xl font-extrabold text-green-600">{job.match}</p>}
-                          {job.match && <p className="text-xs font-bold text-gray-500">Match</p>}
-                        </div>
-                      </div>
+                  {loadingJobs ? (
 
-                      <h3 className="mt-4 text-lg font-extrabold">{job.title}</h3>
-                      <p className="mt-1 text-sm text-gray-500">{job.company} · {job.location}</p>
+Array.from({ length: 6 }).map((_, index) => (
+  // Array.from({ length: 6 }).map((_, index) => (
+  <div
+    key={index}
+    className="animate-pulse rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+  >
+    <div className="h-8 w-8 rounded bg-gray-200"></div>
 
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <span className="rounded-full border border-blue-100 px-3 py-1 text-xs font-bold text-blue-600">
-                          {job.type}
-                        </span>
-                        {job.tags.map((tag) => (
-                          <span key={tag} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
+    <div className="mt-4 h-5 rounded bg-gray-200"></div>
 
-                      <div className="mt-5">
-                        <h4 className="text-xs font-extrabold text-gray-700">Why this matches you</h4>
-                        <div className="mt-2 space-y-1">
-                          {job.matched?.map((item) => (
-                            <p key={item} className="text-xs font-semibold text-green-700">✓ {item}</p>
-                          ))}
-                        </div>
-                      </div>
+    <div className="mt-2 h-4 w-2/3 rounded bg-gray-100"></div>
 
-                      <div className="mt-4">
-                        <h4 className="text-xs font-extrabold text-gray-700">Missing</h4>
-                        <div className="mt-2 space-y-1">
-                          {job.missing?.map((item) => (
-                            <p key={item} className="text-xs font-semibold text-red-500">× {item}</p>
-                          ))}
-                        </div>
-                      </div>
+    <div className="mt-4 h-4 rounded bg-gray-100"></div>
 
-                      <button
-                      onClick={() => {
-                     sessionStorage.setItem(
-                      "recommendedJobs",
-                   JSON.stringify(recommendedJobs)
-                  );
+    <div className="mt-2 h-4 rounded bg-gray-100"></div>
 
-                    router.push(
-                    `/paste-job?url=${encodeURIComponent((job as any).url || "")}`
-                  );
-                   }}
-                  className="mt-5 block w-full rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white"
-                  >
-                 Generate Package →
-                 </button>
-                    </div>
-                  ))}
-                </div>
+    <div className="mt-5 h-10 rounded-xl bg-gray-200"></div>
+  </div>
+))
 
-                {visibleJobs < recommendedJobs.length && (
-                  <div className="mt-6 flex justify-center">
-                    <button
-                      onClick={() => setVisibleJobs((prev) => Math.min(prev + 3, recommendedJobs.length))}
-                      className="rounded-xl border border-blue-200 bg-white px-8 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
-                    >
-                      More Jobs +
-                    </button>
-                  </div>
-                )}
+
+) : (
+
+recommendedJobs.slice(0, visibleJobs).map((job) => (
+  <div
+    key={`${job.title}-${job.company}`}
+    className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+  >
+    <div className="flex items-start justify-between">
+      <div className="text-3xl">💼</div>
+      <div className="text-right">
+        {job.match && (
+          <p className="text-2xl font-extrabold text-green-600">{job.match}</p>
+        )}
+        {job.match && (
+          <p className="text-xs font-bold text-gray-500">Match</p>
+        )}
+      </div>
+    </div>
+
+    <h3 className="mt-4 text-lg font-extrabold">{job.title}</h3>
+    <p className="mt-1 text-sm text-gray-500">
+      {job.company} · {job.location}
+    </p>
+
+    <div className="mt-4 flex flex-wrap gap-2">
+      <span className="rounded-full border border-blue-100 px-3 py-1 text-xs font-bold text-blue-600">
+        {job.type}
+      </span>
+
+      {job.tags.map((tag) => (
+        <span
+          key={tag}
+          className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600"
+        >
+          {tag}
+        </span>
+      ))}
+    </div>
+
+    <div className="mt-5">
+      <h4 className="text-xs font-extrabold text-gray-700">
+        Why this matches you
+      </h4>
+
+      <div className="mt-2 space-y-1">
+        {job.matched?.map((item) => (
+          <p key={item} className="text-xs font-semibold text-green-700">
+            ✓ {item}
+          </p>
+        ))}
+      </div>
+    </div>
+
+    <div className="mt-4">
+      <h4 className="text-xs font-extrabold text-gray-700">Missing</h4>
+
+      <div className="mt-2 space-y-1">
+        {job.missing?.map((item) => (
+          <p key={item} className="text-xs font-semibold text-red-500">
+            × {item}
+          </p>
+        ))}
+      </div>
+    </div>
+
+    {job.fallback ? (
+  <button
+    onClick={() => router.push("/find-jobs")}
+    className="mt-5 block w-full rounded-xl border border-blue-600 bg-white px-4 py-3 text-center text-sm font-bold text-blue-600"
+  >
+    Search Again →
+  </button>
+) : (
+  <button
+    onClick={() => {
+      sessionStorage.setItem(
+        "recommendedJobs",
+        JSON.stringify(recommendedJobs)
+      );
+
+      router.push(
+        `/paste-job?url=${encodeURIComponent((job as any).url || "")}`
+      );
+    }}
+    className="mt-5 block w-full rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white"
+  >
+    Generate Package →
+  </button>
+)}
+  </div>
+))
+
+)}
+</div>
+
+{visibleJobs < recommendedJobs.length && (
+  <div className="mt-6 flex justify-center">
+    <button
+      onClick={() =>
+        setVisibleJobs((prev) =>
+          Math.min(prev + 3, recommendedJobs.length)
+        )
+      }
+      className="rounded-xl border border-blue-200 bg-white px-8 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
+    >
+      More Jobs +
+    </button>
+  </div>
+)}
+
+                 
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
@@ -669,10 +763,10 @@ console.log("Saved real recommended jobs");
                   <div>
                     <div className="flex justify-between text-xs font-bold text-gray-500">
                       <span>Memory Completed</span>
-                      <span>{careerMemoryStrength}%</span>
+                      <span>{memoryStrength}%</span>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-gray-100">
-                      <div className="h-2 rounded-full bg-blue-600" style={{ width: careerMemoryCompleted ? "82%" : "11%" }} />
+                      <div className="h-2 rounded-full bg-blue-600" style={{ width: `${memoryStrength}%`}} />
                     </div>
                   </div>
 
