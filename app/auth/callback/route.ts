@@ -36,7 +36,10 @@ export async function GET(request: Request) {
       }
     );
 
-    await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+console.log("exchange", data);
+console.log("error", error);
   }
 
   return NextResponse.redirect(new URL("/dashboard", request.url));
