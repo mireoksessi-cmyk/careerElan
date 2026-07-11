@@ -24,23 +24,45 @@ async function handleSignUp() {
   setLoading(true);
 
   const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-      },
+  email,
+  password,
+  options: {
+    data: {
+      full_name: fullName,
     },
-  });
+  },
+});
 
-  setLoading(false);
+setLoading(false);
 
-  if (error) {
-    alert(error.message);
+if (error) {
+  alert(error.message);
+  return;
+}
+
+if (data.user) {
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .insert({
+      id: data.user.id,
+      full_name: fullName,
+      login_id: email,
+      email,
+      phone: "",
+      country: "",
+      timezone: "",
+      email_notifications: true,
+      marketing_notifications: false,
+    });
+
+  if (profileError) {
+    console.error(profileError);
+    alert(profileError.message);
     return;
   }
+}
 
-  alert("Check your email to verify your account.");
+alert("Check your email to verify your account.");
 }
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-white px-6 py-10">

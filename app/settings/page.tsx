@@ -38,39 +38,67 @@ const [deleteText, setDeleteText] = useState("");
   }, []);
 
   async function loadProfile() {
+  try {
+    setLoading(true);
+
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser();
 
-    if (!user) return;
+    if (authError) {
+      console.error("Auth Error:", authError);
+      alert(authError.message);
+      router.push("/");
+      return;
+    }
+
+    if (!user) {
+      router.push("/");
+      return;
+    }
 
     setUserId(user.id);
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .single();
+    const { data, error } = await supabase
+  .from("profiles")
+  .select("*")
+  .eq("id", user.id)
+  .single();
+
+console.log("user.id =", user.id);
+console.log("data =", data);
+console.log("error =", error);
+
+    if (error) {
+      console.error("Profile Error:", error);
+      alert(error.message);
+      return;
+    }
 
     if (data) {
       setProfile({
-  full_name: data.full_name ?? "",
-  login_id: data.login_id ?? "",
-  email: data.email ?? "",
-  phone: data.phone ?? "",
-  country: data.country ?? "",
-  timezone: data.timezone ?? "",
+        full_name: data.full_name ?? "",
+        login_id: data.login_id ?? "",
+        email: data.email ?? "",
+        phone: data.phone ?? "",
+        country: data.country ?? "",
+        timezone: data.timezone ?? "",
 
-  email_notifications:
-    data.email_notifications ?? true,
+        email_notifications:
+          data.email_notifications ?? true,
 
-  marketing_notifications:
-    data.marketing_notifications ?? false,
-});
+        marketing_notifications:
+          data.marketing_notifications ?? false,
+      });
     }
-
+  } catch (err) {
+    console.error("Unexpected Error:", err);
+    alert("Failed to load profile.");
+  } finally {
     setLoading(false);
   }
+}
 
   async function saveProfile() {
     setSaving(true);

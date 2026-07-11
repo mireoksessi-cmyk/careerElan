@@ -113,6 +113,7 @@ export default function DashboardPage() {
 const [coverLetters, setCoverLetters] = useState<any[]>([]);
 const [selectedResumeType, setSelectedResumeType] =
 useState("");
+const [name, setName] = useState("Guest");
 
 const [selectedResumeId, setSelectedResumeId] =
 useState("");
@@ -132,6 +133,24 @@ const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
   const [insightItems, setInsightItems] = useState(defaultInsightItems);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
+
+  async function loadProfile() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return;
+
+  const { data } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (data?.full_name) {
+    setName(data.full_name);
+  }
+}
 
 async function saveSelection(
   resumeType: string,
@@ -306,7 +325,9 @@ fetch("/api/recommend-jobs", {
   setLoadingJobs(false);
 });
 }
-
+useEffect(() => {
+  loadProfile();
+}, []);
 useEffect(() => {
   const tourSeen = localStorage.getItem("careerElanTourSeen");
 
@@ -505,7 +526,9 @@ useEffect(() => {
         <section className="flex-1">
           <header className="flex items-center justify-between px-8 py-6">
             <div>
-              <h1 className="text-2xl font-extrabold">Good morning, {careerMemory?.firstName || "there"}! 👋</h1>
+             <h1 className="text-2xl font-extrabold">
+  Good morning, {name}! 👋
+</h1>
               <p className="mt-1 text-sm text-gray-500">
                 Find jobs faster. Generate a tailored package in minutes.{" "}
                 <span className="font-bold text-blue-600">You apply. We prepare.</span>
@@ -523,10 +546,14 @@ useEffect(() => {
               <button className="rounded-full bg-white p-3 shadow-sm">💬</button>
 
               <a href="/settings" className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-blue-50">
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">D</div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
+  {name.charAt(0).toUpperCase()}
+</div>
                 <div>
-                  <p className="text-sm font-bold">{careerMemory ? `${careerMemory.firstName} ${careerMemory.lastName}` : "Guest"}</p>
-                  <p className="text-xs text-gray-500">Career Élan User</p>
+                  <p className="text-sm font-bold">{name}</p>
+                 <p className="text-sm text-gray-500">
+  User
+</p>
                 </div>
               </a>
             </div>
