@@ -1,104 +1,93 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { useAuth } from "@/components/AuthProvider";
 
 export default function SettingsPage() {
-  const [loading, setLoading] = useState(true);
-  const [password, setPassword] = useState("");
-const [confirmPassword, setConfirmPassword] = useState("");
-const [changingPassword, setChangingPassword] = useState(false);
-  const [saving, setSaving] = useState(false);
-const router = useRouter();
-  const [userId, setUserId] = useState("");
-const [showDeleteModal, setShowDeleteModal] = useState(false);
-const [deleteText, setDeleteText] = useState("");
-  const [profile, setProfile] = useState({
-  full_name: "",
-  login_id: "",
-  email: "",
-  phone: "",
-  country: "",
-  timezone: "",
+  const { user, loading } = useAuth();
 
-  email_notifications: true,
-  marketing_notifications: false,
-});
+  const router = useRouter();
+
+  const [pageLoading, setPageLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const [userId, setUserId] = useState("");
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteText, setDeleteText] = useState("");
+
+  const [profile, setProfile] = useState({
+    full_name: "",
+    login_id: "",
+    email: "",
+    phone: "",
+    country: "",
+    timezone: "",
+    email_notifications: true,
+    marketing_notifications: false,
+  });
 
   useEffect(() => {
-    loadProfile();
-  }, []);
+    if (!loading) {
+      loadProfile();
+    }
+  }, [loading, user]);
 
   async function loadProfile() {
-  try {
-    setLoading(true);
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError) {
-      console.error("Auth Error:", authError);
-      alert(authError.message);
-      router.push("/");
-      return;
-    }
+    if (loading) return;
 
     if (!user) {
       router.push("/");
       return;
     }
 
-    setUserId(user.id);
+    try {
+      setPageLoading(true);
 
-    const { data, error } = await supabase
-  .from("profiles")
-  .select("*")
-  .eq("id", user.id)
-  .single();
+      setUserId(user.id);
 
-console.log("user.id =", user.id);
-console.log("data =", data);
-console.log("error =", error);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
 
-    if (error) {
-      console.error("Profile Error:", error);
-      alert(error.message);
-      return;
+      console.log("user.id =", user.id);
+      console.log("data =", data);
+      console.log("error =", error);
+
+      if (error) {
+        console.error("Profile Error:", error);
+        alert(error.message);
+        return;
+      }
+
+      if (data) {
+        setProfile({
+          full_name: data.full_name ?? "",
+          login_id: data.login_id ?? "",
+          email: data.email ?? "",
+          phone: data.phone ?? "",
+          country: data.country ?? "",
+          timezone: data.timezone ?? "",
+          email_notifications: data.email_notifications ?? true,
+          marketing_notifications: data.marketing_notifications ?? false,
+        });
+      }
+    } catch (err) {
+      console.error("Unexpected Error:", err);
+      alert("Failed to load profile.");
+    } finally {
+      setPageLoading(false);
     }
-
-    if (data) {
-      setProfile({
-        full_name: data.full_name ?? "",
-        login_id: data.login_id ?? "",
-        email: data.email ?? "",
-        phone: data.phone ?? "",
-        country: data.country ?? "",
-        timezone: data.timezone ?? "",
-
-        email_notifications:
-          data.email_notifications ?? true,
-
-        marketing_notifications:
-          data.marketing_notifications ?? false,
-      });
-    }
-  } catch (err) {
-    console.error("Unexpected Error:", err);
-    alert("Failed to load profile.");
-  } finally {
-    setLoading(false);
   }
-}
 
   async function saveProfile() {
     setSaving(true);

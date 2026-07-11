@@ -3,11 +3,9 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
 
 type AuthMode = "login" | "signup";
 
@@ -40,11 +38,11 @@ export default function HomePage() {
     const options =
       provider === "facebook"
         ? {
-            redirectTo: `${window.location.origin}/dashboard`,
+            redirectTo: `${window.location.origin}/auth/callback`,
             scopes: "public_profile",
           }
         : {
-            redirectTo: `${window.location.origin}/dashboard`,
+            redirectTo: `${window.location.origin}/auth/callback`,
           };
 
     const { error } = await supabase.auth.signInWithOAuth({
@@ -110,7 +108,7 @@ if (existing) {
           full_name: fullName,
           phone,
         },
-        emailRedirectTo: `${window.location.origin}/dashboard`,
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
 

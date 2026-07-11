@@ -52,20 +52,41 @@ const [filterStatus, setFilterStatus] =
   }, []);
 
   async function loadApplications() {
-    const { data, error } = await supabase
-      .from("applications")
-      .select("*")
-      .order("created_at", { ascending: false });
+  setLoading(true);
 
-   if (error) {
-  console.error(error);
-  alert(error.message);
-  return;
-}
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    setApplications(data ?? []);
+  console.log("USER =", user);
+
+  const session = await supabase.auth.getSession();
+  console.log("SESSION =", session);
+
+  if (!user) {
     setLoading(false);
+    return;
   }
+
+  const { data, error } = await supabase
+    .from("applications")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  console.log("DATA =", data);
+  console.log("ERROR =", error);
+
+  if (error) {
+    console.error(error);
+    alert(error.message);
+    setLoading(false);
+    return;
+  }
+
+  setApplications(data ?? []);
+  setLoading(false);
+}
  async function saveNotes() {
   if (!selectedApplication) return;
 

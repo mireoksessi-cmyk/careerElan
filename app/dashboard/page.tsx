@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
 
 const menuItems = [
   "Dashboard",
@@ -106,7 +107,7 @@ function getMenuIcon(item: string) {
 }
 
 export default function DashboardPage() {
-  
+  const { user, loading } = useAuth();
   const [careerMemoryCompleted, setCareerMemoryCompleted] = useState(false);
   const [careerMemory, setCareerMemory] = useState<any>(null); const [memoryStrength, setMemoryStrength] = useState(0);
   const [resumes, setResumes] = useState<any[]>([]);
@@ -135,9 +136,7 @@ const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
   const router = useRouter();
 
   async function loadProfile() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+ 
 
   if (!user) return;
 
@@ -157,9 +156,7 @@ async function saveSelection(
   resumeId: string | null,
   coverLetterId: string | null
 ) {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  
 
   if (!user) return;
 
@@ -180,9 +177,7 @@ async function loadDashboard() {
 if (cachedJobs) {
   setRecommendedJobs(JSON.parse(cachedJobs));
 }
-  const {
-  data: { user },
-} = await supabase.auth.getUser();
+ 
 
 if (!user) return;
 
@@ -326,6 +321,32 @@ fetch("/api/recommend-jobs", {
 });
 }
 useEffect(() => {
+  if (!user) return;
+
+  loadUserName();
+}, [user]);
+
+async function loadUserName() {
+  if (!user) return;
+
+  const { data } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .single();
+
+  if (data?.full_name) {
+    setName(data.full_name);
+  } else {
+    setName(
+      user.user_metadata?.given_name ||
+      user.user_metadata?.full_name ||
+      "Guest"
+    );
+  }
+}
+
+useEffect(() => {
   loadProfile();
 }, []);
 useEffect(() => {
@@ -340,9 +361,7 @@ useEffect(() => {
   
 useEffect(() => {
   async function loadStats() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+   
 
     if (!user) return;
 

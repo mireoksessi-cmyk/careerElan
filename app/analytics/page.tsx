@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
+import { useAuth } from "@/components/AuthProvider";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
 
@@ -15,14 +15,13 @@ import BestResume from "@/components/analytics/BestResume";
 import AiSummary from "@/components/analytics/AiSummary";
 
 export default function AnalyticsPage() {
+  const { user, loading } = useAuth();
   const [applications, setApplications] = useState<any[]>([]);
   const [userId, setUserId] = useState("");
 
   useEffect(() => {
     async function init() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+     
 
       if (!user) return;
 

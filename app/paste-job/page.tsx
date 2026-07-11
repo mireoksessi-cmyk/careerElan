@@ -3,7 +3,7 @@
 
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
 
-
+import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
@@ -78,10 +78,12 @@ const emptyAnalysis: JobAnalysis = {
     applyUrl: "",
   },
 };
-async function getApplicationData() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+
+
+export default function PasteJobPage() {
+  const { user, loading } = useAuth();
+  async function getApplicationData() {
+  
 
   if (!user) return null;
 
@@ -107,8 +109,6 @@ async function getApplicationData() {
     covers,
   };
 }
-
-export default function PasteJobPage() {
   const router = useRouter();
   const [activeMode, setActiveMode] = useState<PasteMode>("url");
   const [jobUrl, setJobUrl] = useState("");
@@ -377,9 +377,7 @@ await getApplicationData();
 
     setSelectedPreview("resume");
     setGenerated(true);
-    const {
-  data: { user },
- } = await supabase.auth.getUser();
+    
 
    if (user) {
    await supabase.from("applications").insert({
@@ -584,9 +582,7 @@ async function downloadDocx() {
 }
 
   async function savePackage() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  
 
   if (!user) return;
 

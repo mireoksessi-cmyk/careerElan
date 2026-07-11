@@ -4,6 +4,7 @@ import Image from "next/image";
 import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
 const steps = [
   { title: "Personal Information", description: "Required. Your contact information and professional summary used across every application.", required: true },
   { title: "Education", description: "Optional. Schools, degrees, GPA, coursework, and academic achievements that strengthen your profile.", required: false },
@@ -77,6 +78,7 @@ type ImportStage = "idle" | "uploaded" | "parsing" | "parsed" | "preview";
 type UploadedResumeKind = "none" | "pdf" | "txt" | "docx" | "other";
 
 export default function CareerMemoryPage() {
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [mode, setMode] = useState<"start" | "import" | "build">("start");
   const [currentStep, setCurrentStep] = useState(0);
@@ -112,9 +114,7 @@ export default function CareerMemoryPage() {
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
   const isReviewStep = mode === "build" && currentStep === steps.length - 1;
 async function loadCareerMemory() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  
 
   if (!user) return;
 
@@ -255,9 +255,7 @@ setProfileStrength(data.profile_strength ?? 0);
   async function persistMemory() {
   console.log("========== persistMemory START ==========");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  
 
   console.log("USER =", user);
 
@@ -426,9 +424,7 @@ router.push("/dashboard");
   async function handleResumeUpload(event: ChangeEvent<HTMLInputElement>) {
   const file = event.target.files?.[0];
   if (!file) return;
- const {
-  data: { user },
-} = await supabase.auth.getUser();
+ 
 
 if (!user) {
   alert("Please sign in.");
@@ -509,9 +505,7 @@ if (error) {
   const file = event.target.files?.[0];
 
   if (!file) return;
- const {
-  data: { user },
-} = await supabase.auth.getUser();
+ 
 
 if (!user) {
   alert("Please sign in.");
