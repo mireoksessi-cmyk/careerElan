@@ -109,6 +109,18 @@ export default function DashboardPage() {
   
   const [careerMemoryCompleted, setCareerMemoryCompleted] = useState(false);
   const [careerMemory, setCareerMemory] = useState<any>(null); const [memoryStrength, setMemoryStrength] = useState(0);
+  const [resumes, setResumes] = useState<any[]>([]);
+const [coverLetters, setCoverLetters] = useState<any[]>([]);
+const [selectedResumeType, setSelectedResumeType] =
+useState("");
+
+const [selectedResumeId, setSelectedResumeId] =
+useState("");
+
+const [selectedCoverLetterId, setSelectedCoverLetterId] =
+useState("");
+const [selectedResume, setSelectedResume] = useState("");
+const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
   const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
   const [stats, setStats] = useState({ packages: 0, applications: 0, interviews: 0 });
   const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
@@ -120,6 +132,28 @@ export default function DashboardPage() {
   const [insightItems, setInsightItems] = useState(defaultInsightItems);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
+
+async function saveSelection(
+  resumeType: string,
+  resumeId: string | null,
+  coverLetterId: string | null
+) {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return;
+
+  await supabase
+    .from("career_memory")
+    .update({
+      selected_resume_type: resumeType,
+      selected_resume_id: resumeId,
+      selected_cover_letter_id: coverLetterId,
+    })
+    .eq("user_id", user.id);
+}
+
 async function loadDashboard() {
   const cachedJobs = sessionStorage.getItem("recommendedJobs");
   const cachedTime = sessionStorage.getItem("recommendedJobsTime");
@@ -128,10 +162,22 @@ if (cachedJobs) {
   setRecommendedJobs(JSON.parse(cachedJobs));
 }
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  data: { user },
+} = await supabase.auth.getUser();
 
-  if (!user) return;
+if (!user) return;
+
+const { data: resumes } = await supabase
+  .from("resumes")
+  .select("*")
+  .eq("user_id", user.id)
+  .order("created_at", { ascending: false });
+
+const { data: coverLetters } = await supabase
+  .from("cover_letters")
+  .select("*")
+  .eq("user_id", user.id)
+  .order("created_at", { ascending: false });
 
   const { data, error } = await supabase
     .from("career_memory")
@@ -142,9 +188,31 @@ if (cachedJobs) {
   if (error || !data) return;
 
   setCareerMemory(data);
+  setSelectedResume(
+  data.selected_resume_type === "career_memory"
+    ? "career_memory"
+    : data.selected_resume_id || ""
+);
+
+setSelectedCoverLetter(
+  data.selected_cover_letter_id || ""
+);
   setCareerMemoryCompleted(data.required_completed ?? false);
   setMemoryStrength(data.profile_strength ?? 0);
+  setCareerMemory(data);
+setCareerMemoryCompleted(data.required_completed ?? false);
+setMemoryStrength(data.profile_strength ?? 0);
 
+setResumes(resumes ?? []);
+setCoverLetters(coverLetters ?? []);
+if (
+  data.selected_resume_type === "career_memory" ||
+  data.resume_name
+) {
+  setSelectedResume("career_memory");
+}
+
+setSelectedCoverLetter("");
   if (!data.required_completed) return;
 
   setCareerFairs(personalizedCareerFairs);
@@ -492,6 +560,203 @@ useEffect(() => {
                   ))}
                 </div>
               </div>
+                 
+                <div className="mb-6 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+
+<h2 className="text-lg font-bold">
+Resume & Cover Letter
+</h2>
+
+<p className="mt-1 text-sm text-gray-500">
+Choose which resume and cover letter will be used when generating your application package.
+</p>
+
+<div className="mt-6 grid gap-8 md:grid-cols-2">
+
+<div>
+
+<h3 className="mb-3 font-bold">
+Resume <span className="text-red-500">*</span>
+</h3>
+
+{careerMemory?.required_completed && (
+
+<label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3">
+
+<input
+type="radio"
+name="resume"
+checked={selectedResume==="career_memory"}
+onChange={async()=>{
+
+setSelectedResume("career_memory");
+
+await saveSelection(
+"career_memory",
+null,
+selectedCoverLetter || null
+);
+
+}}
+/>
+
+<div>
+
+<p className="font-semibold">
+Career Memory Resume
+</p>
+
+<p className="text-sm text-gray-500">
+  {careerMemory.resume_name || "Career Memory Resume"}
+</p>
+
+</div>
+
+</label>
+
+)}
+
+{resumes.map((resume:any)=>(
+
+<label
+key={resume.id}
+className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3"
+>
+
+<input
+type="radio"
+name="resume"
+checked={selectedResume===resume.id}
+onChange={async()=>{
+
+setSelectedResume(resume.id);
+
+await saveSelection(
+"upload",
+resume.id,
+selectedCoverLetter || null
+);
+
+}}
+/>
+
+<div>
+
+<p className="font-semibold">
+Uploaded Resume
+</p>
+
+<p className="text-sm text-gray-500">
+{resume.file_name}
+</p>
+
+</div>
+
+</label>
+
+))}
+
+</div>
+
+<div>
+
+<h3 className="mb-3 font-bold">
+Cover Letter
+<span className="ml-2 text-xs text-gray-500">
+(Optional)
+</span>
+</h3>
+
+<label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3">
+
+<input
+type="radio"
+name="cover"
+checked={selectedCoverLetter===""}
+onChange={async()=>{
+
+setSelectedCoverLetter("");
+
+await saveSelection(
+selectedResume==="career_memory"
+? "career_memory"
+: "upload",
+
+selectedResume==="career_memory"
+? null
+: selectedResume,
+
+null
+);
+
+}}
+/>
+
+<div>
+
+<p className="font-semibold">
+None
+</p>
+
+<p className="text-sm text-gray-500">
+Generate automatically
+</p>
+
+</div>
+
+</label>
+
+{coverLetters.map((cover:any)=>(
+
+<label
+key={cover.id}
+className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3"
+>
+
+<input
+type="radio"
+name="cover"
+checked={selectedCoverLetter===cover.id}
+onChange={async()=>{
+
+setSelectedCoverLetter(cover.id);
+
+await saveSelection(
+selectedResume==="career_memory"
+? "career_memory"
+: "upload",
+
+selectedResume==="career_memory"
+? null
+: selectedResume,
+
+cover.id
+);
+
+}}
+/>
+
+<div>
+
+<p className="font-semibold">
+Uploaded Cover Letter
+</p>
+
+<p className="text-sm text-gray-500">
+{cover.file_name}
+</p>
+
+</div>
+
+</label>
+
+))}
+
+</div>
+
+</div>
+
+</div> 
 
               <div>
                 <h2 className="mb-4 text-lg font-bold">Quick Actions</h2>

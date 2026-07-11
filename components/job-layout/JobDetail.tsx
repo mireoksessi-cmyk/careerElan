@@ -143,17 +143,16 @@ export default function JobDetail({
 <div className="mt-8 flex flex-wrap gap-3">
 
   <button
-  onClick={saveStatus}
-  disabled={!status}
-  className={`px-4 py-2 rounded-xl font-bold text-white
-    ${
+    onClick={saveStatus}
+    disabled={!status}
+    className={`px-4 py-2 rounded-xl font-bold text-white ${
       !status
         ? "bg-gray-300 cursor-not-allowed"
         : "bg-green-600 hover:bg-green-700"
     }`}
->
-  Save Status
-</button>
+  >
+    Save Status
+  </button>
 
   <button
     onClick={saveInterviewDate}
@@ -163,10 +162,17 @@ export default function JobDetail({
   </button>
 
   <button
-    onClick={downloadPackage}
+    onClick={() => downloadPackage("pdf")}
     className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700"
   >
     Download PDF
+  </button>
+
+  <button
+    onClick={() => downloadPackage("docx")}
+    className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white hover:bg-indigo-700"
+  >
+    Download Word
   </button>
 
 </div>

@@ -1,7 +1,9 @@
 "use client";
-import jsPDF from "jspdf";
-import { Document, Packer, Paragraph } from "docx";
-import { saveAs } from "file-saver";
+
+
+import { exportDocx, exportPdf } from "@/lib/exportDocument";
+
+
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
@@ -76,20 +78,34 @@ const emptyAnalysis: JobAnalysis = {
     applyUrl: "",
   },
 };
-async function getCareerMemory() {
+async function getApplicationData() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) return null;
 
-  const { data } = await supabase
+  const { data: memory } = await supabase
     .from("career_memory")
     .select("*")
     .eq("user_id", user.id)
     .single();
 
-  return data;
+  const { data: resumes } = await supabase
+    .from("resumes")
+    .select("*")
+    .eq("user_id", user.id);
+
+  const { data: covers } = await supabase
+    .from("cover_letters")
+    .select("*")
+    .eq("user_id", user.id);
+
+  return {
+    memory,
+    resumes,
+    covers,
+  };
 }
 
 export default function PasteJobPage() {
@@ -116,6 +132,7 @@ export default function PasteJobPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const autoAnalyzeStartedRef = useRef(false);
+  
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -332,7 +349,8 @@ David Kwak`,
   try {
     setIsGenerating(true);
     setMessage("");
-    const careerMemory = await getCareerMemory();
+    const applicationData =
+await getApplicationData();
     const response = await fetch("/api/generate-package", {
       method: "POST",
       headers: {
@@ -341,7 +359,7 @@ David Kwak`,
       body: JSON.stringify({
         analysis,
         jobText: getOriginalJobSnippet(),
-        careerMemory,
+        applicationData,
       }),
     });
 
@@ -460,18 +478,28 @@ David Kwak`,
   }
 
   async function getSavedApplicationMaterials() {
-  const data = await getCareerMemory();
+  const applicationData = await getApplicationData();
 
-  if (!data) {
+  if (!applicationData) {
     return {
       resume: "",
       coverLetter: "",
     };
   }
 
+  const { memory, resumes, covers } = applicationData;
+
+  const selectedResume = resumes?.find(
+    (r) => r.id === memory?.selected_resume_id
+  );
+
+  const selectedCover = covers?.find(
+    (c) => c.id === memory?.selected_cover_letter_id
+  );
+
   return {
-    resume: data.resume || "",
-    coverLetter: data.cover_letter || "",
+    resume: selectedResume?.original_text || "",
+    coverLetter: selectedCover?.original_text || "",
   };
 }
 
@@ -540,48 +568,18 @@ David Kwak`,
     window.open(targetUrl, "_blank", "noopener,noreferrer");
   }
   
-function downloadPdf() {
-  const pdf = new jsPDF();
-
-  const text =
-    selectedPreview === "resume"
-      ? packageData.resume
-      : selectedPreview === "coverLetter"
-      ? packageData.coverLetter
-      : packageData.emailDraft;
-
-  pdf.setFontSize(10);
-
-  const lines = pdf.splitTextToSize(text, 170);
-
-  pdf.text(lines, 20, 20);
-
-  pdf.save(
-    `${analysis.company}-${selectedPreview}.pdf`
+async function downloadPdf() {
+  await exportPdf(
+    packageData[selectedPreview],
+    `${getFileBaseName()}_${selectedPreview}`
   );
 }
 
+
 async function downloadDocx() {
-  const text = packageData[selectedPreview];
-
-  const doc = new Document({
-    sections: [
-      {
-        children: text.split("\n").map(
-          (line) =>
-            new Paragraph({
-              text: line,
-            })
-        ),
-      },
-    ],
-  });
-
-  const blob = await Packer.toBlob(doc);
-
-  saveAs(
-    blob,
-    `${getFileBaseName()}_${selectedPreview}.docx`
+  await exportDocx(
+    packageData[selectedPreview],
+    `${getFileBaseName()}_${selectedPreview}`
   );
 }
 

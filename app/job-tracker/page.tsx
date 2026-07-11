@@ -9,7 +9,7 @@ import Header from "@/components/job-layout/Header";
 import Sidebar from "@/components/job-layout/Sidebar";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import jsPDF from "jspdf";
+import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import A4Preview from "./A4Preview";
 
 export default function JobTrackerPage() {
@@ -195,66 +195,57 @@ async function deleteApplication() {
   loadApplications();
 }
 
-function downloadPackage() {
+async function downloadPackage(type: "docx" | "pdf") {
   if (!selectedApplication) return;
 
-  const pdf = new jsPDF();
+  const baseName = `${selectedApplication.company}_${selectedApplication.job_title}`;
 
-  let y = 20;
+  if (selectedTab === "resume") {
+    if (type === "docx") {
+      await exportDocx(
+        selectedApplication.resume_text || "",
+        `${baseName}_Resume`
+      );
+    } else {
+      await exportPdf(
+        selectedApplication.resume_text || "",
+        `${baseName}_Resume`
+      );
+    }
+    return;
+  }
 
-  
+  if (selectedTab === "coverLetter") {
+    if (type === "docx") {
+      await exportDocx(
+        selectedApplication.cover_letter_text || "",
+        `${baseName}_Cover_Letter`
+      );
+    } else {
+      await exportPdf(
+        selectedApplication.cover_letter_text || "",
+        `${baseName}_Cover_Letter`
+      );
+    }
+    return;
+  }
 
-  pdf.setFontSize(10);
-
-  pdf.text(
-    selectedApplication.resume_text || "No Resume",
-    20,
-    y,
+  // Email Draft는 TXT
+  const blob = new Blob(
+    [selectedApplication.email_draft || ""],
     {
-      maxWidth: 170,
+      type: "text/plain;charset=utf-8",
     }
   );
 
-  pdf.addPage();
+  const url = URL.createObjectURL(blob);
 
-y = 20;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${baseName}_Email_Draft.txt`;
+  a.click();
 
-pdf.setFontSize(10);
-
-  pdf.text(
-    selectedApplication.cover_letter_text ||
-      "No Cover Letter",
-    20,
-    y,
-    {
-      maxWidth: 170,
-    }
-  );
-
-  pdf.addPage();
-
-  y = 20;
-
-  pdf.setFontSize(14);
-  pdf.text("Email Draft", 20, y);
-
-  y += 10;
-
-  pdf.setFontSize(10);
-
-  pdf.text(
-    selectedApplication.email_draft ||
-      "No Email Draft",
-    20,
-    y,
-    {
-      maxWidth: 170,
-    }
-  );
-
-  pdf.save(
-    `${selectedApplication.company}-Package.pdf`
-  );
+  URL.revokeObjectURL(url);
 }
 
 return (

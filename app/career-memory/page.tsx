@@ -312,7 +312,7 @@ setProfileStrength(data.profile_strength ?? 0);
       font: memoryData.font,
       layout: memoryData.layout,
       tone: memoryData.coverLetterTone,
-
+      resume_name: "Career Memory Resume",
       profile_strength: memoryStrength(),
       required_completed:
   hasPersonalInfo() &&
@@ -460,6 +460,9 @@ if (uploadError) {
   });
 
   const result = await response.json();
+  console.log("RESULT =", result);
+console.log("ORIGINAL =", result.data?.originalText);
+console.log("TYPE =", typeof result.data?.originalText);
   setUploadProgress(47);
   await new Promise((r) => setTimeout(r, 250));
   if (result.success) {

@@ -255,7 +255,9 @@ Output only the reconstructed resume.
 
 resumeText =
   cleanedResume.choices[0].message.content || resumeText;
+console.log("======== RESUME ========");
 console.log(resumeText);
+console.log("======== END ========");
 
 
 
@@ -499,28 +501,31 @@ parsed.projects = normalizeProjects(parsed.projects);
   );
 }
 
+console.log("resumeText length =", resumeText?.length);
+console.log("resumeText preview =", resumeText?.substring(0, 300));
+
     return NextResponse.json({
-      success: true,
-      data: {
-        firstName: parsed.firstName || "",
-        lastName: parsed.lastName || "",
-        email: parsed.email || "",
-        phone: parsed.phone || "",
-        location: parsed.location || "",
-        linkedin: parsed.linkedin || "",
-        headline: parsed.headline || "",
-        summary: parsed.summary || "",
-        skills: parsed.skills || "",
-        education: parsed.education || [],
-        workExperience: parsed.workExperience || [],
-        volunteerExperience:
-          parsed.volunteerExperience || [],
-        languages: parsed.languages || [],
-        certifications:
-          parsed.certifications || [],
-        projects: parsed.projects || [],
-      },
-    });
+  success: true,
+  data: {
+    firstName: parsed.firstName || "",
+    lastName: parsed.lastName || "",
+    email: parsed.email || "",
+    phone: parsed.phone || "",
+    location: parsed.location || "",
+    linkedin: parsed.linkedin || "",
+    headline: parsed.headline || "",
+    summary: parsed.summary || "",
+    skills: parsed.skills || [],
+    education: parsed.education || [],
+    workExperience: parsed.workExperience || [],
+    volunteerExperience: parsed.volunteerExperience || [],
+    languages: parsed.languages || [],
+    certifications: parsed.certifications || [],
+    projects: parsed.projects || [],
+
+    originalText: resumeText,   // ⭐ 이 한 줄 추가
+  },
+});
      } catch (error) {
     console.error("Resume Parser Error:", error);
 
