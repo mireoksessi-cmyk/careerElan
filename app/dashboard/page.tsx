@@ -347,22 +347,21 @@ async function loadUserName() {
 }
 
 useEffect(() => {
-  loadProfile();
-}, []);
-useEffect(() => {
+  if (user) {
+    loadUserName();
+    loadProfile();
+    loadDashboard();
+  }
+
   const tourSeen = localStorage.getItem("careerElanTourSeen");
 
   if (!tourSeen) {
     setShowTour(true);
   }
+}, [user]);
 
-  loadDashboard();
-}, []);
-  
 useEffect(() => {
   async function loadStats() {
-   
-
     if (!user) return;
 
     const { count: packages } = await supabase
@@ -390,8 +389,10 @@ useEffect(() => {
     });
   }
 
-  loadStats();
-}, []);
+  if (user) {
+    loadStats();
+  }
+}, [user]);
   
   
 
