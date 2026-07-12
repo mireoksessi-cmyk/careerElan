@@ -1,4 +1,5 @@
 "use client";
+
 import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -215,27 +216,23 @@ async function loadDashboard() {
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
-  console.log("6. coverError =", coverError);
-  console.log("7. coverLetters =", coverLetters);
+  console.log("===== loadDashboard =====");
 
-  const {
-    data,
-    error,
-  } = await supabase
-    .from("career_memory")
-    .select("*")
-    .eq("user_id", user.id)
-    .single();
+const { data, error } = await supabase
+  .from("career_memory")
+  .select("*")
+  .eq("user_id", user.id)
+  .single();
 
-  console.log("8. careerMemory =", data);
-  console.log("9. careerError =", error);
+console.log("career_memory data =", data);
+console.log("career_memory error =", error);
 
-  if (error || !data) {
-    console.log("❌ RETURN HERE (career_memory)");
-    return;
-  }
+if (error || !data) {
+  console.error("STOPPED HERE");
+  return;
+}
 
-  console.log("10. required_completed =", data.required_completed);
+console.log("required_completed =", data.required_completed);
 
   setCareerMemory(data);
 
