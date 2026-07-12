@@ -18,6 +18,10 @@ export function AuthProvider({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    supabase.auth.getSession().then(({ data, error }) => {
+  console.log("SESSION =", data);
+  console.log("SESSION ERROR =", error);
+});
     supabase.auth.getUser().then(({ data, error }) => {
   console.log("GET USER =", data.user);
   console.log("GET USER ERROR =", error);
