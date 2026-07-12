@@ -108,6 +108,9 @@ function getMenuIcon(item: string) {
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  console.log("USER =", user);
+console.log("LOADING =", loading);
+
   const [careerMemoryCompleted, setCareerMemoryCompleted] = useState(false);
   const [careerMemory, setCareerMemory] = useState<any>(null); const [memoryStrength, setMemoryStrength] = useState(0);
   const [resumes, setResumes] = useState<any[]>([]);
@@ -171,84 +174,126 @@ async function saveSelection(
 }
 
 async function loadDashboard() {
+
+  console.log("===== loadDashboard START =====");
+
   const cachedJobs = sessionStorage.getItem("recommendedJobs");
   const cachedTime = sessionStorage.getItem("recommendedJobsTime");
 
-if (cachedJobs) {
-  setRecommendedJobs(JSON.parse(cachedJobs));
-}
- 
+  console.log("1. cachedJobs =", !!cachedJobs);
+  console.log("2. cachedTime =", cachedTime);
 
-if (!user) return;
+  if (cachedJobs) {
+    setRecommendedJobs(JSON.parse(cachedJobs));
+  }
 
-const { data: resumes } = await supabase
-  .from("resumes")
-  .select("*")
-  .eq("user_id", user.id)
-  .order("created_at", { ascending: false });
+  if (!user) {
+    console.log("❌ NO USER");
+    return;
+  }
 
-const { data: coverLetters } = await supabase
-  .from("cover_letters")
-  .select("*")
-  .eq("user_id", user.id)
-  .order("created_at", { ascending: false });
+  console.log("3. USER ID =", user.id);
 
-  const { data, error } = await supabase
+  const {
+    data: resumes,
+    error: resumeError,
+  } = await supabase
+    .from("resumes")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  console.log("4. resumeError =", resumeError);
+  console.log("5. resumes =", resumes);
+
+  const {
+    data: coverLetters,
+    error: coverError,
+  } = await supabase
+    .from("cover_letters")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  console.log("6. coverError =", coverError);
+  console.log("7. coverLetters =", coverLetters);
+
+  const {
+    data,
+    error,
+  } = await supabase
     .from("career_memory")
     .select("*")
     .eq("user_id", user.id)
     .single();
 
-  if (error || !data) return;
+  console.log("8. careerMemory =", data);
+  console.log("9. careerError =", error);
+
+  if (error || !data) {
+    console.log("❌ RETURN HERE (career_memory)");
+    return;
+  }
+
+  console.log("10. required_completed =", data.required_completed);
 
   setCareerMemory(data);
-  setSelectedResume(
-  data.selected_resume_type === "career_memory"
-    ? "career_memory"
-    : data.selected_resume_id || ""
-);
 
-setSelectedCoverLetter(
-  data.selected_cover_letter_id || ""
-);
+  setSelectedResume(
+    data.selected_resume_type === "career_memory"
+      ? "career_memory"
+      : data.selected_resume_id || ""
+  );
+
+  setSelectedCoverLetter(
+    data.selected_cover_letter_id || ""
+  );
+
   setCareerMemoryCompleted(data.required_completed ?? false);
   setMemoryStrength(data.profile_strength ?? 0);
-  setCareerMemory(data);
-setCareerMemoryCompleted(data.required_completed ?? false);
-setMemoryStrength(data.profile_strength ?? 0);
 
-setResumes(resumes ?? []);
-setCoverLetters(coverLetters ?? []);
-if (
-  data.selected_resume_type === "career_memory" ||
-  data.resume_name
-) {
-  setSelectedResume("career_memory");
-}
+  setResumes(resumes ?? []);
+  setCoverLetters(coverLetters ?? []);
 
-setSelectedCoverLetter("");
-  if (!data.required_completed) return;
+  if (
+    data.selected_resume_type === "career_memory" ||
+    data.resume_name
+  ) {
+    setSelectedResume("career_memory");
+  }
+
+  setSelectedCoverLetter("");
+
+  if (!data.required_completed) {
+    console.log("❌ RETURN HERE (required_completed = false)");
+    return;
+  }
+
+  console.log("11. ABOUT TO FETCH");
 
   setCareerFairs(personalizedCareerFairs);
   setInsightItems(personalizedInsightItems);
 
-  console.log("ABOUT TO FETCH");
+  if (
+    !cachedJobs ||
+    !cachedTime ||
+    Date.now() - Number(cachedTime) > 1000 * 60 * 60
+  ) {
+    console.log("12. setLoadingJobs(true)");
+    setLoadingJobs(true);
+  }
 
- if (
-  !cachedJobs ||
-  !cachedTime ||
-  Date.now() - Number(cachedTime) > 1000 * 60 * 60
-) {
-  setLoadingJobs(true);
-}
+  console.log("13. FETCH START");
 
-fetch("/api/recommend-jobs", {
+  fetch("/api/recommend-jobs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(data),
   })
+
+  // ↓↓↓ 여기부터는 네 기존 .then(...) 코드 그대로 ↓↓↓
   
   .then(async (res) => {
     const data = await res.json();
@@ -329,11 +374,16 @@ useEffect(() => {
 async function loadUserName() {
   if (!user) return;
 
-  const { data } = await supabase
+  console.log("USER =", user);
+
+  const { data, error } = await supabase
     .from("profiles")
     .select("full_name")
     .eq("id", user.id)
     .single();
+
+  console.log("PROFILE DATA =", data);
+  console.log("PROFILE ERROR =", error);
 
   if (data?.full_name) {
     setName(data.full_name);

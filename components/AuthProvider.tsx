@@ -18,17 +18,23 @@ export function AuthProvider({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
-      setLoading(false);
-    });
+    supabase.auth.getUser().then(({ data, error }) => {
+  console.log("GET USER =", data.user);
+  console.log("GET USER ERROR =", error);
+
+  setUser(data.user);
+  setLoading(false);
+});
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
-    });
+    } = supabase.auth.onAuthStateChange((event, session) => {
+  console.log("AUTH EVENT =", event);
+  console.log("SESSION =", session);
 
+  setUser(session?.user ?? null);
+});
+     
     return () => subscription.unsubscribe();
   }, []);
 
