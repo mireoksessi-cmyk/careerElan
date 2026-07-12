@@ -109,6 +109,9 @@ function getMenuIcon(item: string) {
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  if (loading) {
+  return <div>Loading...</div>;
+}
   console.log("USER =", user);
 console.log("LOADING =", loading);
 
@@ -394,39 +397,41 @@ async function loadUserName() {
 }
 
 useEffect(() => {
-  if (user) {
-    loadUserName();
-    loadProfile();
-    loadDashboard();
-  }
+  if (loading) return;
+  if (!user) return;
+
+  loadUserName();
+  loadProfile();
+  loadDashboard();
 
   const tourSeen = localStorage.getItem("careerElanTourSeen");
 
   if (!tourSeen) {
     setShowTour(true);
   }
-}, [user]);
+}, [loading, user]);
 
 useEffect(() => {
+  if (loading) return;
+  if (!user) return;
+ 
   async function loadStats() {
-    if (!user) return;
-
     const { count: packages } = await supabase
       .from("applications")
       .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
+      .eq("user_id", user!.id)
       .eq("status", "package_generated");
 
     const { count: applications } = await supabase
       .from("applications")
       .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
+      .eq("user_id", user!.id)
       .eq("status", "applied");
 
     const { count: interviews } = await supabase
       .from("applications")
       .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
+      .eq("user_id", user!.id)
       .eq("status", "interview");
 
     setStats({
@@ -436,10 +441,8 @@ useEffect(() => {
     });
   }
 
-  if (user) {
-    loadStats();
-  }
-}, [user]);
+  loadStats();
+}, [loading, user]);
   
   
 
