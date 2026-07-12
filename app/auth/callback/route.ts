@@ -3,14 +3,14 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
-  const requestUrl = new URL(request.url);
-  const code = requestUrl.searchParams.get("code");
-
-  const cookieStore = await cookies();
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
 
   const response = NextResponse.redirect(
     new URL("/dashboard", request.url)
   );
+
+  const cookieStore = await cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,12 +22,6 @@ export async function GET(request: Request) {
         },
 
         set(name: string, value: string, options: any) {
-          cookieStore.set({
-            name,
-            value,
-            ...options,
-          });
-
           response.cookies.set({
             name,
             value,
@@ -36,18 +30,11 @@ export async function GET(request: Request) {
         },
 
         remove(name: string, options: any) {
-          cookieStore.set({
-            name,
-            value: "",
-            ...options,
-            maxAge: 0,
-          });
-
           response.cookies.set({
             name,
             value: "",
-            ...options,
             maxAge: 0,
+            ...options,
           });
         },
       },
