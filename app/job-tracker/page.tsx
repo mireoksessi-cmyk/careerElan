@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import A4Preview from "./A4Preview";
+import { useLogin } from "@/lib/auth/LoginManager";
 
 export default function JobTrackerPage() {
     
@@ -23,7 +24,7 @@ export default function JobTrackerPage() {
   const [status, setStatus] = useState("");
   const [interviewDate, setInterviewDate] = useState("");
   const total = applications.length;
-
+  const { user } = useLogin();
 const applied = applications.filter(
   (a) => a.status === "Applied"
 ).length;
@@ -48,20 +49,15 @@ const [filterStatus, setFilterStatus] =
   useState("All");
 
   useEffect(() => {
-    loadApplications();
-  }, []);
+  if (!user) return;
+
+  loadApplications();
+}, [user]);
 
   async function loadApplications() {
   setLoading(true);
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  console.log("USER =", user);
-
-  const session = await supabase.auth.getSession();
-  console.log("SESSION =", session);
+ 
 
   if (!user) {
     setLoading(false);

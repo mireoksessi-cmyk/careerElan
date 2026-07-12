@@ -3,7 +3,7 @@
 
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
 
-import { useAuth } from "@/components/AuthProvider";
+import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
@@ -81,7 +81,7 @@ const emptyAnalysis: JobAnalysis = {
 
 
 export default function PasteJobPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useLogin();
   async function getApplicationData() {
   
 

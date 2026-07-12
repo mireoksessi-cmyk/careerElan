@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/components/AuthProvider";
+import { useLogin } from "@/lib/auth/LoginManager";
 
 const menuItems = [
   "Dashboard",
@@ -36,29 +36,7 @@ type JobItem = {
   fallback?: boolean;
 };
 
-const neutralJobs: JobItem[] = [
-  { title: "Administrative Assistant", company: "Office Support Role", location: "Toronto, ON", type: "Full-time", tags: ["Office", "Admin"], matched: ["Communication", "Organization", "Microsoft Office"], missing: ["Upload resume for deeper match"] },
-  { title: "Customer Service Representative", company: "Client Service Role", location: "Toronto, ON", type: "Part-time", tags: ["Customer Service", "Communication"], matched: ["Customer service", "Phone support", "Problem solving"], missing: ["Add work history for better match"] },
-  { title: "Office Clerk", company: "Entry-Level Office Role", location: "Toronto, ON", type: "Full-time", tags: ["Data Entry", "Organization"], matched: ["Data entry", "Filing", "Document organization"], missing: ["Add skills to personalize"] },
-  { title: "Receptionist", company: "Front Desk Role", location: "Toronto, ON", type: "Part-time", tags: ["Reception", "Client Service"], matched: ["Greeting clients", "Scheduling", "Email communication"], missing: ["Add language skills"] },
-  { title: "Data Entry Clerk", company: "General Office Role", location: "Remote / Hybrid", type: "Remote", tags: ["Data Entry", "Remote"], matched: ["Typing accuracy", "File organization", "Attention to detail"], missing: ["Upload resume for better match"] },
-  { title: "Legal Assistant", company: "Entry-Level Legal Role", location: "Toronto, ON", type: "Full-time", tags: ["Legal", "Admin"], matched: ["Document handling", "Client communication", "Office support"], missing: ["Add education details"] },
-  { title: "Program Assistant", company: "Non-Profit Organization", location: "Toronto, ON", type: "Part-time", tags: ["Program", "Admin"], matched: ["Event support", "Volunteer coordination", "Client service"], missing: ["Add project details"] },
-  { title: "HR Assistant", company: "Human Resources Role", location: "Toronto, ON", type: "Hybrid", tags: ["HR", "Admin"], matched: ["Email communication", "Organization", "Office support"], missing: ["Add HR-related experience"] },
-  { title: "Client Intake Assistant", company: "Community Service Role", location: "Toronto, ON", type: "Full-time", tags: ["Client Intake", "Support"], matched: ["Client communication", "Documentation", "Customer service"], missing: ["Add intake experience"] },
-];
 
-const personalizedJobs: JobItem[] = [
-  { title: "Legal Assistant", company: "TD Bank", location: "Toronto, ON", type: "Full-time", tags: ["Legal", "Admin"], match: "94%", matched: ["Law Clerk education", "Administrative experience", "Outlook & email", "Customer service"], missing: ["Clio", "Legal research experience"] },
-  { title: "Administrative Assistant", company: "RBC", location: "Toronto, ON", type: "Full-time", tags: ["Office", "Client Service"], match: "91%", matched: ["Excel skills", "Scheduling", "Email communication", "Volunteer coordination"], missing: ["SAP experience"] },
-  { title: "Law Clerk Intern", company: "BMO", location: "Toronto, ON", type: "Internship", tags: ["Law Clerk", "Research"], match: "90%", matched: ["Law Clerk program", "Document preparation", "Research & analysis", "Client communication"], missing: ["Additional language skills"] },
-  { title: "Customer Service Representative", company: "Scotiabank", location: "Toronto, ON", type: "Part-time", tags: ["Customer Service", "Banking"], match: "88%", matched: ["Customer service", "Phone & email support", "Problem solving", "Bilingual Korean/English"], missing: ["Additional language skills"] },
-  { title: "Office Clerk", company: "CIBC", location: "Toronto, ON", type: "Full-time", tags: ["Data Entry", "Office"], match: "87%", matched: ["Data entry experience", "Filing & documents", "Microsoft Office"], missing: ["Accounting software"] },
-  { title: "Data Entry Clerk", company: "OMERS", location: "Toronto, ON", type: "Remote", tags: ["Data Entry", "Remote"], match: "85%", matched: ["Data accuracy", "Microsoft Excel", "Attention to detail"], missing: ["Database experience"] },
-  { title: "Legal Receptionist", company: "Toronto Legal Clinic", location: "Toronto, ON", type: "Full-time", tags: ["Legal", "Reception"], match: "83%", matched: ["Client intake", "Phone support", "Document handling"], missing: ["Legal clinic experience"] },
-  { title: "Program Coordinator", company: "Community Agency", location: "Toronto, ON", type: "Part-time", tags: ["Program", "Non-profit"], match: "82%", matched: ["Event coordination", "Google Forms", "Client communication"], missing: ["Grant reporting"] },
-  { title: "Government Clerk", company: "Ontario Public Service", location: "Toronto, ON", type: "Full-time", tags: ["Government", "Admin"], match: "80%", matched: ["Documentation", "Data entry", "Client service"], missing: ["Government experience"] },
-];
 
 const defaultInsightItems = [
   { name: "Add your target roles", level: "Recommended" },
@@ -108,26 +86,22 @@ function getMenuIcon(item: string) {
 }
 
 export default function DashboardPage() {
-  const { user, loading } = useAuth();
-  if (loading) {
-  return <div>Loading...</div>;
-}
-  console.log("USER =", user);
-console.log("LOADING =", loading);
+ const {
+  user,
+  loading,
+  profile,
+  careerMemory,
+  resumes,
+  coverLetters,
+} = useLogin();
+  
+  
 
-  const [careerMemoryCompleted, setCareerMemoryCompleted] = useState(false);
-  const [careerMemory, setCareerMemory] = useState<any>(null); const [memoryStrength, setMemoryStrength] = useState(0);
-  const [resumes, setResumes] = useState<any[]>([]);
-const [coverLetters, setCoverLetters] = useState<any[]>([]);
-const [selectedResumeType, setSelectedResumeType] =
-useState("");
-const [name, setName] = useState("Guest");
+  const careerMemoryCompleted =
+careerMemory?.required_completed ?? false;
+  const memoryStrength =
+careerMemory?.profile_strength ?? 0;
 
-const [selectedResumeId, setSelectedResumeId] =
-useState("");
-
-const [selectedCoverLetterId, setSelectedCoverLetterId] =
-useState("");
 const [selectedResume, setSelectedResume] = useState("");
 const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
   const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
@@ -142,21 +116,7 @@ const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
 
-  async function loadProfile() {
- 
-
-  if (!user) return;
-
-  const { data } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (data?.full_name) {
-    setName(data.full_name);
-  }
-}
+  
 
 async function saveSelection(
   resumeType: string,
@@ -179,13 +139,10 @@ async function saveSelection(
 
 async function loadDashboard() {
 
-  console.log("===== loadDashboard START =====");
+  
 
   const cachedJobs = sessionStorage.getItem("recommendedJobs");
   const cachedTime = sessionStorage.getItem("recommendedJobsTime");
-
-  console.log("1. cachedJobs =", !!cachedJobs);
-  console.log("2. cachedTime =", cachedTime);
 
   if (cachedJobs) {
     setRecommendedJobs(JSON.parse(cachedJobs));
@@ -198,46 +155,15 @@ async function loadDashboard() {
 
   console.log("3. USER ID =", user.id);
 
-  const {
-    data: resumes,
-    error: resumeError,
-  } = await supabase
-    .from("resumes")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+ 
+const data = careerMemory;
 
-  console.log("4. resumeError =", resumeError);
-  console.log("5. resumes =", resumes);
+if (!data) return;
 
-  const {
-    data: coverLetters,
-    error: coverError,
-  } = await supabase
-    .from("cover_letters")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
 
-  console.log("===== loadDashboard =====");
 
-const { data, error } = await supabase
-  .from("career_memory")
-  .select("*")
-  .eq("user_id", user.id)
-  .single();
 
-console.log("career_memory data =", data);
-console.log("career_memory error =", error);
-
-if (error || !data) {
-  console.error("STOPPED HERE");
-  return;
-}
-
-console.log("required_completed =", data.required_completed);
-
-  setCareerMemory(data);
+  
 
   setSelectedResume(
     data.selected_resume_type === "career_memory"
@@ -249,27 +175,6 @@ console.log("required_completed =", data.required_completed);
     data.selected_cover_letter_id || ""
   );
 
-  setCareerMemoryCompleted(data.required_completed ?? false);
-  setMemoryStrength(data.profile_strength ?? 0);
-
-  setResumes(resumes ?? []);
-  setCoverLetters(coverLetters ?? []);
-
-  if (
-    data.selected_resume_type === "career_memory" ||
-    data.resume_name
-  ) {
-    setSelectedResume("career_memory");
-  }
-
-  setSelectedCoverLetter("");
-
-  if (!data.required_completed) {
-    console.log("❌ RETURN HERE (required_completed = false)");
-    return;
-  }
-
-  console.log("11. ABOUT TO FETCH");
 
   setCareerFairs(personalizedCareerFairs);
   setInsightItems(personalizedInsightItems);
@@ -365,43 +270,15 @@ console.log("required_completed =", data.required_completed);
   setLoadingJobs(false);
 });
 }
-useEffect(() => {
-  if (!user) return;
 
-  loadUserName();
-}, [user]);
 
-async function loadUserName() {
-  if (!user) return;
 
-  console.log("USER =", user);
-
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", user.id)
-    .single();
-
-  console.log("PROFILE DATA =", data);
-  console.log("PROFILE ERROR =", error);
-
-  if (data?.full_name) {
-    setName(data.full_name);
-  } else {
-    setName(
-      user.user_metadata?.given_name ||
-      user.user_metadata?.full_name ||
-      "Guest"
-    );
-  }
-}
 
 useEffect(() => {
   if (loading) return;
   if (!user) return;
+  if (!careerMemory) return;
 
-  loadUserName();
-  loadProfile();
   loadDashboard();
 
   const tourSeen = localStorage.getItem("careerElanTourSeen");
@@ -409,7 +286,7 @@ useEffect(() => {
   if (!tourSeen) {
     setShowTour(true);
   }
-}, [loading, user]);
+}, [loading, user, careerMemory]);
 
 useEffect(() => {
   if (loading) return;
@@ -454,9 +331,7 @@ useEffect(() => {
   function handleCareerFairSearch() {
     setCareerFairs(careerMemoryCompleted ? personalizedCareerFairs : defaultCareerFairs);
   }
-   console.log("recommendedJobs state =", recommendedJobs);
-   console.log("recommendedJobs length =", recommendedJobs.length);
-   console.table(recommendedJobs);
+   
   return (
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       {showPackageChoice && (
@@ -597,7 +472,7 @@ useEffect(() => {
           <header className="flex items-center justify-between px-8 py-6">
             <div>
              <h1 className="text-2xl font-extrabold">
-  Good morning, {name}! 👋
+  Good morning, {profile?.full_name || "Guest"}! 👋
 </h1>
               <p className="mt-1 text-sm text-gray-500">
                 Find jobs faster. Generate a tailored package in minutes.{" "}
@@ -617,10 +492,10 @@ useEffect(() => {
 
               <a href="/settings" className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-blue-50">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
-  {name.charAt(0).toUpperCase()}
+  {(profile?.full_name || "Guest").charAt(0).toUpperCase()}
 </div>
                 <div>
-                  <p className="text-sm font-bold">{name}</p>
+                  <p className="text-sm font-bold">{profile?.full_name || "Guest"}</p>
                  <p className="text-sm text-gray-500">
   User
 </p>

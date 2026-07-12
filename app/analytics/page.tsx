@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/components/AuthProvider";
+import { useLogin } from "@/lib/auth/LoginManager";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
 
@@ -15,36 +15,33 @@ import BestResume from "@/components/analytics/BestResume";
 import AiSummary from "@/components/analytics/AiSummary";
 
 export default function AnalyticsPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useLogin();
   const [applications, setApplications] = useState<any[]>([]);
   const [userId, setUserId] = useState("");
 
   useEffect(() => {
-    async function init() {
-     
+  if (!user) return;
 
-      if (!user) return;
+  setUserId(user.id);
 
-      setUserId(user.id);
+  loadApplications(user.id);
+  
 
-      loadApplications();
-    }
+}, [user]);
 
-    init();
-  }, []);
+  async function loadApplications(userId: string) {
+  const { data, error } = await supabase
+    .from("applications")
+    .select("*")
+    .eq("user_id", userId);
 
-  async function loadApplications() {
-    const { data, error } = await supabase
-      .from("applications")
-      .select("*");
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    setApplications(data ?? []);
+  if (error) {
+    console.error(error);
+    return;
   }
+
+  setApplications(data ?? []);
+}
 
   const total = applications.length;
 
@@ -96,6 +93,10 @@ export default function AnalyticsPage() {
   const topMissingSkills = applications.flatMap(
     (a) => a.ai_missing || []
   );
+
+if (loading) {
+  return <div>Loading...</div>;
+}
 
   return (
     <main className="min-h-screen bg-[#f6fbff]">

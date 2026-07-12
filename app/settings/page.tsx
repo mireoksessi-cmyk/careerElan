@@ -5,10 +5,10 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
-import { useAuth } from "@/components/AuthProvider";
+import { useLogin } from "@/lib/auth/LoginManager";
 
 export default function SettingsPage() {
-  const { user, loading } = useAuth();
+ const { user, loading } = useLogin();
 
   const router = useRouter();
 

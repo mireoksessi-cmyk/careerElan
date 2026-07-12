@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useLogin } from "@/lib/auth/LoginManager";
 
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
@@ -14,6 +15,7 @@ const menuItems = [
 ];
 
 export default function CreatePackagePage() {
+  const { profile } = useLogin();
   return (
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       <div className="flex min-h-screen">
@@ -74,7 +76,7 @@ export default function CreatePackagePage() {
                 href="/settings"
                 className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white"
               >
-                D
+                {(profile?.full_name || "Guest").charAt(0).toUpperCase()}
               </a>
             </div>
           </header>

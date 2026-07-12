@@ -4,7 +4,7 @@ import Image from "next/image";
 import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/components/AuthProvider";
+import { useLogin } from "@/lib/auth/LoginManager";
 const steps = [
   { title: "Personal Information", description: "Required. Your contact information and professional summary used across every application.", required: true },
   { title: "Education", description: "Optional. Schools, degrees, GPA, coursework, and academic achievements that strengthen your profile.", required: false },
@@ -78,7 +78,7 @@ type ImportStage = "idle" | "uploaded" | "parsing" | "parsed" | "preview";
 type UploadedResumeKind = "none" | "pdf" | "txt" | "docx" | "other";
 
 export default function CareerMemoryPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useLogin();
   const router = useRouter();
   const [mode, setMode] = useState<"start" | "import" | "build">("start");
   const [currentStep, setCurrentStep] = useState(0);
@@ -172,8 +172,10 @@ setProfileStrength(data.profile_strength ?? 0);
     };
   }, [uploadedResumeUrl]);
   useEffect(() => {
-  loadCareerMemory();
- }, []);
+  if (user) {
+    loadCareerMemory();
+  }
+}, [user]);
 
   function updateMemory(field: keyof CareerMemoryData, value: string | boolean) {
     setMemoryData((prev) => ({ ...prev, [field]: value }));
@@ -345,13 +347,7 @@ if (error) {
     
     await persistMemory();
 router.push("/dashboard");
-    async function saveCoverLetter() {
-  persistMemory();
-
-  alert("Cover Letter saved.");
-
-  continueToDashboard();
-}
+    
   }
 
   function handleProtectedNav(item: string) {
@@ -368,8 +364,8 @@ router.push("/dashboard");
     router.push(path);
   }
 
-  function handleSaveAndContinue() {
-    persistMemory();
+  async function handleSaveAndContinue() {
+  await persistMemory();
     if (canUseService() && [0, 2, 3].includes(currentStep)) {
       const goNow = window.confirm("Required Career Memory sections are complete. Continue to Dashboard now?");
       if (goNow) {
@@ -613,10 +609,10 @@ if (error) {
     return "border-slate-800 text-slate-800";
   }
 
-  function continueToImportPreview() {
-    persistMemory();
-    setImportStage("preview");
-  }
+  async function continueToImportPreview() {
+  await persistMemory();
+  setImportStage("preview");
+}
 
   function renderStyleSettings() {
     return (
@@ -1282,8 +1278,8 @@ if (template === "Creative") {
             isUnlocked={isUnlocked}
             onBuild={() => setMode("build")}
             onContinue={continueToDashboard}
-            onSaveCoverLetter={() => {
-persistMemory();
+            onSaveCoverLetter={async () => {
+  await persistMemory();
   alert("Cover Letter saved.");
   continueToDashboard();
 }}

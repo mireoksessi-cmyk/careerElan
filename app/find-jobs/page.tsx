@@ -1,5 +1,5 @@
 "use client";
-
+import { useLogin } from "@/lib/auth/LoginManager";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -146,13 +146,14 @@ missing: hasCareerMemory
 
 export default function FindJobsPage() {
   const router = useRouter();
-
+const { careerMemory } = useLogin();
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState("Canada");
   const [jobType, setJobType] = useState("All");
   const [category, setCategory] = useState("All");
   const [page, setPage] = useState(1);
-  const [hasCareerMemory, setHasCareerMemory] = useState(false);
+ const hasCareerMemory =
+  careerMemory?.required_completed ?? false;
 
   const [externalJobs, setExternalJobs] = useState<DisplayJob[]>([]);
   const [externalMode, setExternalMode] = useState(false);
@@ -160,16 +161,7 @@ export default function FindJobsPage() {
   const [message, setMessage] = useState("");
   const [externalTotalPages, setExternalTotalPages] = useState(1);
 
-  useEffect(() => {
-  const saved = localStorage.getItem("careerMemoryData");
-  setHasCareerMemory(Boolean(saved));
-
-  console.log(
-    "recommendedJobs =",
-    sessionStorage.getItem("recommendedJobs")
-  );
-}, []);
-
+ 
   useEffect(() => {
     const saved = sessionStorage.getItem("findJobsState");
     if (!saved) return;
