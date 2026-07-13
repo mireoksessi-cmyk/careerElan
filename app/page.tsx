@@ -60,30 +60,64 @@ export default function HomePage() {
   setLoading(true);
   setMessage("");
 
-  const { data, error: profileError } = await supabase
-    .from("profiles")
-    .select("email")
-    .eq("login_id", loginEmail)
-    .single();
+  try {
+    // 1. 사용자가 입력한 로그인 ID로 실제 이메일 찾기
+    const { data: profileData, error: profileError } =
+      await supabase
+        .from("profiles")
+        .select("email")
+        .eq("login_id", loginEmail.trim())
+        .maybeSingle();
 
-  if (profileError || !data) {
-    setMessage("Invalid ID or password.");
+    if (profileError || !profileData?.email) {
+      setMessage("Invalid ID or password.");
+      return;
+    }
+
+    // 2. Supabase 이메일 로그인
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: profileData.email,
+        password: loginPassword,
+      });
+
+    if (authError || !authData.user) {
+      setMessage("Invalid ID or password.");
+      return;
+    }
+
+    // 3. Career Memory 완료 여부 확인
+    const { data: memory, error: memoryError } =
+      await supabase
+        .from("career_memory")
+        .select("required_completed")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
+
+    if (memoryError) {
+      console.error(
+        "CAREER MEMORY LOGIN CHECK ERROR =",
+        memoryError
+      );
+    }
+
+    // 4. 완료 여부에 따라 바로 분기
+    if (memory?.required_completed === true) {
+      router.replace("/dashboard");
+    } else {
+      router.replace("/career-memory");
+    }
+
+    router.refresh();
+  } catch (error) {
+    console.error("LOGIN ERROR =", error);
+
+    setMessage(
+      "Unable to sign in. Please try again."
+    );
+  } finally {
     setLoading(false);
-    return;
   }
-
-  const { error } = await supabase.auth.signInWithPassword({
-    email: data.email,
-    password: loginPassword,
-  });
-
-  if (error) {
-    setMessage("Invalid ID or password.");
-    setLoading(false);
-    return;
-  }
-
-  router.push("/dashboard");
 }
 
   async function handleEmailSignup() {

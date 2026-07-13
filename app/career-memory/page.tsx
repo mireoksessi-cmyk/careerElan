@@ -344,25 +344,49 @@ if (error) {
 }
 
   async function continueToDashboard() {
-    
-    await persistMemory();
-router.push("/dashboard");
-    
+  if (!canUseService()) {
+    setLockedMessage(
+      "Complete Personal Information, Experience, and Skills before continuing to Dashboard."
+    );
+    return;
   }
 
-  function handleProtectedNav(item: string) {
-    if (item === "Career Memory") return;
-    if (item === "Job Tracker" || item === "Settings") {
-      router.push(item === "Job Tracker" ? "/job-tracker" : "/settings");
-      return;
-    }
-    const path = item === "Dashboard" ? "/dashboard" : item === "Create Package" ? "/create-package" : item === "Analytics" ? "/analytics" : "#";
-    if (!isUnlocked) {
-      setLockedMessage(`${item} is locked until you complete Personal Information, Experience, and Skills.`);
-      return;
-    }
-    router.push(path);
+  await persistMemory();
+  router.replace("/dashboard");
+}
+
+ function handleProtectedNav(item: string) {
+  if (item === "Career Memory") {
+    return;
   }
+
+  const allowedBeforeUnlock = ["Find Jobs", "Settings"];
+
+  const pathMap: Record<string, string> = {
+    Dashboard: "/dashboard",
+    "Career Memory": "/career-memory",
+    "Find Jobs": "/find-jobs",
+    "Create Package": "/create-package",
+    "Job Tracker": "/job-tracker",
+    Analytics: "/analytics",
+    Settings: "/settings",
+  };
+
+  const path = pathMap[item];
+
+  if (!path) {
+    return;
+  }
+
+  if (!canUseService() && !allowedBeforeUnlock.includes(item)) {
+    setLockedMessage(
+      `${item} is locked until you complete Personal Information, Experience, and Skills.`
+    );
+    return;
+  }
+
+  router.push(path);
+}
 
   async function handleSaveAndContinue() {
   await persistMemory();
@@ -1206,16 +1230,61 @@ if (template === "Creative") {
   }
 
   function renderRequiredBanner() {
-    return (
-      <div className="mb-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div><p className="text-sm font-black uppercase tracking-wide text-blue-600">Career Memory Unlock</p><h2 className="mt-1 text-xl font-black text-slate-950">Required sections: {requiredCount}/3</h2><p className="mt-2 text-sm leading-6 text-slate-500">Complete the required sections to start using Career Élan. Optional sections can be added anytime to improve AI quality.</p></div>
-          <button type="button" onClick={continueToDashboard}  className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Continue to Dashboard →</button>
+  const unlocked = canUseService();
+
+  return (
+    <div className="mb-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase tracking-wide text-blue-600">
+            Career Memory Unlock
+          </p>
+
+          <h2 className="mt-1 text-xl font-black text-slate-950">
+            Required sections: {requiredCount}/3
+          </h2>
+
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            Complete Personal Information, Experience, and Skills to unlock
+            Dashboard and application features.
+          </p>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-3"><RequiredStatus done={hasPersonalInfo()} title="Personal Information" /><RequiredStatus done={hasExperience()} title="Experience" /><RequiredStatus done={hasSkills()} title="Skills" /></div>
+
+        <button
+          type="button"
+          onClick={continueToDashboard}
+          disabled={!unlocked}
+          className={`rounded-xl px-5 py-3 font-bold transition ${
+            unlocked
+              ? "bg-blue-600 text-white hover:bg-blue-700"
+              : "cursor-not-allowed bg-slate-100 text-slate-400"
+          }`}
+        >
+          {unlocked
+            ? "Continue to Dashboard →"
+            : `Complete Required Sections (${requiredCount}/3)`}
+        </button>
       </div>
-    );
-  }
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <RequiredStatus
+          done={hasPersonalInfo()}
+          title="Personal Information"
+        />
+
+        <RequiredStatus
+          done={hasExperience()}
+          title="Experience"
+        />
+
+        <RequiredStatus
+          done={hasSkills()}
+          title="Skills"
+        />
+      </div>
+    </div>
+  );
+}
 
   function renderStepForm() {
     if (currentStep === 0) return (
@@ -1254,19 +1323,72 @@ if (template === "Creative") {
   </div>
 )}
       <div className="flex min-h-screen">
-        <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
-          <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
-          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">Overview</p>
-          <nav className="mt-4 space-y-2">
-            {["Dashboard", "Career Memory", "Create Package", "Job Tracker", "Analytics", "Settings"].map((item) => (
-              <button key={item} type="button" onClick={() => handleProtectedNav(item)} className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${item === "Career Memory" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"}`}>
-                <span>{item === "Dashboard" ? "🏠" : item === "Career Memory" ? "🧠" : item === "Create Package" ? "📦" : item === "Job Tracker" ? "💼" : item === "Analytics" ? "📊" : "⚙️"}</span>
-                <span className="flex-1">{item}</span>
-                {!['Career Memory', 'Job Tracker', 'Settings'].includes(item) && !canUseService() && <span className="text-xs">🔒</span>}
-              </button>
-            ))}
-          </nav>
-        </aside>
+  <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+    <Image
+      src="/logo.png"
+      alt="Career Élan"
+      width={120}
+      height={45}
+    />
+
+    <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
+      Overview
+    </p>
+
+    <nav className="mt-4 space-y-2">
+      {[
+        "Dashboard",
+        "Career Memory",
+        "Find Jobs",
+        "Create Package",
+        "Job Tracker",
+        "Analytics",
+        "Settings",
+      ].map((item) => {
+        const isLocked =
+          !["Career Memory", "Find Jobs", "Settings"].includes(item) &&
+          !canUseService();
+
+        const icon =
+          item === "Dashboard"
+            ? "🏠"
+            : item === "Career Memory"
+            ? "🧠"
+            : item === "Find Jobs"
+            ? "🔍"
+            : item === "Create Package"
+            ? "📦"
+            : item === "Job Tracker"
+            ? "💼"
+            : item === "Analytics"
+            ? "📊"
+            : "⚙️";
+
+        return (
+          <button
+            key={item}
+            type="button"
+            onClick={() => handleProtectedNav(item)}
+            className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+              item === "Career Memory"
+                ? "bg-blue-600 text-white"
+                : isLocked
+                ? "text-gray-400 hover:bg-red-50"
+                : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+            }`}
+          >
+            <span>{icon}</span>
+
+            <span className="flex-1">{item}</span>
+
+            {isLocked && (
+              <span className="text-xs">🔒</span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  </aside>
 
         <section className="flex-1 px-8 py-6">
           {mode === "start" ? (

@@ -4,6 +4,13 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { searchJobs, type SearchJob } from "@/lib/services/search";
+import { countries } from "@/lib/job-search/countries";
+import { provinces } from "@/lib/job-search/provinces";
+import {
+  searchCities,
+  type CitySuggestion,
+} from "@/lib/job-search/cities";
+import CareerMemoryGuard from "@/components/CareerMemoryGuard";
 
 type Job = {
   id: number;
@@ -47,36 +54,55 @@ const menuItems = [
   { label: "Settings", href: "/settings", icon: "⚙️" },
 ];
 
-const neutralJobs: Job[] = [
-  { id: 1, title: "Administrative Assistant", company: "Office Support Role", location: "Toronto, ON", type: "Full-time", mode: "On-site", category: "Administration", matched: ["Communication", "Organization", "Microsoft Office"], missing: ["Upload resume for deeper match"], posted: "Today" },
-  { id: 2, title: "Customer Service Representative", company: "Client Service Role", location: "Toronto, ON", type: "Part-time", mode: "On-site", category: "Customer Service", matched: ["Customer service", "Phone support", "Problem solving"], missing: ["Add work history"], posted: "1 day ago" },
-  { id: 3, title: "Office Clerk", company: "Entry-Level Office Role", location: "Toronto, ON", type: "Full-time", mode: "Hybrid", category: "Office", matched: ["Data entry", "Filing", "Document organization"], missing: ["Add skills"], posted: "2 days ago" },
-  { id: 4, title: "Receptionist", company: "Front Desk Role", location: "North York, ON", type: "Part-time", mode: "On-site", category: "Reception", matched: ["Greeting clients", "Scheduling", "Email communication"], missing: ["Add language skills"], posted: "3 days ago" },
-  { id: 5, title: "Data Entry Clerk", company: "General Office Role", location: "Remote", type: "Remote", mode: "Remote", category: "Data Entry", matched: ["Typing accuracy", "File organization", "Attention to detail"], missing: ["Upload resume"], posted: "4 days ago" },
-  { id: 6, title: "Legal Assistant", company: "Entry-Level Legal Role", location: "Toronto, ON", type: "Full-time", mode: "Hybrid", category: "Legal", matched: ["Document handling", "Client communication", "Office support"], missing: ["Add education details"], posted: "5 days ago" },
-  { id: 7, title: "Program Assistant", company: "Non-Profit Organization", location: "Toronto, ON", type: "Part-time", mode: "Hybrid", category: "Non-profit", matched: ["Event support", "Volunteer coordination", "Client service"], missing: ["Add project details"], posted: "6 days ago" },
-  { id: 8, title: "HR Assistant", company: "Human Resources Role", location: "Toronto, ON", type: "Contract", mode: "Hybrid", category: "HR", matched: ["Email communication", "Organization", "Admin support"], missing: ["Add HR experience"], posted: "1 week ago" },
-  { id: 9, title: "Client Intake Assistant", company: "Community Service Role", location: "Toronto, ON", type: "Full-time", mode: "On-site", category: "Client Intake", matched: ["Client communication", "Documentation", "Customer service"], missing: ["Add intake experience"], posted: "1 week ago" },
-  { id: 10, title: "Library Assistant", company: "Public Library Role", location: "Toronto, ON", type: "Part-time", mode: "On-site", category: "Public Service", matched: ["Organization", "Customer service", "Data entry"], missing: ["Library system experience"], posted: "1 week ago" },
-  { id: 11, title: "Records Clerk", company: "Records Office Role", location: "Toronto, ON", type: "Full-time", mode: "On-site", category: "Office", matched: ["Filing", "Accuracy", "Document handling"], missing: ["Records software"], posted: "2 weeks ago" },
-  { id: 12, title: "Office Coordinator", company: "Small Business Office", location: "Toronto, ON", type: "Full-time", mode: "Hybrid", category: "Administration", matched: ["Scheduling", "Email", "Coordination"], missing: ["Calendar tools"], posted: "2 weeks ago" },
-  { id: 13, title: "Call Centre Agent", company: "Client Support Centre", location: "Toronto, ON", type: "Full-time", mode: "Remote", category: "Customer Service", matched: ["Phone support", "Problem solving", "Communication"], missing: ["Call centre software"], posted: "2 weeks ago" },
-  { id: 14, title: "Office Support Worker", company: "General Admin Team", location: "Mississauga, ON", type: "Part-time", mode: "On-site", category: "Office", matched: ["Office support", "Teamwork", "Documentation"], missing: ["More work details"], posted: "3 weeks ago" },
-  { id: 15, title: "Junior Admin Clerk", company: "Entry Admin Role", location: "Toronto, ON", type: "Full-time", mode: "Hybrid", category: "Administration", matched: ["Data entry", "Organization", "Email"], missing: ["Upload resume"], posted: "3 weeks ago" },
-];
+const statesByCountry = {
+  Canada: [
+    "Ontario",
+    "British Columbia",
+    "Alberta",
+    "Quebec",
+    "Manitoba",
+    "Saskatchewan",
+    "Nova Scotia",
+    "New Brunswick",
+    "Newfoundland and Labrador",
+    "Prince Edward Island",
+  ],
 
-const aiJobs: Job[] = neutralJobs.map((job, index) => ({
-  ...job,
-  match: 94 - index * 2,
-  company:
-    index === 0 ? "TD Bank" :
-    index === 1 ? "Blakes Law Firm" :
-    index === 2 ? "RBC" :
-    index === 3 ? "Toronto Legal Clinic" :
-    index === 4 ? "Government of Ontario" :
-    index === 5 ? "CIBC" :
-    job.company,
-}));
+  "United States": [
+    "California",
+    "Texas",
+    "Florida",
+    "New York",
+    "Ohio",
+    "Illinois",
+    "Washington",
+  ],
+
+  "United Kingdom": [
+    "England",
+    "Scotland",
+    "Wales",
+    "Northern Ireland",
+  ],
+
+  Australia: [
+    "New South Wales",
+    "Victoria",
+    "Queensland",
+    "Western Australia",
+    "South Australia",
+  ],
+};
+
+const countryNameByCode: Record<string, keyof typeof provinces> = {
+  CA: "Canada",
+  US: "United States",
+  GB: "United Kingdom",
+  AU: "Australia",
+};
+
+
+
 
 function formatPosted(posted: string) {
   if (!posted) return "Recently posted";
@@ -87,22 +113,6 @@ function formatPosted(posted: string) {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function convertLocalJob(job: Job): DisplayJob {
-  return {
-    id: String(job.id),
-    title: job.title,
-    company: job.company,
-    location: job.location,
-    type: job.type,
-    mode: job.mode,
-    category: job.category,
-    match: job.match,
-    matched: job.matched,
-    missing: job.missing,
-    posted: job.posted,
-  };
 }
 
 function convertApiJob(job: SearchJob, hasCareerMemory: boolean): DisplayJob {
@@ -145,10 +155,20 @@ missing: hasCareerMemory
 }
 
 export default function FindJobsPage() {
+  
   const router = useRouter();
 const { careerMemory } = useLogin();
   const [query, setQuery] = useState("");
-  const [location, setLocation] = useState("Canada");
+ const [country, setCountry] = useState("CA");
+ const [province, setProvince] = useState("All");
+const [city, setCity] = useState("All");
+const [cityInput, setCityInput] = useState("");
+const [citySuggestions, setCitySuggestions] =
+  useState<CitySuggestion[]>([]);
+const [isSearchingCities, setIsSearchingCities] =
+  useState(false);
+const [showCitySuggestions, setShowCitySuggestions] =
+  useState(false);
   const [jobType, setJobType] = useState("All");
   const [category, setCategory] = useState("All");
   const [page, setPage] = useState(1);
@@ -160,7 +180,47 @@ const { careerMemory } = useLogin();
   const [isSearching, setIsSearching] = useState(false);
   const [message, setMessage] = useState("");
   const [externalTotalPages, setExternalTotalPages] = useState(1);
+useEffect(() => {
+  const trimmedInput = cityInput.trim();
 
+  if (trimmedInput.length < 3) {
+    setCitySuggestions([]);
+    setIsSearchingCities(false);
+    return;
+  }
+
+  const controller = new AbortController();
+
+  const timer = window.setTimeout(async () => {
+    try {
+      setIsSearchingCities(true);
+
+      const results = await searchCities(
+        trimmedInput,
+        country
+      );
+
+      if (!controller.signal.aborted) {
+        setCitySuggestions(results);
+        setShowCitySuggestions(true);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        console.error(error);
+        setCitySuggestions([]);
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsSearchingCities(false);
+      }
+    }
+  }, 400);
+
+  return () => {
+    controller.abort();
+    window.clearTimeout(timer);
+  };
+}, [cityInput, country]);
  
   useEffect(() => {
     const saved = sessionStorage.getItem("findJobsState");
@@ -170,9 +230,13 @@ const { careerMemory } = useLogin();
       const state = JSON.parse(saved);
 
       setQuery(state.query || "");
-      setLocation(state.location || "Canada");
-      setJobType(state.jobType || "All");
-      setCategory(state.category || "All");
+setCountry(state.country || "CA");
+setProvince(state.province || "All");
+setCity(state.city || "All");
+setCityInput(state.cityInput || "");
+setJobType(state.jobType || "All");
+setCategory(state.category || "All");
+
       setPage(state.page || 1);
       setExternalJobs(Array.isArray(state.jobs) ? state.jobs : []);
       setExternalMode(Boolean(state.externalMode));
@@ -183,62 +247,18 @@ const { careerMemory } = useLogin();
     }
   }, []);
 
-  const savedRecommendedJobs =
-  typeof window !== "undefined"
-    ? sessionStorage.getItem("recommendedJobs")
-    : null;
+  
+    
 
-const baseJobs: Job[] =
-  hasCareerMemory && savedRecommendedJobs
-    ? JSON.parse(savedRecommendedJobs).map((job: any, index: number) => ({
-        id: index + 1,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        type: job.type,
-        mode: "Hybrid",
-        category: job.tags?.[0] || "General",
-        match: Number(String(job.match).replace("%", "")),
-        matched: job.matched || [],
-        missing: job.missing || [],
-        posted: "Today",
-      }))
-    : neutralJobs;
-
-  const filteredLocalJobs = useMemo(() => {
-    return baseJobs.filter((job) => {
-      const q = query.toLowerCase();
-
-      const matchesQuery =
-        !q ||
-        job.title.toLowerCase().includes(q) ||
-        job.company.toLowerCase().includes(q) ||
-        job.category.toLowerCase().includes(q);
-
-      const matchesLocation =
-        location === "All" ||
-        location === "Canada" ||
-        job.location.includes(location.replace(", ON", ""));
-
-      const matchesType = jobType === "All" || job.type === jobType;
-      const matchesCategory = category === "All" || job.category === category;
-
-      return matchesQuery && matchesLocation && matchesType && matchesCategory;
-    });
-  }, [query, location, jobType, category, baseJobs]);
-
+  
   const jobsPerPage = 10;
 
-  const localDisplayJobs = filteredLocalJobs.map(convertLocalJob);
-  const activeJobs = externalMode ? externalJobs : localDisplayJobs;
+  
+  const activeJobs = externalJobs;
 
-  const totalPages = externalMode
-    ? externalTotalPages
-    : Math.max(1, Math.ceil(activeJobs.length / jobsPerPage));
+  const totalPages = externalTotalPages;
 
-  const jobsToShow = externalMode
-    ? activeJobs.slice(0, jobsPerPage)
-    : activeJobs.slice((page - 1) * jobsPerPage, page * jobsPerPage);
+  const jobsToShow = activeJobs;
 
   async function handleSearch(nextPage = 1) {
     setIsSearching(true);
@@ -246,10 +266,13 @@ const baseJobs: Job[] =
 
     try {
       const data = await searchJobs({
-        query: query || "administrative assistant",
-        location: location === "All" ? "Canada" : location,
-        page: nextPage,
-      });
+  query: query.trim(),
+  country,
+  state: province === "All" ? "" : province,
+  city: city === "All" ? "" : city,
+  jobType: jobType === "All" ? "" : jobType,
+  page: nextPage,
+});
 
       const jobs = data.jobs.map((job) => convertApiJob(job, hasCareerMemory));
 
@@ -262,18 +285,21 @@ const baseJobs: Job[] =
       setMessage(jobs.length > 0 ? "" : "No jobs found. Try another keyword or location.");
 
       sessionStorage.setItem(
-        "findJobsState",
-        JSON.stringify({
-          query,
-          location,
-          jobType,
-          category,
-          page: nextPage,
-          jobs,
-          externalMode: true,
-          externalTotalPages: nextTotalPages,
-        })
-      );
+  "findJobsState",
+  JSON.stringify({
+    query,
+    country,
+    province,
+    city,
+    cityInput,
+    jobType,
+    category,
+    page: nextPage,
+    jobs,
+    externalMode: true,
+    externalTotalPages: nextTotalPages,
+  })
+);
     } catch (error: any) {
       console.error(error);
       setMessage(
@@ -285,45 +311,44 @@ const baseJobs: Job[] =
     }
   }
 
-  function handleResetFilters() {
-    setExternalMode(false);
-    setExternalJobs([]);
-    setPage(1);
-    setMessage("");
-    sessionStorage.removeItem("findJobsState");
-  }
+  function clearSearchResults() {
+  setExternalMode(false);
+  setExternalJobs([]);
+  setPage(1);
+  setMessage("");
+  setExternalTotalPages(1);
+  sessionStorage.removeItem("findJobsState");
+}
 
   function goToPage(nextPage: number) {
     if (nextPage < 1) return;
 
     window.scrollTo({ top: 0, behavior: "smooth" });
 
-    if (externalMode) {
-      handleSearch(nextPage);
-      return;
-    }
-
-    const safePage = Math.min(nextPage, totalPages);
-    setPage(safePage);
+    handleSearch(nextPage);
   }
 
 
 
   function saveCurrentSearchState() {
-    sessionStorage.setItem(
-      "findJobsState",
-      JSON.stringify({
-        query,
-        location,
-        jobType,
-        category,
-        page,
-        jobs: externalJobs,
-        externalMode,
-        externalTotalPages,
-      })
-    );
-  }
+  sessionStorage.setItem(
+    "findJobsState",
+    JSON.stringify({
+      query,
+      country,
+      province,
+      city,
+      cityInput,
+      jobType,
+      category,
+      page,
+      jobs: externalJobs,
+      externalMode,
+      externalTotalPages,
+    })
+  );
+}
+
 
   function getPackageHref(job: DisplayJob) {
     if (job.url) {
@@ -339,6 +364,7 @@ const baseJobs: Job[] =
   }
 
   return (
+  <CareerMemoryGuard>
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       <div className="flex min-h-screen">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
@@ -392,7 +418,7 @@ const baseJobs: Job[] =
                 Find Jobs in Career Élan
               </h1>
               <p className="mt-1 text-sm text-gray-500">
-                Search jobs across Canada, then create a full application package.
+               Search jobs across Canada, the United States, the United Kingdom, and Australia.
               </p>
             </div>
 
@@ -407,40 +433,135 @@ const baseJobs: Job[] =
           <section className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
             <div className="grid gap-3 lg:grid-cols-12">
               <input
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  handleResetFilters();
-                }}
-                placeholder="Search job title, company, or keyword..."
-                className="rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-4"
-              />
+  value={query}
+  onChange={(e) => {
+    setQuery(e.target.value);
+    clearSearchResults();
+  }}
+  placeholder="Search job title, company, or keyword..."
+  className="rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-4"
+/>
 
-              <select
-                value={location}
-                onChange={(e) => {
-                  setLocation(e.target.value);
-                  handleResetFilters();
-                }}
-                className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
-              >
-                <option>Canada</option>
-                <option>Toronto, ON</option>
-                <option>North York, ON</option>
-                <option>Mississauga, ON</option>
-                <option>Vancouver, BC</option>
-                <option>Calgary, AB</option>
-                <option>Montreal, QC</option>
-                <option>Ottawa, ON</option>
-                <option>All</option>
-              </select>
+             <select
+  value={country}
+  onChange={(e) => {
+    setCountry(e.target.value);
+    setProvince("All");
+    setCity("All");
+    setCityInput("");
+    setCitySuggestions([]);
+    clearSearchResults();
+  }}
+  className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
+>
+  {countries.map((c) => (
+    <option key={c.code} value={c.code}>
+      {c.name}
+    </option>
+  ))}
+</select>
+              
+   <select
+  value={province}
+  onChange={(e) => {
+  setProvince(e.target.value);
+  setCity("All");
+  setCityInput("");
+  setCitySuggestions([]);
+  clearSearchResults();
+}}
+  className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
+>
+  <option value="All">Province / State</option>
+
+  {(provinces[countryNameByCode[country]] || []).map(
+    (provinceName) => (
+      <option
+        key={provinceName}
+        value={provinceName}
+      >
+        {provinceName}
+      </option>
+    )
+  )}
+</select>
+
+<div className="relative lg:col-span-2">
+  <input
+    value={cityInput}
+    onChange={(e) => {
+  const value = e.target.value;
+
+  setCityInput(value);
+  setCity("All");
+  setShowCitySuggestions(true);
+  clearSearchResults();
+}}
+    onFocus={() => {
+      if (citySuggestions.length > 0) {
+        setShowCitySuggestions(true);
+      }
+    }}
+    placeholder="Search city..."
+    autoComplete="off"
+    className="w-full rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500"
+  />
+
+  {isSearchingCities && (
+    <div className="absolute right-4 top-3.5 text-xs font-semibold text-gray-400">
+      Searching...
+    </div>
+  )}
+
+  {showCitySuggestions &&
+    citySuggestions.length > 0 && (
+      <div className="absolute z-50 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-blue-100 bg-white py-2 shadow-xl">
+        {citySuggestions.map((suggestion) => (
+          <button
+            key={suggestion.id}
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+
+              setCity(suggestion.name);
+              setCityInput(suggestion.label);
+              setCitySuggestions([]);
+              setShowCitySuggestions(false);
+              setPage(1);
+              setExternalJobs([]);
+              setExternalMode(false);
+              setMessage("");
+              sessionStorage.removeItem(
+                "findJobsState"
+              );
+            }}
+            className="block w-full px-4 py-3 text-left hover:bg-blue-50"
+          >
+            <p className="text-sm font-bold text-gray-800">
+              {suggestion.name}
+            </p>
+
+            {suggestion.region && (
+              <p className="mt-1 text-xs text-gray-500">
+                {suggestion.region}
+              </p>
+            )}
+          </button>
+        ))}
+
+        <div className="border-t border-gray-100 px-4 pt-2 text-right text-[10px] font-semibold text-gray-400">
+          Powered by Google
+        </div>
+      </div>
+    )}
+</div>
 
               <select
                 value={jobType}
                 onChange={(e) => {
-                  setJobType(e.target.value);
-                  handleResetFilters();
-                }}
+  setJobType(e.target.value);
+  clearSearchResults();
+}}
                 className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
               >
                 <option>All</option>
@@ -453,9 +574,9 @@ const baseJobs: Job[] =
               <select
                 value={category}
                 onChange={(e) => {
-                  setCategory(e.target.value);
-                  handleResetFilters();
-                }}
+  setCategory(e.target.value);
+  clearSearchResults();
+}}
                 className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
               >
                 <option>All</option>
@@ -486,7 +607,7 @@ const baseJobs: Job[] =
               <div>
                 <h2 className="text-xl font-extrabold">
                   {externalMode
-                    ? "Canada Job Search Results"
+                   ? `${countryNameByCode[country]} Job Search Results`
                     : hasCareerMemory
                     ? "AI Matched Jobs"
                     : "Recommended Jobs"}
@@ -654,7 +775,8 @@ const baseJobs: Job[] =
             </div>
           </section>
         </section>
-      </div>
+     </div>
     </main>
+  </CareerMemoryGuard>
   );
 }

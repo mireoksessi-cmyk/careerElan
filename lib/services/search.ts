@@ -23,33 +23,81 @@ export type SearchJobsResponse = {
 
 type SearchJobsParams = {
   query: string;
-  location?: string;
+  country?: string;
+  state?: string;
+  city?: string;
+  jobType?: string;
+  remote?: string;
+  datePosted?: string;
+  salary?: string;
   page?: number;
 };
 
 export async function searchJobs({
   query,
-  location = "Canada",
+  country = "CA",
+  state,
+  city,
+  jobType,
+  remote,
+  datePosted,
+  salary,
   page = 1,
 }: SearchJobsParams): Promise<SearchJobsResponse> {
   const params = new URLSearchParams();
 
-  params.set("q", query || "administrative assistant");
-  params.set("location", location || "Canada");
-  params.set("page", String(page));
+  params.set(
+    "q",
+    query.trim() || "administrative assistant"
+  );
 
-  const res = await fetch(`/api/search-jobs?${params.toString()}`, {
-    method: "GET",
-  });
+  params.set("country", country);
 
-  const data = await res.json();
+  if (state && state !== "All") {
+    params.set("province", state);
+  }
+
+  if (city && city !== "All") {
+    params.set("city", city);
+  }
+
+  if (jobType && jobType !== "All") {
+    params.set("jobType", jobType);
+  }
+
+  if (remote) {
+    params.set("remote", remote);
+  }
+
+  if (datePosted) {
+    params.set("datePosted", datePosted);
+  }
+
+  if (salary) {
+    params.set("salary", salary);
+  }
+
+  params.set("page", page.toString());
+
+  const res = await fetch(
+    `/api/search-jobs?${params.toString()}`,
+    {
+      method: "GET",
+      cache: "no-store",
+    }
+  );
+
+  const data:
+    | SearchJobsResponse
+    | { error: string } = await res.json();
 
   if (!res.ok) {
     throw new Error(
-      data.error ||
-        "Job search service is temporarily unavailable. Please try again later."
+      "error" in data
+        ? data.error
+        : "Job search service is temporarily unavailable. Please try again later."
     );
   }
 
-  return data;
+  return data as SearchJobsResponse;
 }

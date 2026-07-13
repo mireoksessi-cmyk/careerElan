@@ -15,7 +15,23 @@ const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
 const [confirmPassword, setConfirmPassword] = useState("");
 const [loading, setLoading] = useState(false);
+
 async function handleSignUp() {
+  if (!fullName.trim()) {
+    alert("Please enter your full name.");
+    return;
+  }
+
+  if (!email.trim()) {
+    alert("Please enter your email.");
+    return;
+  }
+
+  if (!password) {
+    alert("Please enter a password.");
+    return;
+  }
+
   if (password !== confirmPassword) {
     alert("Passwords do not match.");
     return;
@@ -23,52 +39,91 @@ async function handleSignUp() {
 
   setLoading(true);
 
-  const { data, error } = await supabase.auth.signUp({
-  email,
-  password,
-  options: {
-    data: {
-      full_name: fullName,
-    },
-  },
-});
-
-setLoading(false);
-
-if (error) {
-  alert(error.message);
-  return;
-}
-
-if (data.user) {
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .insert({
-      id: data.user.id,
-      full_name: fullName,
-      login_id: email,
-      email,
-      phone: "",
-      country: "",
-      timezone: "",
-      email_notifications: true,
-      marketing_notifications: false,
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          full_name: fullName.trim(),
+        },
+      },
     });
 
-  if (profileError) {
-    console.error(profileError);
-    alert(profileError.message);
-    return;
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    if (!data.user) {
+      alert("Unable to create your account.");
+      return;
+    }
+
+    /*
+      이메일 인증이 꺼져 있으면 data.session이 존재한다.
+      이메일 인증이 켜져 있으면 보통 data.session은 null이다.
+    */
+    if (data.session) {
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .upsert(
+          {
+            id: data.user.id,
+            full_name: fullName.trim(),
+            login_id: email.trim(),
+            email: email.trim(),
+            phone: "",
+            country: "",
+            timezone: "",
+            email_notifications: true,
+            marketing_notifications: false,
+          },
+          {
+            onConflict: "id",
+          }
+        );
+
+      if (profileError) {
+        console.error(
+          "PROFILE CREATE ERROR =",
+          profileError
+        );
+
+        alert(profileError.message);
+        return;
+      }
+
+      router.replace("/career-memory");
+      router.refresh();
+      return;
+    }
+
+    /*
+      이메일 인증이 켜져 있으면 아직 로그인 세션이 없다.
+      이메일 인증 후 다시 로그인하게 한다.
+    */
+    alert(
+      "Check your email to verify your account. After verification, log in to continue building your Career Memory."
+    );
+
+    router.replace("/");
+  } catch (error) {
+    console.error("SIGNUP ERROR =", error);
+
+    alert(
+      "Unable to create your account. Please try again."
+    );
+  } finally {
+    setLoading(false);
   }
 }
 
-alert("Check your email to verify your account.");
-}
-  return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-white px-6 py-10">
-      <div className="mx-auto grid min-h-[85vh] w-full max-w-6xl overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-2">
-        <section className="hidden flex-col justify-between bg-gradient-to-br from-blue-700 to-blue-500 p-12 text-white md:flex">
-          <div>
+return (
+  <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-white px-6 py-10">
+    <div className="mx-auto grid min-h-[85vh] w-full max-w-6xl overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-2">
+      <section className="hidden flex-col justify-between bg-gradient-to-br from-blue-700 to-blue-500 p-12 text-white md:flex">
+        <div>
             <div className="inline-flex rounded-2xl bg-white p-4 shadow-lg">
               <Image src="/logo.png" alt="Career Élan" width={180} height={70} priority />
             </div>

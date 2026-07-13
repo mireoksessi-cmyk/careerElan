@@ -28,7 +28,7 @@ function normalizeJob(job: JSearchJob) {
     id: job.job_id || crypto.randomUUID(),
     title: job.job_title || "Untitled Job",
     company: job.employer_name || "Unknown Company",
-    location: location || "Canada",
+    location: location || "Unknown location",
     type: job.job_employment_type || "Not specified",
     category: "General",
     description: job.job_description || "",
@@ -36,7 +36,7 @@ function normalizeJob(job: JSearchJob) {
     posted: job.job_posted_at_datetime_utc || "",
     salary:
       job.job_min_salary || job.job_max_salary
-        ? `${job.job_salary_currency || "CAD"} ${Math.round(
+        ? `${job.job_salary_currency || ""} ${Math.round(
             job.job_min_salary || 0
           )} - ${Math.round(job.job_max_salary || 0)}`
         : "Not listed",
@@ -51,8 +51,31 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
 
     const query = searchParams.get("q") || "administrative assistant";
-    const location = searchParams.get("location") || "Canada";
+
+    const countryCode = (
+  searchParams.get("country") || "CA"
+).toUpperCase();
+
+const province =
+  searchParams.get("province")?.trim() || "";
+
+const city =
+  searchParams.get("city")?.trim() || "";
+
+const countryNameMap: Record<string, string> = {
+  CA: "Canada",
+  US: "United States",
+  GB: "United Kingdom",
+  AU: "Australia",
+};
+
+const countryName =
+  countryNameMap[countryCode] || "Canada";
+
     const page = searchParams.get("page") || "1";
+
+    const jobType = searchParams.get("jobType") || "";
+    const datePosted = searchParams.get("datePosted") || "";
 
     const apiKey = process.env.RAPIDAPI_KEY;
 
@@ -66,12 +89,43 @@ export async function GET(req: Request) {
       );
     }
 
+    
+
+    const parts = [query.trim() || "administrative assistant"];
+
+if (jobType) {
+  parts.push(jobType);
+}
+
+parts.push("jobs");
+
+if (city) {
+  parts.push("in", city);
+}
+
+if (province) {
+  parts.push(province);
+}
+
+parts.push(countryName);
+
+const searchQuery = parts.join(" ");
+
+   
+
     const url = new URL("https://jsearch.p.rapidapi.com/search-v2");
 
-    url.searchParams.set("query", `${query} jobs in ${location}`);
+    url.searchParams.set("query", searchQuery);
     url.searchParams.set("page", page);
     url.searchParams.set("num_pages", "1");
-    url.searchParams.set("country", "ca");
+    url.searchParams.set(
+  "country",
+  countryCode.toLowerCase()
+);
+
+    if (datePosted) {
+      url.searchParams.set("date_posted", datePosted);
+    }
 
     const res = await fetch(url.toString(), {
       method: "GET",
@@ -86,7 +140,7 @@ export async function GET(req: Request) {
       return NextResponse.json(
         {
           error:
-            "Job search service is temporarily unavailable because the monthly search limit has been reached. Please try again later.",
+            "Job search service is temporarily unavailable because the monthly search limit has been reached.",
         },
         { status: 429 }
       );
@@ -95,14 +149,9 @@ export async function GET(req: Request) {
     if (!res.ok) {
       const errorText = await res.text();
 
-      console.log("JSearch status:", res.status);
-      console.log("JSearch error:", errorText);
-      console.log("RapidAPI key prefix:", apiKey.slice(0, 10));
-
       return NextResponse.json(
         {
-          error:
-            errorText || "Job search service is temporarily unavailable.",
+          error: errorText,
           status: res.status,
         },
         { status: res.status }
@@ -110,9 +159,6 @@ export async function GET(req: Request) {
     }
 
     const data = await res.json();
-
-    console.log("JSearch response keys:", Object.keys(data));
-    console.log("JSearch data:", JSON.stringify(data).slice(0, 1000));
 
     const rawJobs = Array.isArray(data.data)
       ? data.data
@@ -123,28 +169,32 @@ export async function GET(req: Request) {
       : [];
 
     const jobs = Array.from(
-  new Map(
-    rawJobs
-      .map(normalizeJob)
-      .map((job: any) => [
-        `${job.title}-${job.company}-${job.location}`.toLowerCase(),
-        job,
-      ])
-  ).values()
-);
+      new Map(
+        rawJobs
+          .map(normalizeJob)
+          .map((job: any) => [
+            `${job.title}-${job.company}-${job.location}`.toLowerCase(),
+            job,
+          ])
+      ).values()
+    );
 
     return NextResponse.json({
       jobs,
       count: jobs.length,
       page: Number(page),
-      source: "JSearch Canada",
+      source: `JSearch ${countryName}`,
     });
   } catch (error) {
     console.error(error);
 
     return NextResponse.json(
-      { error: "Failed to search jobs." },
-      { status: 500 }
+      {
+        error: "Failed to search jobs.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }

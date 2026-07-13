@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
+import CareerMemoryGuard from "@/components/CareerMemoryGuard";
 
 const menuItems = [
   "Dashboard",
@@ -210,9 +211,13 @@ if (!data) return;
         data.jobs.slice(0, 6).map(async (aiJob: any) => {
           try {
             const result = await searchJobs({
-              query: aiJob.title,
-              location: aiJob.location || "Canada",
-            });
+  query: aiJob.title,
+  country: "CA",
+  state: "",
+  city: "",
+  jobType: "",
+  page: 1,
+});
 
             if (!result.jobs.length) {
   return {
@@ -333,6 +338,7 @@ useEffect(() => {
   }
    
   return (
+  <CareerMemoryGuard>
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       {showPackageChoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4 backdrop-blur-sm">
@@ -1094,5 +1100,6 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
         </section>
       </div>
     </main>
+  </CareerMemoryGuard>
   );
 }

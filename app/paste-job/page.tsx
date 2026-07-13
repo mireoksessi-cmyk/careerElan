@@ -9,7 +9,7 @@ import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
-
+import CareerMemoryGuard from "@/components/CareerMemoryGuard";
 type PasteMode = "url" | "description" | "file";
 
 type PreviewType = "resume" | "coverLetter" | "emailDraft";
@@ -698,6 +698,7 @@ async function downloadDocx() {
   }
 
   return (
+  <CareerMemoryGuard>
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       <div className="flex min-h-screen">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
@@ -1469,5 +1470,6 @@ async function downloadDocx() {
         </section>
       </div>
     </main>
+  </CareerMemoryGuard>
   );
 }
