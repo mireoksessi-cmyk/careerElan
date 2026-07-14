@@ -3,7 +3,11 @@
 import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import {
+  ReactNode,
+  useEffect,
+  useState,
+} from "react";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerMemoryGuard from "@/components/CareerMemoryGuard";
@@ -37,7 +41,19 @@ type JobItem = {
   fallback?: boolean;
 };
 
-
+type PreviewAsset =
+  | {
+      type: "career-memory-resume";
+    }
+  | {
+      type: "uploaded-resume";
+      item: any;
+    }
+  | {
+      type: "cover-letter";
+      item: any;
+    }
+  | null;
 
 const defaultInsightItems = [
   { name: "Add your target roles", level: "Recommended" },
@@ -87,13 +103,14 @@ function getMenuIcon(item: string) {
 }
 
 export default function DashboardPage() {
- const {
+const {
   user,
   loading,
   profile,
   careerMemory,
   resumes,
   coverLetters,
+  refresh,
 } = useLogin();
   
   
@@ -105,6 +122,15 @@ careerMemory?.profile_strength ?? 0;
 
 const [selectedResume, setSelectedResume] = useState("");
 const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
+const [previewAsset, setPreviewAsset] =
+  useState<PreviewAsset>(null);
+const [deletingAsset, setDeletingAsset] = useState<
+  "resume" | "cover-letter" | null
+>(null);
+const [
+  resettingCareerMemory,
+  setResettingCareerMemory,
+] = useState(false);
   const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
   const [stats, setStats] = useState({ packages: 0, applications: 0, interviews: 0 });
   const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
@@ -136,6 +162,359 @@ async function saveSelection(
       selected_cover_letter_id: coverLetterId,
     })
     .eq("user_id", user.id);
+}
+
+async function deleteSelectedResume() {
+  if (!user) {
+    alert("Please sign in.");
+    return;
+  }
+
+  if (!selectedResume) {
+    alert("Please select a resume first.");
+    return;
+  }
+
+  // Career Memory Resume는 사용자당 1개인 기본 이력서이므로 삭제 불가
+  if (selectedResume === "career_memory") {
+    alert(
+      "Career Memory Resume cannot be deleted. You can edit it from Career Memory."
+    );
+    return;
+  }
+
+  const resume = resumes.find(
+    (item: any) => item.id === selectedResume
+  );
+
+  if (!resume) {
+    alert("The selected resume could not be found.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Delete "${resume.file_name || "Uploaded Resume"}"?\n\nThis action cannot be undone.`
+  );
+
+  if (!confirmed) return;
+
+  setDeletingAsset("resume");
+
+  try {
+    /*
+      1. Storage 파일 삭제
+    */
+    if (resume.storage_path) {
+      const { error: storageError } =
+        await supabase.storage
+          .from("resumes")
+          .remove([resume.storage_path]);
+
+      if (storageError) {
+        console.error(
+          "RESUME STORAGE DELETE ERROR =",
+          storageError
+        );
+
+        alert(
+          `Unable to delete the resume file: ${storageError.message}`
+        );
+        return;
+      }
+    }
+
+    /*
+      2. resumes 테이블 행 삭제
+    */
+    const {
+      data: deletedResume,
+      error: databaseError,
+    } = await supabase
+      .from("resumes")
+      .delete()
+      .eq("id", resume.id)
+      .eq("user_id", user.id)
+      .select("id")
+      .maybeSingle();
+
+    if (databaseError) {
+      console.error(
+        "RESUME DATABASE DELETE ERROR =",
+        databaseError
+      );
+
+      alert(
+        `Unable to delete the resume record: ${databaseError.message}`
+      );
+      return;
+    }
+
+    if (!deletedResume) {
+      alert(
+        "The resume could not be deleted. Please check the resumes table DELETE policy."
+      );
+      return;
+    }
+
+    /*
+      3. 삭제 후 Career Memory Resume로 선택 변경
+    */
+    const { error: selectionError } =
+      await supabase
+        .from("career_memory")
+        .update({
+          selected_resume_type: "career_memory",
+          selected_resume_id: null,
+        })
+        .eq("user_id", user.id);
+
+    if (selectionError) {
+      console.error(
+        "RESUME SELECTION RESET ERROR =",
+        selectionError
+      );
+    }
+
+    setSelectedResume("career_memory");
+
+    /*
+      4. LoginManager 목록 새로고침
+    */
+    await refresh();
+
+    alert("Resume deleted successfully.");
+  } catch (error) {
+    console.error(
+      "DELETE RESUME ERROR =",
+      error
+    );
+
+    alert("Unable to delete this resume.");
+  } finally {
+    setDeletingAsset(null);
+  }
+}
+
+async function deleteSelectedCoverLetter() {
+  if (!user) {
+    alert("Please sign in.");
+    return;
+  }
+
+  /*
+    빈 문자열은 None 옵션
+  */
+  if (!selectedCoverLetter) {
+    alert(
+      'The "None" option cannot be deleted because it is the automatic cover letter generation option.'
+    );
+    return;
+  }
+
+  const coverLetter = coverLetters.find(
+    (item: any) =>
+      item.id === selectedCoverLetter
+  );
+
+  if (!coverLetter) {
+    alert(
+      "The selected cover letter could not be found."
+    );
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Delete "${coverLetter.file_name || "Uploaded Cover Letter"}"?\n\nThis action cannot be undone.`
+  );
+
+  if (!confirmed) return;
+
+  setDeletingAsset("cover-letter");
+
+  try {
+    /*
+      1. Storage 파일 삭제
+    */
+    if (coverLetter.storage_path) {
+      const { error: storageError } =
+        await supabase.storage
+          .from("cover-letters")
+          .remove([
+            coverLetter.storage_path,
+          ]);
+
+      if (storageError) {
+        console.error(
+          "COVER LETTER STORAGE DELETE ERROR =",
+          storageError
+        );
+
+        alert(
+          `Unable to delete the cover letter file: ${storageError.message}`
+        );
+        return;
+      }
+    }
+
+    /*
+      2. cover_letters 테이블 행 삭제
+    */
+    const {
+      data: deletedCoverLetter,
+      error: databaseError,
+    } = await supabase
+      .from("cover_letters")
+      .delete()
+      .eq("id", coverLetter.id)
+      .eq("user_id", user.id)
+      .select("id")
+      .maybeSingle();
+
+    if (databaseError) {
+      console.error(
+        "COVER LETTER DATABASE DELETE ERROR =",
+        databaseError
+      );
+
+      alert(
+        `Unable to delete the cover letter record: ${databaseError.message}`
+      );
+      return;
+    }
+
+    if (!deletedCoverLetter) {
+      alert(
+        "The cover letter could not be deleted. Please check the cover_letters table DELETE policy."
+      );
+      return;
+    }
+
+    /*
+      3. 삭제 후 None으로 선택 변경
+    */
+    const { error: selectionError } =
+      await supabase
+        .from("career_memory")
+        .update({
+          selected_cover_letter_id: null,
+        })
+        .eq("user_id", user.id);
+
+    if (selectionError) {
+      console.error(
+        "COVER LETTER SELECTION RESET ERROR =",
+        selectionError
+      );
+    }
+
+    setSelectedCoverLetter("");
+
+    /*
+      4. LoginManager 목록 새로고침
+    */
+    await refresh();
+
+    alert(
+      "Cover letter deleted successfully."
+    );
+  } catch (error) {
+    console.error(
+      "DELETE COVER LETTER ERROR =",
+      error
+    );
+
+    alert(
+      "Unable to delete this cover letter."
+    );
+  } finally {
+    setDeletingAsset(null);
+  }
+}
+
+async function resetCareerMemoryResume() {
+  if (!user) {
+    alert("Please sign in.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Reset your Career Memory Resume?\n\n" +
+      "This will remove the information entered in Career Memory, including personal information, experience, skills, education, languages, certifications, projects, and career goals.\n\n" +
+      "Your uploaded resumes and uploaded cover letters will not be deleted."
+  );
+
+  if (!confirmed) return;
+
+  setResettingCareerMemory(true);
+
+  try {
+    const { error } = await supabase
+      .from("career_memory")
+      .update({
+        first_name: "",
+        last_name: "",
+        email: "",
+        phone: "",
+        location: "",
+        linkedin: "",
+        headline: "",
+        summary: "",
+
+        target_roles: [],
+        target_industry: "",
+        target_location: "",
+        salary_expectation: "",
+        career_goal_summary: "",
+
+        skills: [],
+        education: [],
+        experience: [],
+        languages: [],
+        certifications: [],
+        projects: [],
+
+        profile_strength: 0,
+        required_completed: false,
+
+        selected_resume_type: null,
+        selected_resume_id: null,
+
+        resume_name: "Career Memory Resume",
+      })
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error(
+        "CAREER MEMORY RESET ERROR =",
+        error
+      );
+
+      alert(error.message);
+      return;
+    }
+
+    setSelectedResume("");
+
+    await refresh();
+
+    alert(
+      "Career Memory Resume has been reset."
+    );
+
+    router.replace("/career-memory");
+    router.refresh();
+  } catch (error) {
+    console.error(
+      "RESET CAREER MEMORY ERROR =",
+      error
+    );
+
+    alert(
+      "Unable to reset your Career Memory Resume."
+    );
+  } finally {
+    setResettingCareerMemory(false);
+  }
 }
 
 async function loadDashboard() {
@@ -337,9 +716,381 @@ useEffect(() => {
     setCareerFairs(careerMemoryCompleted ? personalizedCareerFairs : defaultCareerFairs);
   }
    
+function renderPreviewContent() {
+  if (!previewAsset) return null;
+
+  /*
+    Career Memory에서 직접 작성한 Resume
+  */
+  if (previewAsset.type === "career-memory-resume") {
+    return (
+      <div className="mx-auto max-w-[800px] bg-white p-8 text-slate-800">
+        <div className="border-b border-slate-300 pb-5">
+          <h1 className="text-3xl font-black text-slate-950">
+            {careerMemory?.first_name || ""}{" "}
+            {careerMemory?.last_name || ""}
+          </h1>
+
+          {careerMemory?.headline && (
+            <p className="mt-2 font-bold text-blue-600">
+              {careerMemory.headline}
+            </p>
+          )}
+
+          <p className="mt-3 text-sm text-slate-500">
+            {[
+              careerMemory?.email,
+              careerMemory?.phone,
+              careerMemory?.location,
+              careerMemory?.linkedin,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
+
+        {careerMemory?.summary && (
+          <PreviewSection title="Professional Summary">
+            <p className="whitespace-pre-wrap">
+              {careerMemory.summary}
+            </p>
+          </PreviewSection>
+        )}
+
+        {Array.isArray(careerMemory?.experience) &&
+          careerMemory.experience.length > 0 && (
+            <PreviewSection title="Experience">
+              {careerMemory.experience.map(
+                (experience: any, index: number) => (
+                  <div
+                    key={index}
+                    className="mb-6"
+                  >
+                    <div className="flex justify-between gap-4">
+                      <p className="font-bold text-slate-950">
+                        {experience.jobTitle ||
+                          experience.job_title ||
+                          experience.role ||
+                          ""}
+                      </p>
+
+                      <p className="text-sm text-slate-500">
+                        {experience.dates || ""}
+                      </p>
+                    </div>
+
+                    <p className="font-semibold text-slate-600">
+                      {experience.company ||
+                        experience.organization ||
+                        ""}
+                    </p>
+
+                    {experience.description && (
+                      <p className="mt-2 whitespace-pre-wrap">
+                        {experience.description}
+                      </p>
+                    )}
+                  </div>
+                )
+              )}
+            </PreviewSection>
+          )}
+
+        {Array.isArray(careerMemory?.education) &&
+          careerMemory.education.length > 0 && (
+            <PreviewSection title="Education">
+              {careerMemory.education.map(
+                (education: any, index: number) => (
+                  <div
+                    key={index}
+                    className="mb-5"
+                  >
+                    <div className="flex justify-between gap-4">
+                      <p className="font-bold text-slate-950">
+                        {education.program ||
+                          education.degree ||
+                          ""}
+                      </p>
+
+                      <p className="text-sm text-slate-500">
+                        {education.dates || ""}
+                      </p>
+                    </div>
+
+                    <p className="font-semibold text-slate-600">
+                      {education.school || ""}
+                    </p>
+
+                    {education.coursework && (
+                      <p className="mt-2 whitespace-pre-wrap">
+                        {education.coursework}
+                      </p>
+                    )}
+                  </div>
+                )
+              )}
+            </PreviewSection>
+          )}
+
+        {Array.isArray(careerMemory?.skills) &&
+          careerMemory.skills.length > 0 && (
+            <PreviewSection title="Skills">
+              <div className="flex flex-wrap gap-2">
+                {careerMemory.skills.map(
+                  (skill: string, index: number) => (
+                    <span
+                      key={`${skill}-${index}`}
+                      className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700"
+                    >
+                      {skill}
+                    </span>
+                  )
+                )}
+              </div>
+            </PreviewSection>
+          )}
+
+        {Array.isArray(careerMemory?.languages) &&
+          careerMemory.languages.length > 0 && (
+            <PreviewSection title="Languages">
+              {careerMemory.languages.map(
+                (language: any, index: number) => (
+                  <p key={index}>
+                    <span className="font-semibold">
+                      {language.language}
+                    </span>
+
+                    {language.level ||
+                    language.proficiency
+                      ? ` — ${
+                          language.level ||
+                          language.proficiency
+                        }`
+                      : ""}
+                  </p>
+                )
+              )}
+            </PreviewSection>
+          )}
+      </div>
+    );
+  }
+
+  /*
+    업로드한 Resume
+  */
+  if (previewAsset.type === "uploaded-resume") {
+    const resume = previewAsset.item;
+    const parsed = resume.parsed_data || {};
+
+    return (
+      <div className="mx-auto max-w-[800px] bg-white p-8 text-slate-800">
+        <div className="border-b border-slate-300 pb-5">
+          <p className="text-sm font-black uppercase tracking-wide text-blue-600">
+            Uploaded Resume
+          </p>
+
+          <h1 className="mt-2 text-2xl font-black">
+            {resume.file_name ||
+              "Uploaded Resume"}
+          </h1>
+        </div>
+
+        {resume.original_text ? (
+          <pre className="mt-6 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-700">
+            {resume.original_text}
+          </pre>
+        ) : (
+          <div className="mt-6">
+            <h2 className="text-2xl font-black">
+              {parsed.firstName || ""}{" "}
+              {parsed.lastName || ""}
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-500">
+              {[
+                parsed.email,
+                parsed.phone,
+                parsed.location,
+                parsed.linkedin,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+
+            {parsed.summary && (
+              <PreviewSection title="Summary">
+                <p className="whitespace-pre-wrap">
+                  {parsed.summary}
+                </p>
+              </PreviewSection>
+            )}
+
+            {Array.isArray(parsed.workExperience) &&
+              parsed.workExperience.length > 0 && (
+                <PreviewSection title="Experience">
+                  {parsed.workExperience.map(
+                    (
+                      experience: any,
+                      index: number
+                    ) => (
+                      <div
+                        key={index}
+                        className="mb-6"
+                      >
+                        <div className="flex justify-between gap-4">
+                          <p className="font-bold text-slate-950">
+                            {experience.jobTitle ||
+                              experience.title ||
+                              ""}
+                          </p>
+
+                          <p className="text-sm text-slate-500">
+                            {experience.dates || ""}
+                          </p>
+                        </div>
+
+                        <p className="font-semibold text-slate-600">
+                          {experience.company || ""}
+                        </p>
+
+                        <p className="mt-2 whitespace-pre-wrap">
+                          {experience.description || ""}
+                        </p>
+                      </div>
+                    )
+                  )}
+                </PreviewSection>
+              )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /*
+    업로드한 Cover Letter
+  */
+  if (previewAsset.type === "cover-letter") {
+    const coverLetter = previewAsset.item;
+    const parsed = coverLetter.parsed_data || {};
+
+    return (
+      <div className="mx-auto max-w-[800px] bg-white p-10 text-slate-800">
+        <div className="border-b border-slate-300 pb-5">
+          <p className="text-sm font-black uppercase tracking-wide text-blue-600">
+            Uploaded Cover Letter
+          </p>
+
+          <h1 className="mt-2 text-2xl font-black">
+            {coverLetter.file_name ||
+              "Uploaded Cover Letter"}
+          </h1>
+        </div>
+
+        {coverLetter.original_text ? (
+          <pre className="mt-8 whitespace-pre-wrap font-sans text-sm leading-8 text-slate-700">
+            {coverLetter.original_text}
+          </pre>
+        ) : (
+          <div className="mt-8 text-sm leading-8">
+            {parsed.recipient && (
+              <p>{parsed.recipient}</p>
+            )}
+
+            {parsed.company && (
+              <p>{parsed.company}</p>
+            )}
+
+            {parsed.jobTitle && (
+              <p>{parsed.jobTitle}</p>
+            )}
+
+            {parsed.greeting && (
+              <p className="mt-8">
+                {parsed.greeting}
+              </p>
+            )}
+
+            {parsed.body && (
+              <p className="mt-6 whitespace-pre-wrap">
+                {parsed.body}
+              </p>
+            )}
+
+            {parsed.closing && (
+              <p className="mt-8">
+                {parsed.closing}
+              </p>
+            )}
+
+            {parsed.signature && (
+              <p className="mt-4 font-bold">
+                {parsed.signature}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+  
   return (
   <CareerMemoryGuard>
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
+     {previewAsset && (
+  <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
+    <div className="mx-auto w-full max-w-5xl rounded-3xl bg-slate-100 shadow-2xl">
+      <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-3xl border-b border-slate-200 bg-white px-6 py-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-blue-600">
+            Document Preview
+          </p>
+
+          <h2 className="mt-1 text-xl font-black text-slate-950">
+            {previewAsset.type ===
+            "career-memory-resume"
+              ? "Career Memory Resume"
+              : previewAsset.type ===
+                "uploaded-resume"
+              ? previewAsset.item.file_name ||
+                "Uploaded Resume"
+              : previewAsset.item.file_name ||
+                "Uploaded Cover Letter"}
+          </h2>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setPreviewAsset(null)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-2xl text-slate-500 transition hover:bg-slate-200 hover:text-slate-900"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="p-4 sm:p-8">
+        <div className="rounded-2xl bg-white shadow">
+          {renderPreviewContent()}
+        </div>
+      </div>
+
+      <div className="sticky bottom-0 flex justify-end rounded-b-3xl border-t border-slate-200 bg-white px-6 py-4">
+        <button
+          type="button"
+          onClick={() => setPreviewAsset(null)}
+          className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700"
+        >
+          Close Preview
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
       {showPackageChoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4 backdrop-blur-sm">
           <div className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
@@ -551,99 +1302,198 @@ Choose which resume and cover letter will be used when generating your applicati
 
 <div className="mt-6 grid gap-8 md:grid-cols-2">
 
-<div>
+  {/* Resume column */}
+  <div>
+    <div className="mb-3 flex items-center justify-between gap-3">
+    <h3 className="font-bold">
+      Resume <span className="text-red-500">*</span>
+    </h3>
 
-<h3 className="mb-3 font-bold">
-Resume <span className="text-red-500">*</span>
-</h3>
+    <button
+      type="button"
+      onClick={deleteSelectedResume}
+      disabled={
+        deletingAsset !== null ||
+        !selectedResume ||
+        selectedResume === "career_memory"
+      }
+      title={
+        selectedResume === "career_memory"
+          ? "Career Memory Resume cannot be deleted."
+          : "Delete selected uploaded resume"
+      }
+      className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+        deletingAsset !== null ||
+        !selectedResume ||
+        selectedResume === "career_memory"
+          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+          : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+      }`}
+    >
+      {deletingAsset === "resume"
+        ? "Deleting..."
+        : "🗑 Delete"}
+    </button>
+  </div>
 
-{careerMemory?.required_completed && (
+  {careerMemory?.required_completed && (
+    <div
+      className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
+        selectedResume === "career_memory"
+          ? "border-blue-500 bg-blue-50/40"
+          : "border-slate-200 bg-white"
+      }`}
+    >
+      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+        <input
+          type="radio"
+          name="resume"
+          checked={selectedResume === "career_memory"}
+          onChange={async () => {
+            setSelectedResume("career_memory");
 
-<label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3">
+            await saveSelection(
+              "career_memory",
+              null,
+              selectedCoverLetter || null
+            );
+          }}
+        />
 
-<input
-type="radio"
-name="resume"
-checked={selectedResume==="career_memory"}
-onChange={async()=>{
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">
+            Career Memory Resume
+          </p>
 
-setSelectedResume("career_memory");
+          <p className="truncate text-sm text-gray-500">
+            {careerMemory.resume_name ||
+              "Career Memory Resume"}
+          </p>
+        </div>
+      </label>
 
-await saveSelection(
-"career_memory",
-null,
-selectedCoverLetter || null
-);
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            setPreviewAsset({
+              type: "career-memory-resume",
+            })
+          }
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+        >
+          Preview
+        </button>
 
-}}
-/>
+        <button
+          type="button"
+          onClick={() =>
+            router.push("/career-memory")
+          }
+          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600 transition hover:bg-blue-100"
+        >
+          Edit
+        </button>
 
-<div>
+        <button
+          type="button"
+          onClick={resetCareerMemoryResume}
+          disabled={resettingCareerMemory}
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {resettingCareerMemory
+            ? "Resetting..."
+            : "Reset"}
+        </button>
+      </div>
+    </div>
+  )}
 
-<p className="font-semibold">
-Career Memory Resume
-</p>
+  {resumes.map((resume: any) => (
+    <div
+      key={resume.id}
+      className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
+        selectedResume === resume.id
+          ? "border-blue-500 bg-blue-50/40"
+          : "border-slate-200 bg-white"
+      }`}
+    >
+      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+        <input
+          type="radio"
+          name="resume"
+          checked={selectedResume === resume.id}
+          onChange={async () => {
+            setSelectedResume(resume.id);
 
-<p className="text-sm text-gray-500">
-  {careerMemory.resume_name || "Career Memory Resume"}
-</p>
+            await saveSelection(
+              "upload",
+              resume.id,
+              selectedCoverLetter || null
+            );
+          }}
+        />
 
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">
+            Uploaded Resume
+          </p>
+
+          <p className="truncate text-sm text-gray-500">
+            {resume.file_name}
+          </p>
+        </div>
+      </label>
+
+      <button
+        type="button"
+        onClick={() =>
+          setPreviewAsset({
+            type: "uploaded-resume",
+            item: resume,
+          })
+        }
+        className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+      >
+        Preview
+      </button>
+    </div>
+  ))}
 </div>
-
-</label>
-
-)}
-
-{resumes.map((resume:any)=>(
-
-<label
-key={resume.id}
-className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3"
->
-
-<input
-type="radio"
-name="resume"
-checked={selectedResume===resume.id}
-onChange={async()=>{
-
-setSelectedResume(resume.id);
-
-await saveSelection(
-"upload",
-resume.id,
-selectedCoverLetter || null
-);
-
-}}
-/>
-
 <div>
 
-<p className="font-semibold">
-Uploaded Resume
-</p>
+<div className="mb-3 flex items-center justify-between gap-3">
+  <h3 className="font-bold">
+    Cover Letter
+    <span className="ml-2 text-xs text-gray-500">
+      (Optional)
+    </span>
+  </h3>
 
-<p className="text-sm text-gray-500">
-{resume.file_name}
-</p>
-
+  <button
+    type="button"
+    onClick={deleteSelectedCoverLetter}
+    disabled={
+      deletingAsset !== null ||
+      !selectedCoverLetter
+    }
+    title={
+      !selectedCoverLetter
+        ? 'The "None" option cannot be deleted.'
+        : "Delete selected uploaded cover letter"
+    }
+    className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+      deletingAsset !== null ||
+      !selectedCoverLetter
+        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+        : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+    }`}
+  >
+    {deletingAsset === "cover-letter"
+      ? "Deleting..."
+      : "🗑 Delete"}
+  </button>
 </div>
-
-</label>
-
-))}
-
-</div>
-
-<div>
-
-<h3 className="mb-3 font-bold">
-Cover Letter
-<span className="ml-2 text-xs text-gray-500">
-(Optional)
-</span>
-</h3>
 
 <label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3">
 
@@ -684,52 +1534,66 @@ Generate automatically
 
 </label>
 
-{coverLetters.map((cover:any)=>(
+{coverLetters.map((cover: any) => (
+  <div
+    key={cover.id}
+    className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
+      selectedCoverLetter === cover.id
+        ? "border-blue-500 bg-blue-50/40"
+        : "border-slate-200 bg-white"
+    }`}
+  >
+    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+      <input
+        type="radio"
+        name="cover"
+        checked={
+          selectedCoverLetter === cover.id
+        }
+        onChange={async () => {
+          setSelectedCoverLetter(cover.id);
 
-<label
-key={cover.id}
-className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3"
->
+          await saveSelection(
+            selectedResume ===
+              "career_memory"
+              ? "career_memory"
+              : "upload",
 
-<input
-type="radio"
-name="cover"
-checked={selectedCoverLetter===cover.id}
-onChange={async()=>{
+            selectedResume ===
+              "career_memory"
+              ? null
+              : selectedResume,
 
-setSelectedCoverLetter(cover.id);
+            cover.id
+          );
+        }}
+      />
 
-await saveSelection(
-selectedResume==="career_memory"
-? "career_memory"
-: "upload",
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold">
+          Uploaded Cover Letter
+        </p>
 
-selectedResume==="career_memory"
-? null
-: selectedResume,
+        <p className="truncate text-sm text-gray-500">
+          {cover.file_name}
+        </p>
+      </div>
+    </label>
 
-cover.id
-);
-
-}}
-/>
-
-<div>
-
-<p className="font-semibold">
-Uploaded Cover Letter
-</p>
-
-<p className="text-sm text-gray-500">
-{cover.file_name}
-</p>
-
-</div>
-
-</label>
-
+    <button
+      type="button"
+      onClick={() =>
+        setPreviewAsset({
+          type: "cover-letter",
+          item: cover,
+        })
+      }
+      className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+    >
+      Preview
+    </button>
+  </div>
 ))}
-
 </div>
 
 </div>
@@ -1101,5 +1965,22 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       </div>
     </main>
   </CareerMemoryGuard>
+  );
+}
+function PreviewSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mt-7 text-sm leading-7 text-slate-700">
+      <h2 className="mb-4 border-b border-slate-200 pb-2 text-sm font-black uppercase tracking-[0.14em] text-slate-950">
+        {title}
+      </h2>
+
+      {children}
+    </section>
   );
 }

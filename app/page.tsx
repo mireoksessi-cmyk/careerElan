@@ -302,50 +302,90 @@ async function resendConfirmationEmail() {
 }
 
   return (
-    <main className="min-h-screen w-screen overflow-x-hidden bg-white text-slate-950">
-      <section className="relative overflow-hidden bg-gradient-to-br from-white via-blue-50 to-slate-50">
-        <div className="pointer-events-none absolute -left-40 top-24 h-96 w-96 rounded-full bg-blue-200/50 blur-3xl" />
-        <div className="pointer-events-none absolute -right-40 top-0 h-[520px] w-[520px] rounded-full bg-blue-300/40 blur-3xl" />
+  <main className="min-h-screen w-screen overflow-x-hidden bg-white text-slate-950">
+    <section className="relative overflow-hidden bg-gradient-to-br from-white via-blue-50 to-slate-50">
+      <div className="pointer-events-none absolute -left-40 top-24 h-96 w-96 rounded-full bg-blue-200/50 blur-3xl" />
+      <div className="pointer-events-none absolute -right-40 top-0 h-[520px] w-[520px] rounded-full bg-blue-300/40 blur-3xl" />
 
-        <header className="relative z-10 mx-auto flex w-full max-w-[1440px] items-center justify-between px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
-          <Image src="/logo.png" alt="Career Élan" width={180} height={76} priority className="h-auto w-[145px] sm:w-[176px]" />
+      <header className="relative z-10 mx-auto flex w-full max-w-[1440px] items-center justify-between px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
+        <Image
+          src="/logo.png"
+          alt="Career Élan"
+          width={180}
+          height={76}
+          priority
+          className="h-auto w-[145px] sm:w-[176px]"
+        />
 
-          <nav className="hidden items-center gap-8 text-[13px] font-bold text-slate-800 md:flex">
-            <a href="#features" className="transition hover:text-blue-600">Features</a>
-            <a href="#how-it-works" className="transition hover:text-blue-600">How it Works</a>
-            <a href="#examples" className="transition hover:text-blue-600">Examples</a>
-            <a href="#pricing" className="transition hover:text-blue-600">Pricing</a>
-            <a href="#faq" className="transition hover:text-blue-600">Resources⌄</a>
-          </nav>
+        <nav className="hidden items-center gap-8 text-[13px] font-bold text-slate-800 md:flex">
+          <a
+            href="#features"
+            className="transition hover:text-blue-600"
+          >
+            Features
+          </a>
 
-          <div className="hidden items-center gap-4 md:flex">
-            <button
-              type="button"
-              onClick={() => openAuth("login")}
-              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
-            >
-              Log in
-            </button>
-            <button
-              type="button"
-              onClick={() => openAuth("signup")}
-              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
-            >
-              Get Started 
-            </button>
-          </div>
+          <a
+            href="#how-it-works"
+            className="transition hover:text-blue-600"
+          >
+            How it Works
+          </a>
+
+          <a
+            href="#examples"
+            className="transition hover:text-blue-600"
+          >
+            Examples
+          </a>
+
+          <a
+            href="#pricing"
+            className="transition hover:text-blue-600"
+          >
+            Pricing
+          </a>
+
+          <a
+            href="#faq"
+            className="transition hover:text-blue-600"
+          >
+            Resources⌄
+          </a>
+        </nav>
+
+        <div className="hidden items-center gap-4 md:flex">
+          <button
+            type="button"
+            onClick={() => openAuth("login")}
+            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            Log in
+          </button>
 
           <button
             type="button"
             onClick={() => openAuth("signup")}
-            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-blue-200 md:hidden"
+            className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
           >
-            Start
+            Get Started
           </button>
-        </header>
+        </div>
 
-        <div className="relative z-10 mx-auto grid w-full max-w-[1440px] items-center gap-8 px-5 pb-8 pt-3 sm:px-8 lg:grid-cols-[0.78fr_1.22fr] lg:px-10 xl:px-12">
-          <div className="max-w-[520px]">
+        <button
+          type="button"
+          onClick={() => openAuth("signup")}
+          className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-blue-200 md:hidden"
+        >
+          Start
+        </button>
+      </header>
+
+      <div className="relative z-10 mx-auto w-full max-w-[1440px] px-5 pb-10 pt-3 sm:px-8 lg:px-10 xl:px-12">
+        {/* 상단: 소개 문구 + 패키지 카드 */}
+        <div className="grid items-start gap-10 lg:grid-cols-[0.82fr_1.18fr]">
+          {/* 왼쪽 */}
+          <div className="max-w-[540px]">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-blue-100/90 px-4 py-2 text-xs font-extrabold text-blue-700 ring-1 ring-blue-200">
               ✦ AI-Powered Career Operating System
             </div>
@@ -353,23 +393,39 @@ async function resendConfirmationEmail() {
             <h1 className="text-[44px] font-black leading-[0.98] tracking-[-0.05em] text-slate-950 sm:text-[56px] lg:text-[66px] xl:text-[72px]">
               Upload One Profile.
               <br />
-              <span className="text-blue-600">Apply Everywhere.</span>
+              <span className="text-blue-600">
+                Apply Everywhere.
+              </span>
             </h1>
 
             <p className="mt-6 max-w-[500px] text-[15px] leading-7 text-slate-600">
-              Career Élan is your AI career partner that tailors your resume, cover letter,
-              and emails to every job automatically — so you never have to rewrite anything again.
+              Career Élan is your AI career partner that
+              tailors your resume, cover letter, and emails
+              to every job automatically — so you never have
+              to rewrite anything again.
             </p>
 
             <p className="mt-4 max-w-[500px] text-[15px] font-bold leading-7 text-slate-700">
-              Upload one profile. Career Élan tailors every application for you.
+              Upload one profile. Career Élan tailors every
+              application for you.
             </p>
 
             <div className="mt-5 grid gap-3 text-sm font-bold text-slate-700">
-              <span>✓ One profile for your entire career</span>
-              <span>✓ AI tailors to any job description in seconds</span>
-              <span>✓ ATS-optimized & recruiter-approved</span>
-              <span>✓ Never rewrite your resume again</span>
+              <span>
+                ✓ One profile for your entire career
+              </span>
+
+              <span>
+                ✓ AI tailors to any job description in seconds
+              </span>
+
+              <span>
+                ✓ ATS-optimized &amp; recruiter-approved
+              </span>
+
+              <span>
+                ✓ Never rewrite your resume again
+              </span>
             </div>
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -378,36 +434,190 @@ async function resendConfirmationEmail() {
                 onClick={() => openAuth("signup")}
                 className="w-fit rounded-xl bg-blue-600 px-8 py-4 text-base font-black text-white shadow-xl shadow-blue-300 transition hover:-translate-y-0.5 hover:bg-blue-700"
               >
-                Get Started 
+                Get Started
               </button>
+
               <button
                 type="button"
-                onClick={() => document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" })}
+                onClick={() =>
+                  document
+                    .getElementById("how-it-works")
+                    ?.scrollIntoView({
+                      behavior: "smooth",
+                    })
+                }
                 className="w-fit rounded-xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
               >
                 See How It Works ◎
               </button>
             </div>
-            <p className="mt-3 text-xs font-bold text-slate-500"></p>
           </div>
 
-          <div className="rounded-[1.7rem] border border-slate-200 bg-white/90 p-7 shadow-xl shadow-blue-100/70">
+          {/* 오른쪽 패키지 카드 */}
+          <div className="rounded-[1.7rem] border border-slate-200 bg-white/90 p-6 shadow-xl shadow-blue-100/70 sm:p-7">
             <div className="mb-6 flex items-center justify-between gap-4">
-              <h3 className="text-2xl font-black tracking-[-0.03em] text-slate-950">Your AI Application Package</h3>
-              <span className="rounded-full bg-green-50 px-4 py-2 text-xs font-black text-green-700">ATS Match 96%</span>
+              <h3 className="text-2xl font-black tracking-[-0.03em] text-slate-950">
+                Your AI Application Package
+              </h3>
+
+              <span className="shrink-0 rounded-full bg-green-50 px-4 py-2 text-xs font-black text-green-700">
+                ATS Match 96%
+              </span>
             </div>
+
             <div className="space-y-4">
-              <HeroPackageCard title="Optimized Resume" body="Tailored to the job description" detail="✓ Changes explained" icon={<MiniResume compact />} onClick={() => openAuth("signup")} />
-              <HeroPackageCard title="Personalized Cover Letter" body="Custom letter that speaks to" detail="the hiring manager" icon={<MiniLetter />} onClick={() => openAuth("signup")} />
-              <HeroPackageCard title="Professional Email Draft" body="Ready-to-send email draft" detail="for your application" icon={<IconBox icon="✉" />} onClick={() => openAuth("signup")} />
+              <HeroPackageCard
+                title="Optimized Resume"
+                body="Tailored to the job description"
+                detail="✓ Changes explained"
+                icon={<MiniResume compact />}
+                onClick={() => openAuth("signup")}
+              />
+
+              <HeroPackageCard
+                title="Personalized Cover Letter"
+                body="Custom letter that speaks to"
+                detail="the hiring manager"
+                icon={<MiniLetter />}
+                onClick={() => openAuth("signup")}
+              />
+
+              <HeroPackageCard
+                title="Professional Email Draft"
+                body="Ready-to-send email draft"
+                detail="for your application"
+                icon={<IconBox icon="✉" />}
+                onClick={() => openAuth("signup")}
+              />
             </div>
+
             <div className="mt-6 rounded-2xl bg-slate-50 p-5 text-center">
-              <p className="text-sm font-black text-slate-800">🔒 One Profile. Unlimited Applications.</p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">No rewriting. Just better applications.</p>
+              <p className="text-sm font-black text-slate-800">
+                🔒 One Profile. Unlimited Applications.
+              </p>
+
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                No rewriting. Just better applications.
+              </p>
             </div>
           </div>
         </div>
-      </section>
+
+        {/* 하단: 전체 폭 비교표 */}
+<div className="mt-9 overflow-hidden rounded-2xl border-2 border-blue-600 bg-white shadow-xl shadow-blue-100">
+
+  {/* 비교표 헤더 */}
+  <div className="grid grid-cols-[minmax(0,1fr)_110px_minmax(0,1fr)] items-center border-b border-slate-200 bg-slate-50 px-6 py-5">
+
+    {/* ChatGPT / Gemini */}
+    <div className="flex items-center justify-end gap-4">
+
+      <div className="text-right">
+        <p className="whitespace-nowrap text-base font-black text-slate-950">
+          ChatGPT / Gemini
+        </p>
+
+        <p className="whitespace-nowrap text-xs font-semibold text-slate-500">
+          General AI Assistants
+        </p>
+      </div>
+
+      <div className="flex shrink-0 items-center">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+          <Image
+            src="/openai.png"
+            alt="OpenAI"
+            width={28}
+            height={28}
+            className="h-7 w-7 object-contain"
+          />
+        </div>
+
+        <div className="-ml-2 flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+          <Image
+            src="/gemini.png"
+            alt="Google Gemini"
+            width={28}
+            height={28}
+            className="h-7 w-7 object-contain"
+          />
+        </div>
+      </div>
+
+    </div>
+
+    {/* VS */}
+    <div className="flex justify-center">
+      <span className="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-xs font-black tracking-widest text-white shadow-lg">
+        VS
+      </span>
+    </div>
+
+    {/* Career Élan */}
+    <div className="flex items-center justify-start gap-4">
+
+      <Image
+        src="/logo.png"
+        alt="Career Élan"
+        width={52}
+        height={52}
+        className="h-11 w-auto shrink-0 object-contain"
+      />
+
+      <div>
+        <p className="whitespace-nowrap text-base font-black text-slate-950">
+          Career Élan
+        </p>
+
+        <p className="whitespace-nowrap text-xs font-semibold text-slate-500">
+          Built for Job Seekers
+        </p>
+      </div>
+
+      
+    </div>
+  </div>
+
+  <ComparisonRow
+  left="General Resume"
+  right="Job-Specific Resume"
+/>
+
+<ComparisonRow
+  left="Manual Editing"
+  right="One-Click AI Tailoring"
+/>
+
+<ComparisonRow
+  left="Resume Only"
+  right="Full Application Package"
+/>
+
+<ComparisonRow
+  left="No Career Memory"
+  right="Career Memory"
+/>
+
+<ComparisonRow
+  left="No Application Tracker"
+  right="Track Every Application"
+/>
+
+<ComparisonRow
+  left="Generic Resume"
+  right="ATS-Optimized Resume"
+/>
+
+<ComparisonRow
+  left="No AI Explanation"
+  right="Explains Every Change"
+  last
+/>
+</div>
+      </div>
+    </section>
+
+    {/* 여기부터 기존 Trusted by job seekers worldwide 섹션을 그대로 붙이면 됨 */}
 
       <section className="w-full bg-white px-5 py-4 sm:px-8 lg:px-10 xl:px-12">
         <div className="mx-auto mb-3 flex max-w-[1440px] items-center gap-6 text-center text-xs font-black uppercase tracking-widest text-slate-500">
@@ -833,6 +1043,53 @@ function StepCard({ number, title, body, icon }: { number: string; title: string
 
 function FooterGroup({ title, items }: { title: string; items: string[] }) {
   return <div><p className="font-black">{title}</p><div className="mt-4 space-y-3 text-sm text-slate-400">{items.map((item) => <p key={item}>{item}</p>)}</div></div>;
+}
+
+function ComparisonRow({
+  left,
+  right,
+  last = false,
+}: {
+  left: string;
+  right: string;
+  last?: boolean;
+}) {
+  return (
+    <div
+      className={`grid grid-cols-[1fr_110px_1fr] ${
+        last ? "" : "border-b border-slate-200"
+      }`}
+    >
+      {/* ChatGPT / Gemini */}
+      <div className="flex min-h-[58px] items-center justify-end bg-red-50/30 px-5 py-3 text-right">
+        <span className="text-[13px] font-semibold text-slate-600">
+          {left}
+        </span>
+
+        <span className="ml-3 text-lg font-black text-red-500">
+          ✕
+        </span>
+      </div>
+
+      {/* VS */}
+      <div className="flex items-center justify-center border-x border-slate-200 bg-gradient-to-b from-blue-50 to-white">
+        <span className="rounded-full bg-blue-600 px-4 py-1.5 text-xs font-black tracking-widest text-white shadow-md">
+          VS
+        </span>
+      </div>
+
+      {/* Career Élan */}
+      <div className="flex min-h-[58px] items-center justify-start bg-blue-50/30 px-5 py-3 text-left">
+        <span className="mr-3 text-lg font-black text-blue-600">
+          ✓
+        </span>
+
+        <span className="text-[13px] font-black text-slate-900">
+          {right}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function Input({ value, onChange, placeholder, icon, type = "text" }: { value: string; onChange: (value: string) => void; placeholder: string; icon: string; type?: string }) {
