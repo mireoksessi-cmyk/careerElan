@@ -121,52 +121,100 @@ export default function HomePage() {
 }
 
   async function handleEmailSignup() {
-    setLoading(true);
-    setMessage("");
-    const { data: existing } = await supabase
-  .from("profiles")
-  .select("id")
-  .eq("login_id", loginId)
-  .maybeSingle();
+  const cleanFullName = fullName.trim();
+  const cleanPhone = phone.trim();
+  const cleanLoginId = loginId.trim();
+  const cleanEmail = signupEmail.trim().toLowerCase();
 
-if (existing) {
-  setMessage("This ID is already taken. Please choose another one.");
-  setLoading(false);
-  return;
-}
-    const { data, error } = await supabase.auth.signUp({
-      email: signupEmail,
-      password: signupPassword,
-      options: {
-        data: {
-          full_name: fullName,
-          phone,
+  if (!cleanFullName) {
+    setMessage("Please enter your full name.");
+    return;
+  }
+
+  if (!cleanLoginId) {
+    setMessage("Please create a login ID.");
+    return;
+  }
+
+  if (!cleanEmail) {
+    setMessage("Please enter your email.");
+    return;
+  }
+
+  if (!signupPassword) {
+    setMessage("Please create a password.");
+    return;
+  }
+
+  setLoading(true);
+  setMessage("");
+
+  try {
+    const { data, error } =
+      await supabase.auth.signUp({
+        email: cleanEmail,
+        password: signupPassword,
+        options: {
+          data: {
+            full_name: cleanFullName,
+            phone: cleanPhone,
+            login_id: cleanLoginId,
+          },
+          emailRedirectTo:
+            `${window.location.origin}/auth/callback`,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+      });
 
     if (error) {
+      console.error("SIGNUP ERROR =", error);
+
+      if (
+        error.message
+          .toLowerCase()
+          .includes("duplicate")
+      ) {
+        setMessage(
+          "This login ID or email is already registered."
+        );
+        return;
+      }
+
       setMessage(error.message);
-      setLoading(false);
       return;
     }
 
-    // Optional: if your Supabase project confirms emails manually, user may need to verify email first.
-    if (data.user) {
-      await supabase.from("profiles").upsert({
-        id: data.user.id,
-        login_id: loginId, 
-        full_name: fullName,
-        phone,
-        email: signupEmail,
-        created_at: new Date().toISOString(),
-      });
+    if (!data.user) {
+      setMessage(
+        "Unable to create your account."
+      );
+      return;
     }
 
-    setMessage("Account created. Please check your email if confirmation is required.");
+    if (data.session) {
+  alert("Your account has been created successfully.");
+
+  router.replace("/career-memory");
+  router.refresh();
+  return;
+}
+
+alert(
+  "Your account has been created successfully. Please check your email and verify your account before logging in."
+);
+
+setMessage(
+  "Account created. Please check your email and verify your account before logging in."
+);
+  } catch (error) {
+    console.error("SIGNUP ERROR =", error);
+
+    setMessage(
+      "Unable to create your account. Please try again."
+    );
+  } finally {
     setLoading(false);
   }
+}
 
 async function resendConfirmationEmail() {
   const email = signupEmail.trim();
