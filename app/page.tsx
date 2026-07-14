@@ -75,61 +75,78 @@ useEffect(() => {
     }
   }
 
-  async function handleEmailLogin() {
+ async function handleEmailLogin() {
+  const cleanLoginId = loginEmail.trim();
+
+  if (!cleanLoginId || !loginPassword) {
+    setMessage("Please enter your ID and password.");
+    return;
+  }
+
   setLoading(true);
   setMessage("");
 
   try {
-    // 1. 사용자가 입력한 로그인 ID로 실제 이메일 찾기
-    const { data: profileData, error: profileError } =
-      await supabase
-        .from("profiles")
-        .select("email")
-        .eq("login_id", loginEmail.trim())
-        .maybeSingle();
+    const lookupResponse = await fetch(
+      "/api/login-by-id",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          loginId: cleanLoginId,
+        }),
+      }
+    );
 
-    if (profileError || !profileData?.email) {
-      setMessage("Invalid ID or password.");
+    const lookupData = await lookupResponse.json();
+console.log("LOOKUP STATUS =", lookupResponse.status);
+console.log("LOOKUP DATA =", lookupData);
+    if (!lookupResponse.ok || !lookupData.email) {
+      setMessage(
+        lookupData.error ||
+          "Invalid ID or password."
+      );
       return;
     }
 
-    // 2. Supabase 이메일 로그인
     const { data: authData, error: authError } =
       await supabase.auth.signInWithPassword({
-        email: profileData.email,
+        email: lookupData.email,
         password: loginPassword,
       });
 
     if (authError) {
-  console.error("AUTH LOGIN ERROR =", authError);
+      console.error("AUTH LOGIN ERROR =", authError);
 
-  if (
-    authError.message
-      .toLowerCase()
-      .includes("email not confirmed")
-  ) {
-    setMessage(
-      "Please verify your email before logging in."
-    );
-  } else {
-    setMessage("Invalid ID or password.");
-  }
+      if (
+        authError.message
+          .toLowerCase()
+          .includes("email not confirmed")
+      ) {
+        setMessage(
+          "Please verify your email before logging in."
+        );
+      } else {
+        setMessage("Invalid ID or password.");
+      }
 
-  return;
-}
+      return;
+    }
 
-if (!authData.user) {
-  setMessage("Unable to load your account.");
-  return;
-}
+    if (!authData.user) {
+      setMessage("Unable to load your account.");
+      return;
+    }
 
-    // 3. Career Memory 완료 여부 확인
     const { data: memory, error: memoryError } =
       await supabase
         .from("career_memory")
         .select("required_completed")
         .eq("user_id", authData.user.id)
         .maybeSingle();
+        
 
     if (memoryError) {
       console.error(
@@ -138,12 +155,11 @@ if (!authData.user) {
       );
     }
 
-    // 4. 완료 여부에 따라 바로 분기
-    if (memory?.required_completed === true) {
-      router.replace("/dashboard");
-    } else {
-      router.replace("/career-memory");
-    }
+    router.replace(
+      memory?.required_completed === true
+        ? "/dashboard"
+        : "/career-memory"
+    );
 
     router.refresh();
   } catch (error) {
