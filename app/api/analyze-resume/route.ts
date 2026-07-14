@@ -526,17 +526,19 @@ console.log("resumeText preview =", resumeText?.substring(0, 300));
     originalText: resumeText,   // ⭐ 이 한 줄 추가
   },
 });
-     } catch (error) {
-    console.error("Resume Parser Error:", error);
+    } catch (error: any) {
+  console.error("Resume Parser Error:", error);
 
-    return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to analyze resume.",
-      },
-      {
-        status: 500,
-      }
-    );
-  }
+  return NextResponse.json(
+    {
+      success: false,
+      message: "Failed to analyze resume.",
+      error: error?.message,
+      stack: error?.stack,
+    },
+    {
+      status: 500,
+    }
+  );
+}
 }
