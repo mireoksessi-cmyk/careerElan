@@ -13,8 +13,8 @@ export async function GET(request: Request) {
     실제 이동 주소는 로그인 확인 후 아래에서 변경한다.
   */
   const response = NextResponse.redirect(
-    new URL("/", request.url)
-  );
+  new URL("/?verified=true", request.url)
+);
 
   const cookieStore = await cookies();
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -24,6 +24,25 @@ export default function HomePage() {
   const [signupEmail, setSignupEmail] = useState("");
   const [loginId, setLoginId] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
+useEffect(() => {
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  if (params.get("verified") === "true") {
+    setAuthMode("login");
+    setShowAuthModal(true);
+    setMessage(
+      "Account created successfully. Your email has been verified. You can now log in."
+    );
+
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname
+    );
+  }
+}, []);
 
   function openAuth(mode: AuthMode = "login") {
     setAuthMode(mode);
@@ -81,10 +100,28 @@ export default function HomePage() {
         password: loginPassword,
       });
 
-    if (authError || !authData.user) {
-      setMessage("Invalid ID or password.");
-      return;
-    }
+    if (authError) {
+  console.error("AUTH LOGIN ERROR =", authError);
+
+  if (
+    authError.message
+      .toLowerCase()
+      .includes("email not confirmed")
+  ) {
+    setMessage(
+      "Please verify your email before logging in."
+    );
+  } else {
+    setMessage("Invalid ID or password.");
+  }
+
+  return;
+}
+
+if (!authData.user) {
+  setMessage("Unable to load your account.");
+  return;
+}
 
     // 3. Career Memory 완료 여부 확인
     const { data: memory, error: memoryError } =
@@ -203,7 +240,7 @@ alert(
 );
 
 setMessage(
-  "Account created. Please check your email and verify your account before logging in."
+  "Verification email sent. Please verify your email to complete account creation."
 );
   } catch (error) {
     console.error("SIGNUP ERROR =", error);
