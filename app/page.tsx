@@ -168,6 +168,38 @@ if (existing) {
     setLoading(false);
   }
 
+async function resendConfirmationEmail() {
+  const email = signupEmail.trim();
+
+  if (!email) {
+    setMessage("Please enter your email first.");
+    return;
+  }
+
+  setLoading(true);
+  setMessage("");
+
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: {
+      emailRedirectTo: `${window.location.origin}/auth/callback`,
+    },
+  });
+
+  setLoading(false);
+
+  if (error) {
+    console.error("RESEND ERROR =", error);
+    setMessage(error.message);
+    return;
+  }
+
+  setMessage(
+    "Verification email sent again. Please check your inbox and spam folder."
+  );
+}
+
   return (
     <main className="min-h-screen w-screen overflow-x-hidden bg-white text-slate-950">
       <section className="relative overflow-hidden bg-gradient-to-br from-white via-blue-50 to-slate-50">
@@ -504,6 +536,15 @@ if (existing) {
     >
       Create Account
     </button>
+
+    <button
+  type="button"
+  onClick={resendConfirmationEmail}
+  disabled={loading}
+  className="w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600"
+>
+  Resend Verification Email
+</button>
   </form>
 ) : (
   <form className="space-y-4">
