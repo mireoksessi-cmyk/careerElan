@@ -1,22 +1,23 @@
 type Props = {
   total: number;
+  applied: number;
   interviewRate: number;
   offerRate: number;
   acceptanceRate: number;
-  averageATS: number;
+  rejected: number;
 };
 
 export default function AnalyticsStats({
   total,
+  applied,
   interviewRate,
   offerRate,
   acceptanceRate,
-  averageATS,
+  rejected,
 }: Props) {
   return (
-    <div className="mt-8 grid grid-cols-5 gap-6">
-
-      <div className="rounded-3xl bg-white border border-blue-100 p-6 shadow-sm">
+    <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
         <p className="text-sm text-gray-500">
           Total Applications
         </p>
@@ -26,7 +27,17 @@ export default function AnalyticsStats({
         </h2>
       </div>
 
-      <div className="rounded-3xl bg-white border border-blue-100 p-6 shadow-sm">
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
+        <p className="text-sm text-gray-500">
+          Applied
+        </p>
+
+        <h2 className="mt-3 text-4xl font-bold text-sky-600">
+          {applied}
+        </h2>
+      </div>
+
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
         <p className="text-sm text-gray-500">
           Interview Rate
         </p>
@@ -36,7 +47,7 @@ export default function AnalyticsStats({
         </h2>
       </div>
 
-      <div className="rounded-3xl bg-white border border-blue-100 p-6 shadow-sm">
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
         <p className="text-sm text-gray-500">
           Offer Rate
         </p>
@@ -46,7 +57,7 @@ export default function AnalyticsStats({
         </h2>
       </div>
 
-      <div className="rounded-3xl bg-white border border-blue-100 p-6 shadow-sm">
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
         <p className="text-sm text-gray-500">
           Acceptance Rate
         </p>
@@ -56,16 +67,15 @@ export default function AnalyticsStats({
         </h2>
       </div>
 
-      <div className="rounded-3xl bg-white border border-blue-100 p-6 shadow-sm">
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
         <p className="text-sm text-gray-500">
-          Average ATS
+          Rejected
         </p>
 
-        <h2 className="mt-3 text-4xl font-bold text-orange-500">
-          {averageATS}%
+        <h2 className="mt-3 text-4xl font-bold text-red-600">
+          {rejected}
         </h2>
       </div>
-
     </div>
   );
 }

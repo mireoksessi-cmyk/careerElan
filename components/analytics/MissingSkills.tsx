@@ -24,7 +24,7 @@ export default function MissingSkills({
     <div className="rounded-3xl border border-red-100 bg-white p-6 shadow-sm">
 
       <h2 className="text-2xl font-bold">
-        Missing Skills
+        Overall Missing Skills
       </h2>
 
       <p className="mt-1 text-sm text-gray-500">

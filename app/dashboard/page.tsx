@@ -11,7 +11,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerMemoryGuard from "@/components/CareerMemoryGuard";
-
+const FREE_PACKAGE_LIMIT = 10;
 const menuItems = [
   "Dashboard",
   "Career Memory",
@@ -22,12 +22,6 @@ const menuItems = [
   "Settings",
 ];
 
-const progressCards = [
-  { title: "Career Memory", change: "+6%", note: "profile improved this week", icon: "🧠" },
-  { title: "Application Packages", change: "+3", note: "new packages created this week", icon: "📦" },
-  { title: "Applications Sent", change: "+5", note: "applications submitted this month", icon: "📤" },
-  { title: "Interviews", change: "+2", note: "interviews scheduled", icon: "🗓️" },
-];
 
 type JobItem = {
   title: string;
@@ -55,19 +49,7 @@ type PreviewAsset =
     }
   | null;
 
-const defaultInsightItems = [
-  { name: "Add your target roles", level: "Recommended" },
-  { name: "Add language skills", level: "Worth Adding" },
-  { name: "Add work or volunteer details", level: "Worth Adding" },
-  { name: "Add certifications or licenses", level: "Nice to Have" },
-];
 
-const personalizedInsightItems = [
-  { name: "Add measurable achievements", level: "Recommended" },
-  { name: "Add tools or software you used", level: "Worth Adding" },
-  { name: "Add language skills", level: "Worth Adding" },
-  { name: "Add certifications or licenses", level: "Nice to Have" },
-];
 
 const defaultCareerFairs = [
   { title: "Toronto Career Fair", date: "Jul 12", location: "Metro Toronto Convention Centre", icon: "🎓", tags: ["General", "Toronto"], match: "", why: ["Open to multiple industries", "Good for entry-level roles"] },
@@ -102,6 +84,485 @@ function getMenuIcon(item: string) {
   return "⚙️";
 }
 
+type InsightItem = {
+  name: string;
+  level: "Recommended" | "Worth Adding" | "Nice to Have";
+  reason: string;
+};
+
+type DashboardStats = {
+  packages: number;
+  applications: number;
+  interviews: number;
+  packagesThisMonth: number;
+  applicationsThisMonth: number;
+  interviewsThisMonth: number;
+};
+
+function hasArrayItems(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+function hasMeaningfulValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (typeof value === "number") {
+    return true;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(hasMeaningfulValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value).some(
+      hasMeaningfulValue
+    );
+  }
+
+  return false;
+}
+
+function hasMeaningfulArrayItems(
+  value: unknown
+): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some((item) =>
+      hasMeaningfulValue(item)
+    )
+  );
+}
+function hasText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function getExperienceDescription(experience: any) {
+  return [
+    experience?.description,
+    experience?.responsibilities,
+    experience?.achievements,
+    experience?.details,
+    experience?.bullets,
+  ]
+    .flat()
+    .filter(Boolean)
+    .join(" ");
+}
+
+function hasMeasurableAchievement(experiences: any[]) {
+  return experiences.some((experience) => {
+    const text = getExperienceDescription(experience);
+
+    return /\d+|%|\$|CAD|USD|increased|reduced|improved|saved|grew|generated/i.test(
+      text
+    );
+  });
+}
+
+function hasToolsOrSoftware(data: any) {
+  const skills = Array.isArray(data?.skills)
+    ? data.skills
+    : Array.isArray(data?.technicalSkills)
+      ? data.technicalSkills
+      : [];
+
+  const text = skills
+    .map((skill: any) =>
+      typeof skill === "string"
+        ? skill
+        : skill?.name || skill?.skill || ""
+    )
+    .join(" ");
+
+  return /excel|word|powerpoint|outlook|google|microsoft|salesforce|canva|quickbooks|slack|teams|crm|software|system/i.test(
+    text
+  );
+}
+
+function normalizeToArray(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+
+  if (
+    typeof value === "string" &&
+    value.trim().length > 0
+  ) {
+    return [value];
+  }
+
+  return [];
+}
+
+function getResumeText(data: any) {
+  return [
+    data?.original_text,
+    data?.summary,
+    data?.professionalSummary,
+    data?.professional_summary,
+    data?.headline,
+    data?.jobTitle,
+    data?.targetRole,
+    data?.target_role,
+    data?.skills,
+    data?.technicalSkills,
+    data?.coreSkills,
+    data?.experience,
+    data?.workExperience,
+    data?.work_experience,
+    data?.education,
+    data?.languages,
+    data?.certifications,
+  ]
+    .flat(Infinity)
+    .map((item) => {
+      if (typeof item === "string") {
+        return item;
+      }
+
+      if (
+        item &&
+        typeof item === "object"
+      ) {
+        return Object.values(item)
+          .flat(Infinity)
+          .filter(
+            (value) =>
+              typeof value === "string"
+          )
+          .join(" ");
+      }
+
+      return "";
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+type ResumeInsightSource =
+  | "career_memory"
+  | "uploaded_resume";
+
+function buildResumeInsights(
+  data: any,
+  source: ResumeInsightSource
+): InsightItem[] {
+  const insights: InsightItem[] = [];
+
+  const experiences = Array.isArray(data?.experience)
+    ? data.experience
+    : Array.isArray(data?.workExperience)
+      ? data.workExperience
+      : Array.isArray(data?.work_experience)
+        ? data.work_experience
+        : [];
+
+  const education = Array.isArray(data?.education)
+    ? data.education
+    : Array.isArray(data?.educations)
+      ? data.educations
+      : [];
+
+  const skills = Array.isArray(data?.skills)
+    ? data.skills
+    : Array.isArray(data?.technicalSkills)
+      ? data.technicalSkills
+      : Array.isArray(data?.coreSkills)
+        ? data.coreSkills
+        : [];
+
+  const languages = Array.isArray(data?.languages)
+    ? data.languages
+    : Array.isArray(data?.languageSkills)
+      ? data.languageSkills
+      : [];
+
+  const certifications = Array.isArray(
+    data?.certifications
+  )
+    ? data.certifications
+    : Array.isArray(data?.licenses)
+      ? data.licenses
+      : Array.isArray(data?.certificates)
+        ? data.certificates
+        : [];
+
+  const targetRoles = Array.isArray(
+    data?.target_roles
+  )
+    ? data.target_roles
+    : Array.isArray(data?.targetRoles)
+      ? data.targetRoles
+      : [];
+
+  const summary =
+    data?.summary ||
+    data?.professionalSummary ||
+    data?.professional_summary ||
+    "";
+
+  const headline =
+    data?.headline ||
+    data?.jobTitle ||
+    data?.job_title ||
+    data?.title ||
+    "";
+
+  const originalText =
+    typeof data?.original_text === "string"
+      ? data.original_text
+      : "";
+
+  /*
+    Career Memory는 실제 입력된 필드만 검사한다.
+    Summary에 "English", "certification"이 있어도
+    Languages나 Certifications 섹션이 작성된 것으로 보지 않는다.
+  */
+  const hasExperience =
+  hasMeaningfulArrayItems(experiences);
+
+const hasSkills =
+  hasMeaningfulArrayItems(skills);
+
+const hasEducation =
+  source === "career_memory"
+    ? hasMeaningfulArrayItems(education)
+    : hasMeaningfulArrayItems(education) ||
+      /\beducation\b|\bcollege\b|\buniversity\b|\bdegree\b|\bdiploma\b/i.test(
+        originalText
+      );
+
+const hasLanguages =
+  source === "career_memory"
+    ? hasMeaningfulArrayItems(languages)
+    : hasMeaningfulArrayItems(languages) ||
+      /\blanguages?\b|\benglish\b|\bfrench\b|\bkorean\b|\bspanish\b|\bmandarin\b/i.test(
+        originalText
+      );
+
+const hasCertifications =
+  source === "career_memory"
+    ? hasMeaningfulArrayItems(
+        certifications
+      )
+    : hasMeaningfulArrayItems(
+        certifications
+      ) ||
+      /\bcertifications?\b|\blicen[cs]e\b|\bcertificate\b|\bcredential\b|\bDELF\b/i.test(
+        originalText
+      );
+
+if (!hasText(summary)) {
+  insights.push({
+    name: "Add a professional summary",
+    level: "Recommended",
+    reason:
+      "A focused summary helps recruiters understand your experience and value quickly.",
+  });
+}
+
+if (
+  !hasText(headline) &&
+  !hasMeaningfulArrayItems(targetRoles)
+) {
+  insights.push({
+    name: "Clarify your target role",
+    level: "Recommended",
+    reason:
+      "A clear headline or target role makes the resume easier to understand and tailor.",
+  });
+}
+
+if (!hasExperience) {
+  insights.push({
+    name: "Add work or volunteer experience",
+    level: "Recommended",
+    reason:
+      "Experience is needed to create stronger job-specific applications.",
+  });
+} else if (
+  !hasMeasurableAchievement(experiences)
+) {
+  insights.push({
+    name: "Add measurable achievements",
+    level: "Recommended",
+    reason:
+      "Numbers and results make your experience more specific and credible.",
+  });
+}
+
+if (!hasSkills) {
+  insights.push({
+    name: "Add relevant skills",
+    level: "Worth Adding",
+    reason:
+      "Skills help Career Élan match your resume to job requirements.",
+  });
+} else if (!hasToolsOrSoftware(data)) {
+  insights.push({
+    name: "Add tools or software",
+    level: "Worth Adding",
+    reason:
+      "Employers often search for specific software and technical keywords.",
+  });
+}
+
+if (!hasEducation) {
+  insights.push({
+    name: "Add education details",
+    level: "Worth Adding",
+    reason:
+      "Education can help satisfy job requirements and improve ATS matching.",
+  });
+}
+
+if (!hasLanguages) {
+  insights.push({
+    name: "Add language skills",
+    level: "Worth Adding",
+    reason:
+      "Language skills can strengthen customer-facing and international applications.",
+  });
+}
+
+if (!hasCertifications) {
+  insights.push({
+    name: "Add certifications or licences",
+    level: "Nice to Have",
+    reason:
+      "Relevant credentials can strengthen your resume and support your qualifications.",
+  });
+}
+
+if (insights.length === 0) {
+  insights.push({
+    name: "Your resume profile looks strong",
+    level: "Nice to Have",
+    reason:
+      "Keep your experience, achievements, and skills updated as your career develops.",
+  });
+  
+}
+
+return insights.slice(0, 4);
+}
+type SelectedResumePayload = {
+  sourceType:
+    | "career_memory"
+    | "upload";
+
+  resumeId: string | null;
+  resumeName: string;
+  resumeText: string;
+  resumeData: any;
+};
+
+function buildSelectedResumePayload(
+  careerMemory: any,
+  resumes: any[],
+  selectedResume: string
+): SelectedResumePayload | null {
+  /*
+    Career Memory Resume 선택
+  */
+  if (
+    selectedResume ===
+    "career_memory"
+  ) {
+    if (!careerMemory) {
+      return null;
+    }
+
+    return {
+      sourceType:
+        "career_memory",
+
+      resumeId: null,
+
+      resumeName:
+        careerMemory.resume_name ||
+        "Career Memory Resume",
+
+      resumeText:
+        getResumeText(
+          careerMemory
+        ),
+
+      resumeData:
+        careerMemory,
+    };
+  }
+
+  /*
+    업로드 Resume 선택
+  */
+  const uploadedResume =
+    resumes.find(
+      (resume: any) =>
+        resume.id ===
+        selectedResume
+    );
+
+  if (!uploadedResume) {
+    return null;
+  }
+
+  let parsedData =
+    uploadedResume.parsed_data ||
+    {};
+
+  /*
+    parsed_data가 JSON 문자열로
+    저장된 경우 객체로 변환
+  */
+  if (
+    typeof parsedData ===
+    "string"
+  ) {
+    try {
+      parsedData =
+        JSON.parse(parsedData);
+    } catch {
+      parsedData = {};
+    }
+  }
+
+  const resumeData = {
+    ...parsedData,
+
+    original_text:
+      uploadedResume.original_text ||
+      "",
+  };
+
+  return {
+    sourceType: "upload",
+
+    resumeId:
+      uploadedResume.id,
+
+    resumeName:
+      uploadedResume.file_name ||
+      "Uploaded Resume",
+
+    /*
+      업로드 이력서는 원문을
+      최우선으로 사용
+    */
+    resumeText:
+      uploadedResume.original_text ||
+      getResumeText(
+        resumeData
+      ),
+
+    resumeData,
+  };
+}
+
 export default function DashboardPage() {
 const {
   user,
@@ -132,14 +593,40 @@ const [
   setResettingCareerMemory,
 ] = useState(false);
   const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
-  const [stats, setStats] = useState({ packages: 0, applications: 0, interviews: 0 });
+ const [stats, setStats] = useState<DashboardStats>({
+  packages: 0,
+  applications: 0,
+  interviews: 0,
+  packagesThisMonth: 0,
+  applicationsThisMonth: 0,
+  interviewsThisMonth: 0,
+});
   const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
   const [showTour, setShowTour] = useState(false);
   const [visibleJobs, setVisibleJobs] = useState(6);
   const [recommendedJobs, setRecommendedJobs] =
   useState<JobItem[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
-  const [insightItems, setInsightItems] = useState(defaultInsightItems);
+ const [insightItems, setInsightItems] = useState<InsightItem[]>([]);
+ const selectedResumeLabel =
+  selectedResume === "career_memory"
+    ? careerMemory?.resume_name || "Career Memory Resume"
+    : resumes.find((resume: any) => resume.id === selectedResume)
+        ?.file_name || "Selected Resume";
+   const aiUsageUsed = stats.packagesThisMonth;
+const aiUsageLimit = 10;
+
+const aiUsagePercent = Math.min(
+  100,
+  Math.round(
+    (aiUsageUsed / aiUsageLimit) * 100
+  )
+);
+
+const aiUsageRemaining = Math.max(
+  0,
+  aiUsageLimit - aiUsageUsed
+);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
 
@@ -177,11 +664,11 @@ async function deleteSelectedResume() {
 
   // Career Memory Resume는 사용자당 1개인 기본 이력서이므로 삭제 불가
   if (selectedResume === "career_memory") {
-    alert(
-      "Career Memory Resume cannot be deleted. You can edit it from Career Memory."
-    );
-    return;
-  }
+  alert(
+    "Career Memory Resume cannot be deleted. You can edit it from Career Memory."
+  );
+  return;
+}
 
   const resume = resumes.find(
     (item: any) => item.id === selectedResume
@@ -521,8 +1008,11 @@ async function loadDashboard() {
 
   
 
-  const cachedJobs = sessionStorage.getItem("recommendedJobs");
-  const cachedTime = sessionStorage.getItem("recommendedJobsTime");
+ const cacheKey = `recommendedJobs:${selectedResume}`;
+const cacheTimeKey = `recommendedJobsTime:${selectedResume}`;
+
+const cachedJobs = sessionStorage.getItem(cacheKey);
+const cachedTime = sessionStorage.getItem(cacheTimeKey);
 
   if (cachedJobs) {
     setRecommendedJobs(JSON.parse(cachedJobs));
@@ -536,28 +1026,33 @@ async function loadDashboard() {
   console.log("3. USER ID =", user.id);
 
  
-const data = careerMemory;
+const selectedPayload =
+  buildSelectedResumePayload(
+    careerMemory,
+    resumes,
+    selectedResume
+  );
 
-if (!data) return;
+if (!selectedPayload) {
+  console.log(
+    "No selected resume source."
+  );
+
+  setRecommendedJobs([]);
+  setLoadingJobs(false);
+
+  return;
+}
 
 
 
 
   
 
-  setSelectedResume(
-    data.selected_resume_type === "career_memory"
-      ? "career_memory"
-      : data.selected_resume_id || ""
-  );
-
-  setSelectedCoverLetter(
-    data.selected_cover_letter_id || ""
-  );
+ 
 
 
-  setCareerFairs(personalizedCareerFairs);
-  setInsightItems(personalizedInsightItems);
+  setCareerFairs(defaultCareerFairs);
 
   if (
     !cachedJobs ||
@@ -571,12 +1066,33 @@ if (!data) return;
   console.log("13. FETCH START");
 
   fetch("/api/recommend-jobs", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
-  })
+  method: "POST",
+
+  headers: {
+    "Content-Type":
+      "application/json",
+  },
+
+  body: JSON.stringify({
+    sourceType:
+      selectedPayload.sourceType,
+
+    resumeId:
+      selectedPayload.resumeId,
+
+    resumeName:
+      selectedPayload.resumeName,
+
+    resumeText:
+      selectedPayload.resumeText,
+
+    /*
+      선택된 이력서 데이터만 전달
+    */
+    resumeData:
+      selectedPayload.resumeData,
+  }),
+})
 
   // ↓↓↓ 여기부터는 네 기존 .then(...) 코드 그대로 ↓↓↓
   
@@ -641,11 +1157,12 @@ if (!data) return;
     setLoadingJobs(false);
 
      sessionStorage.setItem(
-      "recommendedJobs",
-      JSON.stringify(realJobs)
-    );
-    sessionStorage.setItem(
-  "recommendedJobsTime",
+  cacheKey,
+  JSON.stringify(realJobs)
+);
+
+sessionStorage.setItem(
+  cacheTimeKey,
   Date.now().toString()
 );
   })
@@ -658,48 +1175,270 @@ if (!data) return;
 
 
 
+/*
+  최초 Dashboard 초기화
+*/
 useEffect(() => {
   if (loading) return;
   if (!user) return;
   if (!careerMemory) return;
 
-  loadDashboard();
+  const initialResume =
+    careerMemory
+      .selected_resume_type ===
+    "career_memory"
+      ? "career_memory"
+      : careerMemory
+          .selected_resume_id ||
+        "";
 
-  const tourSeen = localStorage.getItem("careerElanTourSeen");
+  setSelectedResume(
+    initialResume
+  );
+
+  setSelectedCoverLetter(
+    careerMemory
+      .selected_cover_letter_id ||
+      ""
+  );
+
+  setCareerFairs(
+    defaultCareerFairs
+  );
+
+  const tourSeen =
+    localStorage.getItem(
+      "careerElanTourSeen"
+    );
 
   if (!tourSeen) {
     setShowTour(true);
   }
-}, [loading, user, careerMemory]);
+}, [
+  loading,
+  user,
+  careerMemory,
+]);
+
+/*
+  선택된 Resume가 바뀔 때마다
+  해당 Resume만 이용하여 추천 갱신
+*/
+useEffect(() => {
+  if (loading) return;
+  if (!user) return;
+  if (!careerMemory) return;
+  if (!selectedResume) return;
+
+  loadDashboard();
+}, [
+  loading,
+  user,
+  careerMemory,
+  resumes,
+  selectedResume,
+]);
+
+useEffect(() => {
+  if (!careerMemory) {
+    setInsightItems([]);
+    return;
+  }
+
+  /*
+    Career Memory Resume가 선택된 경우
+  */
+  if (selectedResume === "career_memory") {
+  setInsightItems(
+    buildResumeInsights(
+      careerMemory,
+      "career_memory"
+    )
+  );
+
+  return;
+}
+
+  /*
+    업로드 Resume가 선택된 경우
+  */
+  const uploadedResume = resumes.find(
+    (resume: any) =>
+      resume.id === selectedResume
+  );
+
+  if (uploadedResume) {
+    const uploadedResumeData = {
+      ...(uploadedResume.parsed_data || {}),
+      original_text:
+        uploadedResume.original_text || "",
+    };
+
+    setInsightItems(
+  buildResumeInsights(
+    uploadedResumeData,
+    "uploaded_resume"
+  )
+);
+    return;
+  }
+
+  /*
+    아무 이력서도 선택되지 않은 경우
+  */
+  setInsightItems([
+    {
+      name: "Select a resume",
+      level: "Recommended",
+      reason:
+        "Select a resume to receive personalized improvement suggestions.",
+    },
+  ]);
+}, [
+  selectedResume,
+  careerMemory,
+  resumes,
+]);
 
 useEffect(() => {
   if (loading) return;
   if (!user) return;
- 
+
   async function loadStats() {
-    const { count: packages } = await supabase
-      .from("applications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user!.id)
-      .eq("status", "package_generated");
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
 
-    const { count: applications } = await supabase
+    const { data, error } = await supabase
       .from("applications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user!.id)
-      .eq("status", "applied");
+      .select(`
+        id,
+        status,
+        created_at,
+        applied_date,
+        interview_date
+      `)
+      .eq("user_id", user.id);
 
-    const { count: interviews } = await supabase
-      .from("applications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user!.id)
-      .eq("status", "interview");
+    if (error) {
+      console.error(
+        "DASHBOARD STATS ERROR =",
+        error
+      );
+      return;
+    }
+
+    const rows = data ?? [];
+
+    const normalizedRows = rows.map((row) => ({
+      ...row,
+      normalizedStatus: String(
+        row.status || ""
+      )
+        .trim()
+        .toLowerCase(),
+    }));
+
+    /*
+      패키지 수:
+      현재 구조에서는 applications 행이
+      패키지를 생성할 때 만들어지므로 전체 행 수를 사용
+    */
+    const packageRows = normalizedRows;
+
+    /*
+      실제 지원 수:
+      package_generated를 제외하고 상태를 변경한 모든 지원서
+      applied, interview, offer, accepted, rejected 포함
+    */
+    const applicationRows =
+      normalizedRows.filter(
+        (row) =>
+          row.normalizedStatus !==
+            "package_generated" &&
+          row.normalizedStatus !== ""
+      );
+
+    /*
+      인터뷰 수:
+      현재 인터뷰 상태이거나 interview_date가 입력된 지원서
+    */
+    const interviewRows =
+      normalizedRows.filter(
+        (row) =>
+          row.normalizedStatus ===
+            "interview" ||
+          Boolean(row.interview_date)
+      );
+
+    const isCreatedThisMonth = (
+      createdAt: string | null
+    ) => {
+      if (!createdAt) return false;
+
+      return (
+        new Date(createdAt).getTime() >=
+        monthStart.getTime()
+      );
+    };
+
+    const isAppliedThisMonth = (
+      appliedDate: string | null
+    ) => {
+      if (!appliedDate) return false;
+
+      return (
+        new Date(appliedDate).getTime() >=
+        monthStart.getTime()
+      );
+    };
+
+    const isInterviewThisMonth = (
+      interviewDate: string | null
+    ) => {
+      if (!interviewDate) return false;
+
+      return (
+        new Date(interviewDate).getTime() >=
+        monthStart.getTime()
+      );
+    };
 
     setStats({
-      packages: packages ?? 0,
-      applications: applications ?? 0,
-      interviews: interviews ?? 0,
+      packages: packageRows.length,
+
+      applications:
+        applicationRows.length,
+
+      interviews:
+        interviewRows.length,
+
+      packagesThisMonth:
+        packageRows.filter((row) =>
+          isCreatedThisMonth(row.created_at)
+        ).length,
+
+      applicationsThisMonth:
+        applicationRows.filter((row) =>
+          isAppliedThisMonth(row.applied_date)
+        ).length,
+
+      interviewsThisMonth:
+        interviewRows.filter((row) =>
+          row.interview_date
+            ? isInterviewThisMonth(
+                row.interview_date
+              )
+            : isCreatedThisMonth(
+                row.created_at
+              )
+        ).length,
     });
+
+    console.log(
+      "DASHBOARD APPLICATION ROWS =",
+      normalizedRows
+    );
   }
 
   loadStats();
@@ -1267,27 +2006,149 @@ function renderPreviewContent() {
                 <h2 className="mb-4 text-lg font-bold">Overview</h2>
 
                 <div className="grid gap-5 md:grid-cols-4">
-                  {progressCards.map((card) => (
-                    <div key={card.title} className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-gray-500">{card.title}</p>
-                         <h3 className="mt-3 text-3xl font-extrabold">{card.title === "Application Packages" ? stats.packages : card.title === "Applications Sent" ? stats.applications : card.title === "Interviews" ? stats.interviews : `${memoryStrength}%`}</h3>
-                        </div>
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">{card.icon}</div>
-                      </div>
+  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-sm font-semibold text-gray-500">
+          Career Memory
+        </p>
 
-                      <p className="mt-3 text-xs text-gray-500">
-                        <span className="font-bold text-green-600">{card.change}</span> {card.note}
-                      </p>
+        <h3 className="mt-3 text-3xl font-extrabold">
+          {memoryStrength}%
+        </h3>
+      </div>
 
-                      <div className="mt-5 flex items-center justify-between text-sm">
-                        <a href="#" className="font-bold text-blue-600">View Details</a>
-                        <span>→</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">
+        🧠
+      </div>
+    </div>
+
+    <p className="mt-3 text-xs text-gray-500">
+      {careerMemoryCompleted
+        ? "Profile ready for personalized applications"
+        : "Complete your profile to improve results"}
+    </p>
+
+    <div className="mt-5 flex items-center justify-between text-sm">
+      <a
+        href="/career-memory"
+        className="font-bold text-blue-600"
+      >
+        Improve Profile
+      </a>
+
+      <span>→</span>
+    </div>
+  </div>
+
+  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-sm font-semibold text-gray-500">
+          Application Packages
+        </p>
+
+        <h3 className="mt-3 text-3xl font-extrabold">
+          {stats.packages}
+        </h3>
+      </div>
+
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">
+        📦
+      </div>
+    </div>
+
+    <p className="mt-3 text-xs text-gray-500">
+      <span className="font-bold text-green-600">
+        +{stats.packagesThisMonth}
+      </span>{" "}
+      generated this month
+    </p>
+
+    <div className="mt-5 flex items-center justify-between text-sm">
+      <a
+        href="/job-tracker"
+        className="font-bold text-blue-600"
+      >
+        View Packages
+      </a>
+
+      <span>→</span>
+    </div>
+  </div>
+
+  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-sm font-semibold text-gray-500">
+          Applications Sent
+        </p>
+
+        <h3 className="mt-3 text-3xl font-extrabold">
+          {stats.applications}
+        </h3>
+      </div>
+
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">
+        📤
+      </div>
+    </div>
+
+    <p className="mt-3 text-xs text-gray-500">
+      <span className="font-bold text-green-600">
+        +{stats.applicationsThisMonth}
+      </span>{" "}
+      submitted this month
+    </p>
+
+    <div className="mt-5 flex items-center justify-between text-sm">
+      <a
+        href="/job-tracker"
+        className="font-bold text-blue-600"
+      >
+        View Applications
+      </a>
+
+      <span>→</span>
+    </div>
+  </div>
+
+  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-sm font-semibold text-gray-500">
+          Interviews
+        </p>
+
+        <h3 className="mt-3 text-3xl font-extrabold">
+          {stats.interviews}
+        </h3>
+      </div>
+
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">
+        🗓️
+      </div>
+    </div>
+
+    <p className="mt-3 text-xs text-gray-500">
+      <span className="font-bold text-green-600">
+        +{stats.interviewsThisMonth}
+      </span>{" "}
+      added this month
+    </p>
+
+    <div className="mt-5 flex items-center justify-between text-sm">
+      <a
+        href="/job-tracker"
+        className="font-bold text-blue-600"
+      >
+        View Interviews
+      </a>
+
+      <span>→</span>
+    </div>
+  </div>
+</div>
               </div>
                  
                 <div className="mb-6 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
@@ -1895,27 +2756,48 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-bold">Career Insights</h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  {careerMemoryCompleted
-                    ? "Based on your profile and application materials."
-                    : "Small updates that can make your profile stronger."}
-                </p>
+               <p className="mt-1 text-sm text-gray-500">
+  Suggestions based on{" "}
+  <span className="font-bold text-blue-600">
+    {selectedResumeLabel}
+  </span>
+  .
+</p>
 
-                <div className="mt-5 space-y-4">
-                  {insightItems.map((item) => (
-                    <div key={item.name} className="rounded-xl bg-slate-50 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-bold">{item.name}</p>
-                        <span className="whitespace-nowrap rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-600">{item.level}</span>
-                      </div>
-                      <a href="/career-memory" className="mt-2 block text-xs font-bold text-blue-600">Review</a>
-                    </div>
-                  ))}
-                </div>
+               <div className="mt-5 space-y-4">
+  {insightItems.map((item) => (
+    <div
+      key={`${item.name}-${item.reason}`}
+      className="rounded-xl bg-slate-50 p-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-bold">
+          {item.name}
+        </p>
 
-                <button className="mt-5 text-sm font-bold text-blue-600 hover:underline">
-                  More insights →
-                </button>
+        <span
+          className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${
+            item.level === "Recommended"
+              ? "bg-red-100 text-red-600"
+              : item.level === "Worth Adding"
+                ? "bg-blue-100 text-blue-600"
+                : "bg-slate-200 text-slate-600"
+          }`}
+        >
+          {item.level}
+        </span>
+      </div>
+
+      <p className="mt-2 text-xs leading-5 text-slate-500">
+        {item.reason}
+      </p>
+
+     
+    </div>
+  ))}
+</div>
+
+                
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
@@ -1929,26 +2811,86 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-bold">AI Usage</h2>
-                <p className="mt-2 text-sm text-gray-500">Monthly AI generation usage.</p>
+  <div className="flex items-start justify-between gap-3">
+    <div>
+      <h2 className="text-lg font-bold">
+        AI Usage
+      </h2>
 
-                <div className="mt-5">
-                  <div className="flex justify-between text-xs font-bold text-gray-500">
-                    <span>Used</span>
-                    <span>41 / 100</span>
-                  </div>
-                  <div className="mt-2 h-2 rounded-full bg-gray-100">
-                    <div className="h-2 w-[41%] rounded-full bg-green-500" />
-                  </div>
-                </div>
+      <p className="mt-2 text-sm text-gray-500">
+        Monthly package generation usage.
+      </p>
+    </div>
 
-                <div className="mt-5 flex items-center justify-between">
-                  <p className="text-sm font-bold text-gray-600">Plan: Free</p>
-                  <button className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-600">
-                    ⚡ Upgrade to Pro
-                  </button>
-                </div>
-              </div>
+    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">
+      ⚡
+    </div>
+  </div>
+
+  <div className="mt-5">
+    <div className="flex items-center justify-between text-xs font-bold text-gray-500">
+      <span>Packages Generated</span>
+
+      <span
+        className={
+          aiUsageUsed >= aiUsageLimit
+            ? "text-red-600"
+            : aiUsagePercent >= 80
+              ? "text-amber-600"
+              : "text-gray-600"
+        }
+      >
+        {aiUsageUsed} / {aiUsageLimit}
+      </span>
+    </div>
+
+    <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+      <div
+        className={`h-full rounded-full transition-all duration-500 ${
+          aiUsageUsed >= aiUsageLimit
+            ? "bg-red-500"
+            : aiUsagePercent >= 80
+              ? "bg-amber-500"
+              : "bg-green-500"
+        }`}
+        style={{
+          width: `${aiUsagePercent}%`,
+        }}
+      />
+    </div>
+
+    <div className="mt-3 flex items-center justify-between gap-3">
+      <p className="text-xs font-semibold text-gray-400">
+        Resets at the beginning of each month
+      </p>
+
+      <p className="whitespace-nowrap text-xs font-bold text-gray-500">
+        {aiUsageRemaining} remaining
+      </p>
+    </div>
+  </div>
+
+  {aiUsageUsed >= aiUsageLimit && (
+    <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+      <p className="text-xs font-bold text-red-600">
+        You have reached your monthly package limit.
+      </p>
+    </div>
+  )}
+
+  <div className="mt-5 flex items-center justify-between gap-3">
+    <p className="text-sm font-bold text-gray-600">
+      Plan: Free Beta
+    </p>
+
+    <button
+      type="button"
+      className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-600 transition hover:bg-blue-100"
+    >
+      ⚡ Upgrade to Pro
+    </button>
+  </div>
+</div>
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-bold">Upcoming Interview</h2>

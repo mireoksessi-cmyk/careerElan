@@ -13,7 +13,6 @@ export async function POST(req: Request) {
     const {
       userId,
       total,
-      averageATS,
       interviewRate,
       offerRate,
       jobs,
@@ -42,10 +41,11 @@ export async function POST(req: Request) {
     // 2. Generate AI Summary
     // -------------------------------
 
-    const response = await client.responses.create({
-      model: "gpt-5.5",
+    const response =
+      await client.responses.create({
+        model: "gpt-5.5",
 
-      input: `
+        input: `
 You are a senior Canadian career coach.
 
 Based on the statistics below, write a personalized career report.
@@ -54,9 +54,6 @@ Statistics
 
 Total Applications:
 ${total}
-
-Average ATS Score:
-${averageATS}
 
 Interview Rate:
 ${interviewRate}%
@@ -78,15 +75,16 @@ Instructions
 - Maximum 250 words.
 - Mention strengths.
 - Mention weaknesses.
-- Mention ATS trend.
 - Mention missing skills.
 - Recommend the best job types.
 - Recommend the next three actions.
+- Consider the user's application volume, interview rate, and offer rate.
 - Sound like a professional Canadian career coach.
 `,
-    });
+      });
 
-    const summary = response.output_text;
+    const summary =
+      response.output_text;
 
     // -------------------------------
     // 3. Save Cache
@@ -97,16 +95,15 @@ Instructions
       .upsert({
         user_id: userId,
         summary,
-        updated_at: new Date().toISOString(),
+        updated_at:
+          new Date().toISOString(),
       });
 
     return NextResponse.json({
       summary,
       cached: false,
     });
-
   } catch (error) {
-
     console.error(error);
 
     return NextResponse.json({
@@ -116,9 +113,9 @@ Continue applying to more jobs to generate meaningful career insights.
 
 Recommendations
 
-• Tailor every resume.
-• Improve ATS keywords.
-• Track interview outcomes.
+• Tailor every resume to the job posting.
+• Strengthen missing qualifications where possible.
+• Track interview and offer outcomes.
 • Keep building your Career Memory.`,
       cached: false,
     });

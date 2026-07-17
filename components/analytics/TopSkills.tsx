@@ -24,7 +24,7 @@ export default function TopSkills({
     <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
 
       <h2 className="text-2xl font-bold">
-        Top Skills
+        Overall Top Skills
       </h2>
 
       <p className="mt-1 text-sm text-gray-500">

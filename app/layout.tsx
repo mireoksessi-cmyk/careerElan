@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { LoginManager } from "@/lib/auth/LoginManager";
-
+import CareerAssistant from "@/components/chatbot/CareerAssistant";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -28,11 +28,13 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <LoginManager>
-          {children}
-        </LoginManager>
-      </body>
+     <body className="flex min-h-full flex-col">
+  <LoginManager>
+    {children}
+
+    <CareerAssistant />
+  </LoginManager>
+</body>
     </html>
   );
 }

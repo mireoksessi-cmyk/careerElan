@@ -5,6 +5,62 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+type RequirementCategory =
+  | "mandatory"
+  | "preferred"
+  | "legal_or_regulated";
+
+type AnalyzedRequirement = {
+  requirement: string;
+  category: RequirementCategory;
+};
+
+type CanadianJobContext = {
+  country:
+    | "Canada"
+    | "Unknown";
+
+  sector:
+    | "private"
+    | "provincial"
+    | "municipal"
+    | "federal"
+    | "unknown";
+
+  province: string;
+  municipality: string;
+
+  supportedByCareerElan: boolean;
+  classificationReason: string;
+};
+
+type JobAnalysisResponse = {
+  title: string;
+  company: string;
+  location: string;
+  type: string;
+  category: string;
+  icon: string;
+  match: string;
+  keywordCount: number;
+  requirementsMatched: number;
+  keywords: string[];
+  summary: string;
+
+  jobContext: CanadianJobContext;
+  requirements: AnalyzedRequirement[];
+
+  jobDetails?: {
+    description: string;
+    responsibilities: string[];
+    qualifications: string[];
+    benefits: string[];
+    salary: string;
+    schedule: string;
+    applyUrl: string;
+  };
+};
+
 function extractJson(text: string) {
   const cleaned = text
     .replace(/```json/g, "")
@@ -49,7 +105,23 @@ Return this exact JSON structure:
   "keywordCount": 0,
   "requirementsMatched": 0,
   "keywords": [],
-  "summary": ""
+  "summary": "",
+
+  "jobContext": {
+    "country": "Canada",
+    "sector": "private",
+    "province": "",
+    "municipality": "",
+    "supportedByCareerElan": true,
+    "classificationReason": ""
+  },
+
+  "requirements": [
+    {
+      "requirement": "",
+      "category": "mandatory"
+    }
+  ]
 }
 
 Rules:
@@ -70,9 +142,129 @@ ${jobText}
       `,
     });
 
-    const json = extractJson(response.output_text);
+    const json =
+  extractJson(
+    response.output_text
+  ) as JobAnalysisResponse;
 
-    return NextResponse.json(json);
+json.jobContext = {
+  country:
+    json.jobContext?.country ===
+      "Canada"
+      ? "Canada"
+      : "Unknown",
+
+  sector: [
+    "private",
+    "provincial",
+    "municipal",
+    "federal",
+    "unknown",
+  ].includes(
+    json.jobContext?.sector
+  )
+    ? json.jobContext.sector
+    : "unknown",
+
+  province:
+    typeof json.jobContext
+      ?.province === "string"
+      ? json.jobContext.province.trim()
+      : "",
+
+  municipality:
+    typeof json.jobContext
+      ?.municipality === "string"
+      ? json.jobContext
+          .municipality
+          .trim()
+      : "",
+
+  supportedByCareerElan:
+    json.jobContext
+      ?.supportedByCareerElan === true,
+
+  classificationReason:
+    typeof json.jobContext
+      ?.classificationReason ===
+      "string"
+      ? json.jobContext
+          .classificationReason
+          .trim()
+      : "",
+};
+
+if (
+  json.jobContext.country !==
+    "Canada" ||
+  json.jobContext.sector ===
+    "federal" ||
+  json.jobContext.sector ===
+    "unknown"
+) {
+  json.jobContext
+    .supportedByCareerElan = false;
+}
+
+if (
+  json.jobContext.country ===
+    "Canada" &&
+  [
+    "private",
+    "provincial",
+    "municipal",
+  ].includes(
+    json.jobContext.sector
+  )
+) {
+  json.jobContext
+    .supportedByCareerElan = true;
+}
+
+json.requirements = Array.isArray(
+  json.requirements
+)
+  ? json.requirements
+      .filter(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          typeof item.requirement ===
+            "string" &&
+          item.requirement.trim()
+            .length > 0
+      )
+      .slice(0, 12)
+      .map((item) => ({
+        requirement:
+          item.requirement.trim(),
+
+        category:
+          item.category ===
+            "preferred" ||
+          item.category ===
+            "legal_or_regulated"
+            ? item.category
+            : "mandatory",
+      }))
+  : [];
+
+json.keywords =
+  Array.isArray(json.keywords)
+    ? json.keywords
+        .filter(
+          (item) =>
+            typeof item ===
+              "string" &&
+            item.trim().length > 0
+        )
+        .slice(0, 8)
+    : [];
+
+json.keywordCount =
+  json.keywords.length;
+
+return NextResponse.json(json);
   } catch (error) {
     console.error(error);
 
