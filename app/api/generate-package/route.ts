@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { getResumeText } from "@/lib/resume-service";
+import { normalizeResumeSource } from "@/lib/types/resume-source";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -3086,10 +3087,23 @@ export async function POST(
         analysis.companyName
       ) || "the company";
 
+    /*
+      normalizeResumeSource is the single canonical judgment shared with
+      lib/resume-service.ts and app/paste-job/page.tsx - previously this
+      route and getResumeText() used opposite conditions ("upload" here vs
+      "career_memory" there), which could disagree on a third/unset value.
+      A genuinely unset selection defaults to career_memory here (matching
+      existing behavior for rows created before this field existed); any
+      other unrecognized value now throws instead of being silently guessed.
+    */
+    const canonicalResumeSource =
+      normalizeResumeSource(
+        memory.selected_resume_type ?? "career_memory"
+      );
+
     const resumeSource:
       ResumeSource =
-      memory.selected_resume_type ===
-      "upload"
+      canonicalResumeSource === "uploaded"
         ? "upload"
         : "career_memory";
 

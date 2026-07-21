@@ -5,6 +5,7 @@ import { exportDocx, exportPdf } from "@/lib/exportDocument";
 
 import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
+import { normalizeResumeSource } from "@/lib/types/resume-source";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
@@ -1293,12 +1294,26 @@ async function loadSelectedApplicationMaterials() {
     SavedApplicationMaterial["resume"];
 
   /*
-    Dashboard에서 업로드 Resume 선택
+    Shared with lib/resume-service.ts and app/api/generate-package/route.ts
+    - a genuinely unset selection (no Dashboard choice made yet) defaults to
+    career_memory, matching existing behavior for rows created before this
+    field existed. Any other unrecognized value throws instead of being
+    silently guessed, so it's caught below rather than mislabeled.
   */
-  if (
-    memory?.selected_resume_type ===
-    "upload"
-  ) {
+  let canonicalResumeSource: "uploaded" | "career_memory" | null = null;
+
+  try {
+    canonicalResumeSource = normalizeResumeSource(
+      memory?.selected_resume_type ?? "career_memory"
+    );
+  } catch (sourceError) {
+    console.error(
+      "UNKNOWN RESUME SOURCE =",
+      sourceError
+    );
+  }
+
+  if (canonicalResumeSource === "uploaded") {
     const uploadedResume =
       resumeList.find(
         (item: any) =>
@@ -1337,7 +1352,7 @@ async function loadSelectedApplicationMaterials() {
           ),
       };
     }
-  } else {
+  } else if (canonicalResumeSource === "career_memory") {
     /*
       Dashboard에서 Career Memory Resume 선택
       또는 선택값이 없는 경우
@@ -1354,6 +1369,13 @@ async function loadSelectedApplicationMaterials() {
           memory
         ),
     };
+  } else {
+    /*
+      selected_resume_type held an unrecognized value - fail explicitly
+      instead of guessing a source, per normalizeResumeSource's contract.
+    */
+    setSavedApplicationMaterial(null);
+    return null;
   }
 
   /*
