@@ -57,10 +57,10 @@ function RetryProcessingBanner({ resume }: { resume: any }) {
   return (
     <div className="mx-auto mb-4 max-w-[800px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
       {resume.conversion_status === "pending" ? (
-        <p>원본 디자인을 아직 처리하지 못했어요.</p>
+        <p>We haven&apos;t processed the original design yet.</p>
       ) : (
         <p>
-          원본 디자인 처리에 실패했어요
+          We couldn&apos;t process the original design
           {resume.conversion_error ? ` (${resume.conversion_error})` : ""}.
         </p>
       )}
@@ -72,18 +72,18 @@ function RetryProcessingBanner({ resume }: { resume: any }) {
           disabled={status === "retrying"}
           className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-700 disabled:opacity-60"
         >
-          {status === "retrying" ? "처리 중..." : "다시 처리하기"}
+          {status === "retrying" ? "Processing..." : "Try again"}
         </button>
 
         {status === "done" && (
           <span className="text-xs font-semibold">
-            요청했어요. 잠시 후 미리보기를 다시 열어주세요.
+            Request sent. Reopen the preview in a moment to see the result.
           </span>
         )}
 
         {status === "error" && (
           <span className="text-xs font-semibold text-red-600">
-            요청에 실패했어요. 다시 시도해주세요.
+            The request failed. Please try again.
           </span>
         )}
       </div>

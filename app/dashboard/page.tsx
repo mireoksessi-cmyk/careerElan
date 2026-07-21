@@ -3316,9 +3316,9 @@ Generate automatically
 
                 {!hasResumeData && (
                   <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                    이력서를 직접 작성하거나 업로드하면 내 프로필 기반으로 맞춤 추천을 받을 수 있어요.{" "}
+                    Write or upload a resume to get recommendations tailored to your profile.{" "}
                     <a href="/career-memory" className="font-bold underline">
-                      이력서 등록하러 가기
+                      Add your resume
                     </a>
                   </div>
                 )}
