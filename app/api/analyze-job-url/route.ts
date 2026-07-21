@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { assertSafeJobUrl, UnsafeUrlError } from "@/lib/security/ssrfGuard";
 import { toSafeResponse } from "@/lib/errors/publicError";
 import { JOB_ANALYSIS_MODEL } from "@/lib/config/aiModels";
+import { createClient } from "@/lib/supabase-server";
+import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimiter";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -340,6 +342,39 @@ export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
 
   try {
+    /*
+      Guest-allowed endpoint - having no session never blocks the request,
+      it only decides which rate-limit bucket applies. resolveOptionalUserId
+      distinguishes a genuine "no session" from an auth-service failure,
+      so a real logged-in user is never silently downgraded to the shared
+      guest IP bucket just because the session check itself had trouble.
+      Never trust a client-supplied user id here.
+    */
+    const supabase = await createClient();
+    const userId = await resolveOptionalUserId(supabase);
+
+    const rateLimitResult = await checkRateLimit("analyze-job-url", {
+      userId,
+      requestHeaders: req.headers,
+    });
+
+    if (!rateLimitResult.allowed) {
+      console.timeEnd("total analyze-job-url");
+
+      return NextResponse.json(
+        {
+          error: "Too many analysis requests. Please try again shortly.",
+          requestId,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimitResult.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
     const { jobUrl } = await req.json();
 
     if (!jobUrl || typeof jobUrl !== "string") {
