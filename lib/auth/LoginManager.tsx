@@ -23,6 +23,8 @@ type LoginContextType = {
 
   coverLetters: any[];
 
+  hasResumeData: boolean;
+
   refresh: () => Promise<void>;
 };
 
@@ -38,6 +40,8 @@ const LoginContext = createContext<LoginContextType>({
   resumes: [],
 
   coverLetters: [],
+
+  hasResumeData: false,
 
   refresh: async () => {},
 });
@@ -59,6 +63,9 @@ export function LoginManager({
 
   const [coverLetters, setCoverLetters] =
     useState<any[]>([]);
+
+  const [hasResumeData, setHasResumeData] =
+    useState(false);
 
   useEffect(() => {
     refresh();
@@ -85,6 +92,7 @@ export function LoginManager({
       setCareerMemory(null);
       setResumes([]);
       setCoverLetters([]);
+      setHasResumeData(false);
       setLoading(false);
       return;
     }
@@ -132,6 +140,16 @@ export function LoginManager({
 
     setCoverLetters(coverLetters ?? []);
 
+    /*
+      직접 작성(career_memory 필수 항목 완료) 또는
+      업로드(resumes 행 존재) 둘 중 하나라도 되어 있으면
+      이력서 데이터가 있는 것으로 간주한다.
+    */
+    setHasResumeData(
+      Boolean(careerMemory?.required_completed) ||
+        (resumes ?? []).length > 0
+    );
+
     setLoading(false);
   }
 
@@ -149,6 +167,8 @@ export function LoginManager({
         resumes,
 
         coverLetters,
+
+        hasResumeData,
 
         refresh,
       }}
