@@ -7,9 +7,10 @@ import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
+import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
-import CareerMemoryGuard from "@/components/CareerMemoryGuard";
+
 type PasteMode = "url" | "description" | "file";
 
 type PreviewType = "resume" | "coverLetter" | "emailDraft";
@@ -21,6 +22,7 @@ type SavedApplicationMaterial = {
     id: string | null;
     name: string;
     text: string;
+    resumeRow?: any;
   };
 
   coverLetter: {
@@ -295,276 +297,571 @@ function buildCareerMemoryResumeText(
 
   const lines: string[] = [];
 
-  const fullName = [
-    memory.first_name,
-    memory.last_name,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  if (fullName) {
-    lines.push(fullName);
+  function clean(value: unknown): string {
+    return typeof value === "string"
+      ? value.trim()
+      : "";
   }
 
-  const contact = [
-    memory.location,
-    memory.phone,
-    memory.email,
-    memory.linkedin,
-  ]
-    .filter(
-      (item) =>
-        typeof item === "string" &&
-        item.trim()
-    )
-    .join(" | ");
+  function formatMonth(value?: string): string {
+    if (!value) return "";
 
-  if (contact) {
-    lines.push(contact);
-  }
+    const [year, month] = value.split("-");
 
-  if (memory.headline?.trim()) {
-    lines.push("", memory.headline.trim());
-  }
+    if (!year || !month) {
+      return value;
+    }
 
-  if (memory.summary?.trim()) {
-    lines.push(
-      "",
-      "PROFESSIONAL SUMMARY",
-      memory.summary.trim()
-    );
-  }
-
-  const skills = Array.isArray(
-    memory.skills
-  )
-    ? memory.skills.filter(
-        (item: unknown) =>
-          typeof item === "string" &&
-          item.trim()
-      )
-    : [];
-
-  if (skills.length > 0) {
-    lines.push(
-      "",
-      "SKILLS",
-      ...skills.map(
-        (skill: string) =>
-          `• ${skill.trim()}`
-      )
-    );
-  }
-
-  const experiences = Array.isArray(
-    memory.experience
-  )
-    ? memory.experience
-    : [];
-
-  const meaningfulExperiences =
-    experiences.filter(
-      (item: any) =>
-        item &&
-        [
-          item.company,
-          item.organization,
-          item.jobTitle,
-          item.job_title,
-          item.role,
-          item.title,
-          item.dates,
-          item.description,
-        ].some(
-          (value) =>
-            typeof value === "string" &&
-            value.trim()
-        )
-    );
-
-  if (
-    meaningfulExperiences.length > 0
-  ) {
-    lines.push(
-      "",
-      "PROFESSIONAL EXPERIENCE"
-    );
-
-    meaningfulExperiences.forEach(
-      (item: any) => {
-        const title =
-          item.jobTitle ||
-          item.job_title ||
-          item.role ||
-          item.title ||
-          "";
-
-        const employer =
-          item.company ||
-          item.organization ||
-          item.employer ||
-          "";
-
-        const dates =
-          item.dates ||
-          [
-            item.startDate ||
-              item.start_date,
-            item.endDate ||
-              item.end_date,
-          ]
-            .filter(Boolean)
-            .join(" – ");
-
-        lines.push(
-          "",
-          [
-            title,
-            employer,
-            dates,
-          ]
-            .filter(Boolean)
-            .join(" | ")
-        );
-
-        const descriptions = [
-          item.description,
-          item.responsibilities,
-          item.achievements,
-          item.details,
-          item.bullets,
-        ]
-          .flat()
-          .filter(
-            (value) =>
-              typeof value ===
-                "string" &&
-              value.trim()
-          );
-
-        descriptions.forEach(
-          (description) => {
-            lines.push(
-              `• ${description.trim()}`
-            );
-          }
-        );
-      }
-    );
-  }
-
-  const education = Array.isArray(
-    memory.education
-  )
-    ? memory.education.filter(
-        (item: any) =>
-          item &&
-          [
-            item.school,
-            item.institution,
-            item.program,
-            item.degree,
-            item.dates,
-          ].some(
-            (value) =>
-              typeof value ===
-                "string" &&
-              value.trim()
-          )
-      )
-    : [];
-
-  if (education.length > 0) {
-    lines.push("", "EDUCATION");
-
-    education.forEach((item: any) => {
-      lines.push(
-        [
-          item.program ||
-            item.degree,
-          item.school ||
-            item.institution,
-          item.dates,
-        ]
-          .filter(Boolean)
-          .join(" | ")
-      );
+    return new Date(
+      Number(year),
+      Number(month) - 1,
+      1
+    ).toLocaleDateString("en-CA", {
+      year: "numeric",
+      month: "short",
     });
   }
 
-  const languages = Array.isArray(
-    memory.languages
+  function formatExperienceDates(
+    item: any
+  ): string {
+    const startDate =
+      item.startDate ||
+      item.start_date ||
+      "";
+
+    const endDate =
+      item.endDate ||
+      item.end_date ||
+      "";
+
+    const isCurrent =
+      item.isCurrent ??
+      item.is_current ??
+      false;
+
+    const start = formatMonth(startDate);
+
+    const end = isCurrent
+      ? "Present"
+      : formatMonth(endDate);
+
+    return [start, end]
+      .filter(Boolean)
+      .join(" – ");
+  }
+
+  function formatEducationDates(
+    item: any
+  ): string {
+    return [
+      formatMonth(
+        item.startDate ||
+          item.start_date ||
+          ""
+      ),
+      formatMonth(
+        item.endDate ||
+          item.end_date ||
+          ""
+      ),
+    ]
+      .filter(Boolean)
+      .join(" – ");
+  }
+
+  function addDescriptionBullets(
+    description: unknown
+  ) {
+    if (
+      typeof description !== "string" ||
+      !description.trim()
+    ) {
+      return;
+    }
+
+    description
+      .split(/\r?\n|•/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => {
+        lines.push(`• ${line}`);
+      });
+  }
+
+  /*
+  Header
+*/
+
+const fullName = [
+  clean(memory.first_name),
+  clean(memory.last_name),
+]
+  .filter(Boolean)
+  .join(" ");
+
+if (fullName) {
+  lines.push(fullName);
+}
+
+if (clean(memory.headline)) {
+  lines.push(clean(memory.headline));
+}
+
+const contact = [
+  clean(memory.email),
+  clean(memory.phone),
+  clean(memory.location),
+  clean(memory.linkedin),
+]
+  .filter(Boolean)
+  .join(" · ");
+
+if (contact) {
+  lines.push(contact);
+}
+
+/*
+  Professional Summary
+  Dashboard처럼 제목은 항상 포함
+*/
+
+lines.push(
+  "",
+  "PROFESSIONAL SUMMARY"
+);
+
+if (clean(memory.summary)) {
+  lines.push(clean(memory.summary));
+}
+
+/*
+  Skills
+  Dashboard처럼 제목은 항상 포함
+*/
+
+const skills = Array.isArray(
+  memory.skills
+)
+  ? memory.skills
+      .map((item: unknown) =>
+        clean(item)
+      )
+      .filter(Boolean)
+  : String(memory.skills || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+lines.push("", "SKILLS");
+
+skills.forEach((skill: string) => {
+  lines.push(`• ${skill}`);
+});
+
+/*
+  Experience
+  Dashboard처럼 제목은 항상 포함
+*/
+
+lines.push("", "EXPERIENCE");
+
+const workExperiences = Array.isArray(
+  memory.experience
+)
+  ? memory.experience.filter(
+      (item: any) =>
+        clean(item?.company) ||
+        clean(item?.jobTitle) ||
+        clean(item?.job_title) ||
+        clean(item?.description)
+    )
+  : [];
+
+workExperiences.forEach(
+  (item: any) => {
+    const role =
+      clean(item.jobTitle) ||
+      clean(item.job_title);
+
+    const employer = [
+      clean(item.company),
+      clean(item.location),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const dates =
+      formatExperienceDates(item);
+
+    const titleLine = [
+      role,
+      dates,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
+    if (titleLine) {
+      lines.push("", titleLine);
+    }
+
+    if (employer) {
+      lines.push(employer);
+    }
+
+    addDescriptionBullets(
+      item.description
+    );
+  }
+);
+
+/*
+  Volunteer / Internship
+  Dashboard Experience 내부 소제목과 동일
+*/
+
+const volunteerExperiences =
+  Array.isArray(
+    memory.volunteer_experience
   )
-    ? memory.languages.filter(
+    ? memory.volunteer_experience.filter(
         (item: any) =>
-          typeof item === "string"
-            ? item.trim()
-            : item?.language?.trim()
+          clean(item?.organization) ||
+          clean(item?.role) ||
+          clean(item?.location) ||
+          item?.startDate ||
+          item?.start_date ||
+          item?.endDate ||
+          item?.end_date ||
+          clean(item?.description)
       )
     : [];
 
-  if (languages.length > 0) {
-    lines.push("", "LANGUAGES");
+if (volunteerExperiences.length > 0) {
+  lines.push(
+    "",
+    "VOLUNTEER / INTERNSHIP"
+  );
 
-    languages.forEach((item: any) => {
+  volunteerExperiences.forEach(
+    (item: any) => {
+      const role = clean(item.role);
+
+      const organization = [
+        clean(item.organization),
+        clean(item.location),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      const dates =
+        formatExperienceDates(item);
+
+      const titleLine = [
+        role,
+        dates,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      if (titleLine) {
+        lines.push("", titleLine);
+      }
+
+      if (organization) {
+        lines.push(organization);
+      }
+
+      addDescriptionBullets(
+        item.description
+      );
+    }
+  );
+}
+
+/*
+  Projects
+  Dashboard처럼 name이 있어야 표시
+*/
+
+const projects = Array.isArray(
+  memory.projects
+)
+  ? memory.projects.filter(
+      (item: any) =>
+        Boolean(item?.name?.trim?.())
+    )
+  : [];
+
+if (projects.length > 0) {
+  lines.push("", "PROJECTS");
+
+  projects.forEach(
+    (item: any) => {
+      const heading = [
+        clean(item.name),
+        clean(item.dates),
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      if (heading) {
+        lines.push("", heading);
+      }
+
+      if (clean(item.role)) {
+        lines.push(clean(item.role));
+      }
+
+      if (clean(item.description)) {
+        lines.push(
+          clean(item.description)
+        );
+      }
+    }
+  );
+}
+
+/*
+  Education
+*/
+
+const education = Array.isArray(
+  memory.education
+)
+  ? memory.education.filter(
+      (item: any) =>
+        clean(item?.school) ||
+        clean(item?.program) ||
+        clean(item?.degree) ||
+        item?.startDate ||
+        item?.start_date ||
+        item?.endDate ||
+        item?.end_date ||
+        clean(item?.gpa) ||
+        clean(item?.coursework)
+    )
+  : [];
+
+if (education.length > 0) {
+  lines.push("", "EDUCATION");
+
+  education.forEach(
+    (item: any) => {
+      const program =
+        clean(item.program) ||
+        clean(item.degree);
+
+      const dates =
+        formatEducationDates(item);
+
+      const heading = [
+        program,
+        dates,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      if (heading) {
+        lines.push("", heading);
+      }
+
+      if (clean(item.school)) {
+        lines.push(clean(item.school));
+      }
+
+      if (clean(item.gpa)) {
+        lines.push(
+          `GPA: ${clean(item.gpa)}`
+        );
+      }
+
+      if (clean(item.coursework)) {
+        lines.push(
+          clean(item.coursework)
+        );
+      }
+    }
+  );
+}
+
+/*
+  Languages
+*/
+
+const languages = Array.isArray(
+  memory.languages
+)
+  ? memory.languages.filter(
+      (item: any) =>
+        typeof item === "string"
+          ? Boolean(item.trim())
+          : Boolean(
+              item?.language?.trim?.()
+            )
+    )
+  : [];
+
+if (languages.length > 0) {
+  lines.push("", "LANGUAGES");
+
+  languages.forEach(
+    (item: any) => {
       if (typeof item === "string") {
-        lines.push(`• ${item}`);
+        lines.push(`• ${item.trim()}`);
         return;
       }
 
-      lines.push(
-        `• ${[
-          item.language,
-          item.proficiency ||
-            item.level,
-        ]
-          .filter(Boolean)
-          .join(" — ")}`
-      );
-    });
-  }
+      const languageLine = [
+        clean(item.language),
+        clean(item.level) ||
+          clean(item.proficiency),
+      ]
+        .filter(Boolean)
+        .join(" — ");
 
-  const certifications = Array.isArray(
+      if (languageLine) {
+        lines.push(`• ${languageLine}`);
+      }
+    }
+  );
+}
+
+/*
+  Certifications
+  Dashboard처럼 name이 있어야 표시
+*/
+
+const certifications =
+  Array.isArray(
     memory.certifications
   )
     ? memory.certifications.filter(
         (item: any) =>
-          typeof item === "string"
-            ? item.trim()
-            : (
-                item?.name ||
-                item?.title ||
-                item?.certification
-              )?.trim()
+          Boolean(item?.name?.trim?.())
       )
     : [];
 
-  if (certifications.length > 0) {
-    lines.push(
-      "",
-      "CERTIFICATIONS"
-    );
+if (certifications.length > 0) {
+  lines.push(
+    "",
+    "CERTIFICATIONS"
+  );
 
-    certifications.forEach(
-      (item: any) => {
+  certifications.forEach(
+    (item: any) => {
+      const heading = [
+        clean(item.name),
+        clean(item.date),
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      if (heading) {
+        lines.push("", heading);
+      }
+
+      if (clean(item.issuer)) {
+        lines.push(clean(item.issuer));
+      }
+
+      if (clean(item.description)) {
         lines.push(
-          `• ${
-            typeof item === "string"
-              ? item
-              : item.name ||
-                item.title ||
-                item.certification
-          }`
+          clean(item.description)
         );
       }
+    }
+  );
+}
+
+/*
+  Career Objective
+*/
+
+const targetRoles = Array.isArray(
+  memory.target_roles
+)
+  ? memory.target_roles
+      .map((role: unknown) =>
+        clean(role)
+      )
+      .filter(Boolean)
+  : clean(memory.target_roles)
+    ? [clean(memory.target_roles)]
+    : [];
+
+const hasCareerObjective =
+  targetRoles.length > 0 ||
+  clean(memory.target_industry) ||
+  clean(memory.target_location) ||
+  clean(memory.salary_expectation) ||
+  clean(memory.career_goal_summary);
+
+if (hasCareerObjective) {
+  lines.push(
+    "",
+    "CAREER OBJECTIVE"
+  );
+
+  if (targetRoles.length > 0) {
+    lines.push(
+      `Target Role: ${targetRoles.join(
+        ", "
+      )}`
     );
   }
 
-  return lines.join("\n").trim();
+  if (clean(memory.target_industry)) {
+    lines.push(
+      `Industry: ${clean(
+        memory.target_industry
+      )}`
+    );
+  }
+
+  if (clean(memory.target_location)) {
+    lines.push(
+      `Preferred Location: ${clean(
+        memory.target_location
+      )}`
+    );
+  }
+
+  if (
+    clean(memory.salary_expectation)
+  ) {
+    lines.push(
+      `Salary Expectation: ${clean(
+        memory.salary_expectation
+      )}`
+    );
+  }
+
+  if (
+    clean(memory.career_goal_summary)
+  ) {
+    lines.push(
+      "",
+      clean(
+        memory.career_goal_summary
+      )
+    );
+  }
+}
+
+return lines.join("\n").trim();
 }
 
 export default function PasteJobPage() {
-  const { user, loading } = useLogin();
+  const { user, loading, hasResumeData } = useLogin();
+  const [showResumeRequiredModal, setShowResumeRequiredModal] =
+    useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) return;
+    setShowResumeRequiredModal(!hasResumeData);
+  }, [loading, user, hasResumeData]);
   async function getApplicationData() {
   
 
@@ -1024,6 +1321,7 @@ async function loadSelectedApplicationMaterials() {
         text:
           uploadedResume.original_text ||
           "",
+        resumeRow: uploadedResume,
       };
     } else {
       selectedResumeMaterial = {
@@ -1116,6 +1414,14 @@ async function loadSelectedApplicationMaterials() {
   }
 
   async function handleGeneratePackage() {
+  if (!hasResumeData) {
+    alert(
+      "Please write your Career Memory or upload a resume before creating an application package."
+    );
+    setShowResumeRequiredModal(true);
+    return;
+  }
+
   if (!analyzed) {
     alert(
       "Please analyze the job posting first."
@@ -1640,8 +1946,41 @@ async function downloadDocx() {
   }
 
   return (
-  <CareerMemoryGuard>
+
     <>
+      {showResumeRequiredModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <h2 className="text-lg font-black text-slate-950">
+              이력서를 먼저 등록해주세요
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Career Memory를 직접 작성하거나 이력서 파일을 업로드해야
+              이 페이지에서 맞춤 지원 서류(이력서·자기소개서·이메일)를
+              만들 수 있어요. 페이지는 계속 둘러보실 수 있습니다.
+            </p>
+
+            <div className="mt-5 flex flex-col gap-2">
+              <a
+                href="/career-memory"
+                className="rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-blue-700"
+              >
+                이력서 작성 / 업로드하러 가기
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setShowResumeRequiredModal(false)}
+                className="rounded-xl px-4 py-2 text-center text-sm font-semibold text-slate-500 transition hover:bg-slate-100"
+              >
+                나중에 하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {savedPreviewType && savedApplicationMaterial && (
         <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/60 px-4 py-8 backdrop-blur-sm">
           <div className="mx-auto w-full max-w-5xl overflow-hidden rounded-3xl bg-slate-100 shadow-2xl">
@@ -1671,13 +2010,21 @@ async function downloadDocx() {
             </div>
 
             <div className="p-4 sm:p-8">
-              <div className="mx-auto min-h-[900px] max-w-[794px] bg-white p-10 shadow">
-                <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-slate-700">
-                  {savedPreviewType === "resume"
-                    ? savedApplicationMaterial.resume.text
-                    : savedApplicationMaterial.coverLetter.text}
-                </pre>
-              </div>
+              {savedPreviewType === "resume" &&
+              savedApplicationMaterial.resume.resumeRow ? (
+                <ResumePreviewRenderer
+                  resume={savedApplicationMaterial.resume.resumeRow}
+                  fallbackText={savedApplicationMaterial.resume.text}
+                />
+              ) : (
+                <div className="mx-auto min-h-[900px] max-w-[794px] bg-white p-10 shadow">
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-slate-700">
+                    {savedPreviewType === "resume"
+                      ? savedApplicationMaterial.resume.text
+                      : savedApplicationMaterial.coverLetter.text}
+                  </pre>
+                </div>
+              )}
             </div>
 
             <div className="sticky bottom-0 flex justify-end border-t border-slate-200 bg-white px-6 py-4">
@@ -2808,7 +3155,7 @@ async function downloadDocx() {
       </div>
     </main>
     </>
-  </CareerMemoryGuard>
+  
 );
 }
 function PackageAnalysisPanel({

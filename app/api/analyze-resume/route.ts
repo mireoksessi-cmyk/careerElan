@@ -139,6 +139,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const MAX_RESUME_FILE_BYTES = 15 * 1024 * 1024;
+
+    const lowerFileName = file.name.toLowerCase();
+
+    const hasAllowedExtension =
+      lowerFileName.endsWith(".pdf") ||
+      lowerFileName.endsWith(".docx") ||
+      lowerFileName.endsWith(".txt");
+
+    if (!hasAllowedExtension) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Unsupported file format.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (file.size > MAX_RESUME_FILE_BYTES) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "This file is larger than 15MB. Please upload a smaller resume.",
+        },
+        { status: 400 }
+      );
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
 
     let resumeText = "";

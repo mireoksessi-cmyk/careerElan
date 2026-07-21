@@ -10,8 +10,9 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
-import CareerMemoryGuard from "@/components/CareerMemoryGuard";
-const FREE_PACKAGE_LIMIT = 10;
+import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
+
+const FREE_PACKAGE_LIMIT = 5;
 const menuItems = [
   "Dashboard",
   "Career Memory",
@@ -83,10 +84,89 @@ function getMenuIcon(item: string) {
   if (item === "Analytics") return "📊";
   return "⚙️";
 }
+function formatInterviewDate(
+  interviewDate: string
+) {
+  if (!interviewDate) {
+    return "";
+  }
 
+  const dateOnly =
+    interviewDate.slice(0, 10);
+
+  const [year, month, day] =
+    dateOnly
+      .split("-")
+      .map(Number);
+
+  if (
+    !year ||
+    !month ||
+    !day
+  ) {
+    return interviewDate;
+  }
+
+  /*
+    YYYY-MM-DD를 로컬 날짜로 생성한다.
+    new Date("YYYY-MM-DD")의 UTC 변환 문제를 방지한다.
+  */
+  const date = new Date(
+    year,
+    month - 1,
+    day
+  );
+
+  const now = new Date();
+
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+
+  const interviewStart = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate()
+  );
+
+  const dayDifference = Math.round(
+    (
+      interviewStart.getTime() -
+      todayStart.getTime()
+    ) /
+      (1000 * 60 * 60 * 24)
+  );
+
+  if (dayDifference === 0) {
+    return "Today";
+  }
+
+  if (dayDifference === 1) {
+    return "Tomorrow";
+  }
+
+  return date.toLocaleDateString(
+    "en-CA",
+    {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year:
+        date.getFullYear() !==
+        now.getFullYear()
+          ? "numeric"
+          : undefined,
+    }
+  );
+}
 type InsightItem = {
   name: string;
-  level: "Recommended" | "Worth Adding" | "Nice to Have";
+  level:
+    | "Recommended"
+    | "Worth Adding"
+    | "Nice to Have";
   reason: string;
 };
 
@@ -97,6 +177,13 @@ type DashboardStats = {
   packagesThisMonth: number;
   applicationsThisMonth: number;
   interviewsThisMonth: number;
+};
+
+type UpcomingInterview = {
+  id: string;
+  company: string;
+  jobTitle: string;
+  interviewDate: string;
 };
 
 function hasArrayItems(value: unknown) {
@@ -246,6 +333,297 @@ function getResumeText(data: any) {
 type ResumeInsightSource =
   | "career_memory"
   | "uploaded_resume";
+
+type ResumeScores = {
+  memoryCompleted: number;
+  aiPersonalization: number;
+};
+
+function calculateResumeScores(
+  data: any,
+  source:
+    | "career_memory"
+    | "uploaded_resume"
+): ResumeScores {
+  if (!data) {
+    return {
+      memoryCompleted: 0,
+      aiPersonalization: 0,
+    };
+  }
+
+  const experiences =
+    normalizeToArray(
+      data.experience ||
+        data.workExperience ||
+        data.work_experience
+    );
+
+  const education =
+    normalizeToArray(
+      data.education ||
+        data.educations
+    );
+
+  const languages =
+    normalizeToArray(
+      data.languages ||
+        data.languageSkills
+    );
+
+  const certifications =
+    normalizeToArray(
+      data.certifications ||
+        data.certificates ||
+        data.licenses
+    );
+
+  const projects =
+    normalizeToArray(
+      data.projects
+    );
+
+  const targetRoles =
+    normalizeToArray(
+      data.target_roles ||
+        data.targetRoles ||
+        data.targetRole
+    );
+
+  const skillsValue =
+    data.skills ||
+    data.technicalSkills ||
+    data.coreSkills ||
+    [];
+
+  const skills =
+    Array.isArray(skillsValue)
+      ? skillsValue
+      : typeof skillsValue === "string"
+        ? skillsValue
+            .split(",")
+            .map((skill) =>
+              skill.trim()
+            )
+            .filter(Boolean)
+        : [];
+
+  const firstName =
+    data.first_name ||
+    data.firstName ||
+    "";
+
+  const lastName =
+    data.last_name ||
+    data.lastName ||
+    "";
+
+  const email =
+    data.email || "";
+
+  const phone =
+    data.phone || "";
+
+  const location =
+    data.location || "";
+
+  const linkedin =
+    data.linkedin || "";
+
+  const headline =
+    data.headline ||
+    data.jobTitle ||
+    data.job_title ||
+    "";
+
+  const summary =
+    data.summary ||
+    data.professionalSummary ||
+    data.professional_summary ||
+    "";
+
+  const targetIndustry =
+    data.target_industry ||
+    data.targetIndustry ||
+    "";
+
+  const targetLocation =
+    data.target_location ||
+    data.targetLocation ||
+    "";
+
+  const careerGoalSummary =
+    data.career_goal_summary ||
+    data.careerGoalSummary ||
+    "";
+
+  /*
+    Memory Completed
+    기본적인 이력서 내용 완성도
+  */
+  let memoryScore = 0;
+
+/*
+  1. Personal Information: 15%
+*/
+if (
+  (hasText(firstName) || hasText(lastName)) &&
+  hasText(email)
+) {
+  memoryScore += 15;
+}
+
+/*
+  2. Education: 10%
+*/
+if (
+  hasMeaningfulArrayItems(education)
+) {
+  memoryScore += 10;
+}
+
+/*
+  3. Experience: 20%
+*/
+if (
+  hasMeaningfulArrayItems(experiences)
+) {
+  memoryScore += 20;
+}
+
+/*
+  4. Skills: 15%
+*/
+if (skills.length > 0) {
+  memoryScore += 15;
+}
+
+/*
+  5. Languages: 10%
+*/
+if (
+  hasMeaningfulArrayItems(languages)
+) {
+  memoryScore += 10;
+}
+
+/*
+  6. Certifications: 10%
+*/
+if (
+  hasMeaningfulArrayItems(certifications)
+) {
+  memoryScore += 10;
+}
+
+/*
+  7. Projects: 10%
+*/
+if (
+  hasMeaningfulArrayItems(projects)
+) {
+  memoryScore += 10;
+}
+
+/*
+  8. Career Goals: 10%
+*/
+if (
+  targetRoles.length > 0 ||
+  hasText(targetIndustry) ||
+  hasText(targetLocation) ||
+  hasText(careerGoalSummary)
+) {
+  memoryScore += 10;
+}
+  /*
+    AI Personalization
+    Career Élan이 사용자를 얼마나 세밀하게
+    이해하고 맞춤 생성할 수 있는지
+  */
+  let personalizationScore = 0;
+
+  if (
+    hasMeaningfulArrayItems(
+      experiences
+    )
+  ) {
+    personalizationScore += 25;
+  }
+
+  if (
+    hasMeasurableAchievement(
+      experiences
+    )
+  ) {
+    personalizationScore += 15;
+  }
+
+  if (skills.length >= 3) {
+    personalizationScore += 20;
+  } else if (skills.length > 0) {
+    personalizationScore += 10;
+  }
+
+  if (hasToolsOrSoftware(data)) {
+    personalizationScore += 10;
+  }
+
+  if (
+    hasText(headline) ||
+    targetRoles.length > 0
+  ) {
+    personalizationScore += 10;
+  }
+
+  if (
+    hasText(targetIndustry) ||
+    hasText(targetLocation) ||
+    hasText(careerGoalSummary)
+  ) {
+    personalizationScore += 10;
+  }
+
+  if (hasText(summary)) {
+    personalizationScore += 5;
+  }
+
+  if (
+    hasMeaningfulArrayItems(
+      education
+    ) ||
+    hasMeaningfulArrayItems(
+      certifications
+    ) ||
+    hasMeaningfulArrayItems(
+      projects
+    ) ||
+    hasMeaningfulArrayItems(
+      languages
+    )
+  ) {
+    personalizationScore += 5;
+  }
+
+  /*
+    Career Memory에 이미 저장된 profile_strength가 있으면
+    직접 작성 Resume의 Memory Completed에는 그 값을 사용
+  */
+  
+
+  return {
+  memoryCompleted: Math.min(
+    100,
+    Math.max(0, memoryScore)
+  ),
+
+  aiPersonalization: Math.min(
+    100,
+    Math.max(0, personalizationScore)
+  ),
+};
+}
+  
 
 function buildResumeInsights(
   data: any,
@@ -571,18 +949,29 @@ const {
   careerMemory,
   resumes,
   coverLetters,
+  hasResumeData,
   refresh,
 } = useLogin();
   
   
 
-  const careerMemoryCompleted =
-careerMemory?.required_completed ?? false;
-  const memoryStrength =
-careerMemory?.profile_strength ?? 0;
+ const careerMemoryCompleted =
+  careerMemory?.required_completed ?? false;
 
 const [selectedResume, setSelectedResume] = useState("");
 const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
+const [
+  selectedResumeScores,
+  setSelectedResumeScores,
+] = useState<ResumeScores>({
+  memoryCompleted: 0,
+  aiPersonalization: 0,
+});
+const memoryStrength =
+  selectedResumeScores.memoryCompleted;
+
+const aiPersonalization =
+  selectedResumeScores.aiPersonalization;
 const [previewAsset, setPreviewAsset] =
   useState<PreviewAsset>(null);
 const [deletingAsset, setDeletingAsset] = useState<
@@ -601,6 +990,10 @@ const [
   applicationsThisMonth: 0,
   interviewsThisMonth: 0,
 });
+const [
+  upcomingInterview,
+  setUpcomingInterview,
+] = useState<UpcomingInterview | null>(null);
   const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
   const [showTour, setShowTour] = useState(false);
   const [visibleJobs, setVisibleJobs] = useState(6);
@@ -613,8 +1006,14 @@ const [
     ? careerMemory?.resume_name || "Career Memory Resume"
     : resumes.find((resume: any) => resume.id === selectedResume)
         ?.file_name || "Selected Resume";
+ const selectedResumeTypeLabel =
+  selectedResume === "career_memory"
+    ? "Created Resume"
+    : selectedResume
+      ? "Imported Resume"
+      : "No Resume Selected";       
    const aiUsageUsed = stats.packagesThisMonth;
-const aiUsageLimit = 10;
+const aiUsageLimit = FREE_PACKAGE_LIMIT;
 
 const aiUsagePercent = Math.min(
   100,
@@ -1074,23 +1473,13 @@ if (!selectedPayload) {
   },
 
   body: JSON.stringify({
-    sourceType:
-      selectedPayload.sourceType,
+    selectedResumeSource:
+      selectedPayload.sourceType === "upload"
+        ? "uploaded"
+        : "career_memory",
 
-    resumeId:
+    selectedResumeId:
       selectedPayload.resumeId,
-
-    resumeName:
-      selectedPayload.resumeName,
-
-    resumeText:
-      selectedPayload.resumeText,
-
-    /*
-      선택된 이력서 데이터만 전달
-    */
-    resumeData:
-      selectedPayload.resumeData,
   }),
 })
 
@@ -1301,6 +1690,93 @@ useEffect(() => {
 ]);
 
 useEffect(() => {
+  /*
+    아직 Resume가 선택되지 않은 경우
+  */
+  if (!selectedResume) {
+    setSelectedResumeScores({
+      memoryCompleted: 0,
+      aiPersonalization: 0,
+    });
+
+    return;
+  }
+
+  /*
+    Career Memory Resume 선택
+  */
+  if (
+    selectedResume ===
+    "career_memory"
+  ) {
+    setSelectedResumeScores(
+      calculateResumeScores(
+        careerMemory,
+        "career_memory"
+      )
+    );
+
+    return;
+  }
+
+  /*
+    업로드 Resume 선택
+  */
+  const uploadedResume =
+    resumes.find(
+      (resume: any) =>
+        resume.id ===
+        selectedResume
+    );
+
+  if (!uploadedResume) {
+    setSelectedResumeScores({
+      memoryCompleted: 0,
+      aiPersonalization: 0,
+    });
+
+    return;
+  }
+
+  let parsedData =
+    uploadedResume.parsed_data ||
+    {};
+
+  /*
+    parsed_data가 문자열 JSON인 경우 처리
+  */
+  if (
+    typeof parsedData === "string"
+  ) {
+    try {
+      parsedData =
+        JSON.parse(parsedData);
+    } catch {
+      parsedData = {};
+    }
+  }
+
+  const uploadedResumeData = {
+    ...parsedData,
+
+    original_text:
+      uploadedResume.original_text ||
+      "",
+  };
+
+  setSelectedResumeScores(
+    calculateResumeScores(
+      uploadedResumeData,
+      "uploaded_resume"
+    )
+  );
+}, [
+  selectedResume,
+  careerMemory,
+  resumes,
+]);
+
+useEffect(() => {
   if (loading) return;
   if (!user) return;
 
@@ -1309,16 +1785,18 @@ useEffect(() => {
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
 
-    const { data, error } = await supabase
-      .from("applications")
-      .select(`
-        id,
-        status,
-        created_at,
-        applied_date,
-        interview_date
-      `)
-      .eq("user_id", user.id);
+   const { data, error } = await supabase
+  .from("applications")
+  .select(`
+    id,
+    company,
+    job_title,
+    status,
+    created_at,
+    applied_date,
+    interview_date
+  `)
+  .eq("user_id", user.id);
 
     if (error) {
       console.error(
@@ -1435,6 +1913,113 @@ useEffect(() => {
         ).length,
     });
 
+/*
+  오늘 이후에 예정된 인터뷰 중
+  가장 가까운 인터뷰 1개 선택
+*/
+const today = new Date();
+
+today.setHours(
+  0,
+  0,
+  0,
+  0
+);
+
+function getLocalDateTime(
+  value: string | null
+) {
+  if (!value) {
+    return null;
+  }
+
+  const dateOnly =
+    value.slice(0, 10);
+
+  const [year, month, day] =
+    dateOnly
+      .split("-")
+      .map(Number);
+
+  if (
+    !year ||
+    !month ||
+    !day
+  ) {
+    return null;
+  }
+
+  return new Date(
+    year,
+    month - 1,
+    day
+  ).getTime();
+}
+
+const futureInterviews =
+  normalizedRows
+    .filter((row) => {
+      /*
+        인터뷰 상태이면서 날짜가 있는 행만 표시
+      */
+      if (
+        row.normalizedStatus !==
+          "interview" ||
+        !row.interview_date
+      ) {
+        return false;
+      }
+
+      const interviewTime =
+        getLocalDateTime(
+          row.interview_date
+        );
+
+      return (
+        interviewTime !== null &&
+        interviewTime >=
+          today.getTime()
+      );
+    })
+    .sort((a, b) => {
+      const firstTime =
+        getLocalDateTime(
+          a.interview_date
+        ) ?? Infinity;
+
+      const secondTime =
+        getLocalDateTime(
+          b.interview_date
+        ) ?? Infinity;
+
+      return (
+        firstTime -
+        secondTime
+      );
+    });
+
+const nextInterview =
+  futureInterviews[0];
+
+if (nextInterview) {
+  setUpcomingInterview({
+    id: nextInterview.id,
+
+    company:
+      nextInterview.company ||
+      "Company",
+
+    jobTitle:
+      nextInterview.job_title ||
+      "Interview",
+
+    interviewDate:
+      nextInterview.interview_date!,
+  });
+} else {
+  setUpcomingInterview(null);
+}
+
     console.log(
       "DASHBOARD APPLICATION ROWS =",
       normalizedRows
@@ -1458,253 +2043,458 @@ useEffect(() => {
 function renderPreviewContent() {
   if (!previewAsset) return null;
 
+  function formatMonth(value?: string) {
+  if (!value) return "";
+
+  const [year, month] = value.split("-");
+
+  if (!year || !month) {
+    return value;
+  }
+
+  return new Date(
+    Number(year),
+    Number(month) - 1,
+    1
+  ).toLocaleDateString("en-CA", {
+    year: "numeric",
+    month: "short",
+  });
+}
+
+function formatExperienceDates(item: {
+  startDate?: string;
+  start_date?: string;
+  endDate?: string;
+  end_date?: string;
+  isCurrent?: boolean;
+  is_current?: boolean;
+}) {
+  const start = formatMonth(
+    item.startDate || item.start_date
+  );
+
+  const isCurrent =
+    item.isCurrent ?? item.is_current ?? false;
+
+  const end = isCurrent
+    ? "Present"
+    : formatMonth(item.endDate || item.end_date);
+
+  return [start, end]
+    .filter(Boolean)
+    .join(" – ");
+}
+
+function formatEducationDates(item: {
+  startDate?: string;
+  start_date?: string;
+  endDate?: string;
+  end_date?: string;
+}) {
+  return [
+    formatMonth(item.startDate || item.start_date),
+    formatMonth(item.endDate || item.end_date),
+  ]
+    .filter(Boolean)
+    .join(" – ");
+}
+
   /*
     Career Memory에서 직접 작성한 Resume
   */
-  if (previewAsset.type === "career-memory-resume") {
-    return (
-      <div className="mx-auto max-w-[800px] bg-white p-8 text-slate-800">
-        <div className="border-b border-slate-300 pb-5">
-          <h1 className="text-3xl font-black text-slate-950">
-            {careerMemory?.first_name || ""}{" "}
-            {careerMemory?.last_name || ""}
-          </h1>
+if (previewAsset.type === "career-memory-resume") {
+  return (
+    <div className="mx-auto max-w-[800px] bg-white p-8 text-slate-800">
+      <div className="border-b border-slate-300 pb-5">
+        <h1 className="text-3xl font-black text-slate-950">
+          {careerMemory?.first_name || ""}{" "}
+          {careerMemory?.last_name || ""}
+        </h1>
 
-          {careerMemory?.headline && (
-            <p className="mt-2 font-bold text-blue-600">
-              {careerMemory.headline}
-            </p>
-          )}
-
-          <p className="mt-3 text-sm text-slate-500">
-            {[
-              careerMemory?.email,
-              careerMemory?.phone,
-              careerMemory?.location,
-              careerMemory?.linkedin,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+        {careerMemory?.headline && (
+          <p className="mt-2 font-bold text-blue-600">
+            {careerMemory.headline}
           </p>
-        </div>
-
-        {careerMemory?.summary && (
-          <PreviewSection title="Professional Summary">
-            <p className="whitespace-pre-wrap">
-              {careerMemory.summary}
-            </p>
-          </PreviewSection>
         )}
 
-        {Array.isArray(careerMemory?.experience) &&
-          careerMemory.experience.length > 0 && (
-            <PreviewSection title="Experience">
-              {careerMemory.experience.map(
-                (experience: any, index: number) => (
-                  <div
-                    key={index}
-                    className="mb-6"
-                  >
-                    <div className="flex justify-between gap-4">
-                      <p className="font-bold text-slate-950">
-                        {experience.jobTitle ||
-                          experience.job_title ||
-                          experience.role ||
-                          ""}
-                      </p>
-
-                      <p className="text-sm text-slate-500">
-                        {experience.dates || ""}
-                      </p>
-                    </div>
-
-                    <p className="font-semibold text-slate-600">
-                      {experience.company ||
-                        experience.organization ||
-                        ""}
-                    </p>
-
-                    {experience.description && (
-                      <p className="mt-2 whitespace-pre-wrap">
-                        {experience.description}
-                      </p>
-                    )}
-                  </div>
-                )
-              )}
-            </PreviewSection>
-          )}
-
-        {Array.isArray(careerMemory?.education) &&
-          careerMemory.education.length > 0 && (
-            <PreviewSection title="Education">
-              {careerMemory.education.map(
-                (education: any, index: number) => (
-                  <div
-                    key={index}
-                    className="mb-5"
-                  >
-                    <div className="flex justify-between gap-4">
-                      <p className="font-bold text-slate-950">
-                        {education.program ||
-                          education.degree ||
-                          ""}
-                      </p>
-
-                      <p className="text-sm text-slate-500">
-                        {education.dates || ""}
-                      </p>
-                    </div>
-
-                    <p className="font-semibold text-slate-600">
-                      {education.school || ""}
-                    </p>
-
-                    {education.coursework && (
-                      <p className="mt-2 whitespace-pre-wrap">
-                        {education.coursework}
-                      </p>
-                    )}
-                  </div>
-                )
-              )}
-            </PreviewSection>
-          )}
-
-        {Array.isArray(careerMemory?.skills) &&
-          careerMemory.skills.length > 0 && (
-            <PreviewSection title="Skills">
-              <div className="flex flex-wrap gap-2">
-                {careerMemory.skills.map(
-                  (skill: string, index: number) => (
-                    <span
-                      key={`${skill}-${index}`}
-                      className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700"
-                    >
-                      {skill}
-                    </span>
-                  )
-                )}
-              </div>
-            </PreviewSection>
-          )}
-
-        {Array.isArray(careerMemory?.languages) &&
-          careerMemory.languages.length > 0 && (
-            <PreviewSection title="Languages">
-              {careerMemory.languages.map(
-                (language: any, index: number) => (
-                  <p key={index}>
-                    <span className="font-semibold">
-                      {language.language}
-                    </span>
-
-                    {language.level ||
-                    language.proficiency
-                      ? ` — ${
-                          language.level ||
-                          language.proficiency
-                        }`
-                      : ""}
-                  </p>
-                )
-              )}
-            </PreviewSection>
-          )}
+        <p className="mt-3 text-sm text-slate-500">
+          {[
+            careerMemory?.email,
+            careerMemory?.phone,
+            careerMemory?.location,
+            careerMemory?.linkedin,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
       </div>
-    );
-  }
+
+     <PreviewSection title="Professional Summary">
+  {careerMemory?.summary && (
+    <p className="whitespace-pre-wrap">
+      {careerMemory.summary}
+    </p>
+  )}
+</PreviewSection>
+
+<PreviewSection title="Skills">
+  <div className="flex flex-wrap gap-2">
+    {(Array.isArray(careerMemory?.skills)
+      ? careerMemory.skills
+      : String(careerMemory?.skills || "").split(",")
+    )
+      .map((skill: string) => String(skill).trim())
+      .filter(Boolean)
+      .map((skill: string, index: number) => (
+        <span
+          key={`${skill}-${index}`}
+          className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700"
+        >
+          {skill}
+        </span>
+      ))}
+  </div>
+</PreviewSection>
+
+<PreviewSection title="Experience">
+  {Array.isArray(careerMemory?.experience) &&
+    careerMemory.experience
+      .filter(
+        (experience: any) =>
+          experience.company?.trim?.() ||
+          experience.jobTitle?.trim?.() ||
+          experience.job_title?.trim?.() ||
+          experience.description?.trim?.()
+      )
+      .map((experience: any, index: number) => (
+        <div
+          key={`work-${index}`}
+          className="mb-6"
+        >
+          <div className="flex justify-between gap-4">
+            <p className="font-bold text-slate-950">
+              {experience.jobTitle ||
+                experience.job_title ||
+                ""}
+            </p>
+
+            <p className="text-sm text-slate-500">
+              {formatExperienceDates(experience)}
+            </p>
+          </div>
+
+          <p className="font-semibold text-slate-600">
+            {experience.company || ""}
+            {experience.location
+              ? ` · ${experience.location}`
+              : ""}
+          </p>
+
+          {experience.description && (
+            <ul className="mt-2 list-disc space-y-2 pl-6">
+              {String(experience.description)
+                .split(/\r?\n|•/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((line, lineIndex) => (
+                  <li key={lineIndex}>
+                    {line}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      ))}
+
+  {Array.isArray(careerMemory?.volunteer_experience) &&
+    careerMemory.volunteer_experience.some(
+      (experience: any) =>
+        experience.organization?.trim?.() ||
+        experience.role?.trim?.() ||
+        experience.location?.trim?.() ||
+        experience.startDate ||
+        experience.start_date ||
+        experience.endDate ||
+        experience.end_date ||
+        experience.description?.trim?.()
+    ) && (
+      <div className="mt-7">
+        <h3 className="mb-5 text-sm font-black uppercase tracking-[0.12em] text-slate-950">
+          Volunteer / Internship
+        </h3>
+
+        {careerMemory.volunteer_experience
+          .filter(
+            (experience: any) =>
+              experience.organization?.trim?.() ||
+              experience.role?.trim?.() ||
+              experience.location?.trim?.() ||
+              experience.startDate ||
+              experience.start_date ||
+              experience.endDate ||
+              experience.end_date ||
+              experience.description?.trim?.()
+          )
+          .map((experience: any, index: number) => (
+            <div
+              key={`volunteer-${index}`}
+              className="mb-6"
+            >
+              <div className="flex justify-between gap-4">
+                <p className="font-bold text-slate-950">
+                  {experience.role || ""}
+                </p>
+
+                <p className="text-sm text-slate-500">
+                  {formatExperienceDates(experience)}
+                </p>
+              </div>
+
+              <p className="font-semibold text-slate-600">
+                {experience.organization || ""}
+                {experience.location
+                  ? ` · ${experience.location}`
+                  : ""}
+              </p>
+
+              {experience.description && (
+                <ul className="mt-2 list-disc space-y-2 pl-6">
+                  {String(experience.description)
+                    .split(/\r?\n|•/)
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .map((line, lineIndex) => (
+                      <li key={lineIndex}>
+                        {line}
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          ))}
+      </div>
+    )}
+</PreviewSection>
+
+{Array.isArray(careerMemory?.projects) &&
+  careerMemory.projects.some(
+    (project: any) => project.name?.trim()
+  ) && (
+    <PreviewSection title="Projects">
+      {careerMemory.projects
+        .filter(
+          (project: any) => project.name?.trim()
+        )
+        .map((project: any, index: number) => (
+          <div
+            key={index}
+            className="mb-5"
+          >
+            <div className="flex justify-between gap-4">
+              <p className="font-bold text-slate-950">
+                {project.name}
+              </p>
+
+              <p className="text-sm text-slate-500">
+                {project.dates}
+              </p>
+            </div>
+
+            {project.role && (
+              <p className="font-semibold text-slate-600">
+                {project.role}
+              </p>
+            )}
+
+            {project.description && (
+              <p className="mt-2 whitespace-pre-wrap">
+                {project.description}
+              </p>
+            )}
+          </div>
+        ))}
+    </PreviewSection>
+)}
+
+{Array.isArray(careerMemory?.education) &&
+  careerMemory.education.some(
+    (education: any) =>
+      education.school?.trim?.() ||
+      education.program?.trim?.() ||
+      education.degree?.trim?.() ||
+      education.startDate ||
+      education.start_date ||
+      education.endDate ||
+      education.end_date ||
+      education.gpa?.trim?.() ||
+      education.coursework?.trim?.()
+  ) && (
+    <PreviewSection title="Education">
+      {careerMemory.education
+        .filter(
+          (education: any) =>
+            education.school?.trim?.() ||
+            education.program?.trim?.() ||
+            education.degree?.trim?.() ||
+            education.startDate ||
+            education.start_date ||
+            education.endDate ||
+            education.end_date ||
+            education.gpa?.trim?.() ||
+            education.coursework?.trim?.()
+        )
+        .map((education: any, index: number) => (
+          <div
+            key={index}
+            className="mb-5"
+          >
+            <div className="flex justify-between gap-4">
+              <p className="font-bold text-slate-950">
+                {education.program ||
+                  education.degree ||
+                  ""}
+              </p>
+
+              <p className="text-sm text-slate-500">
+                {formatEducationDates(education)}
+              </p>
+            </div>
+
+            <p className="font-semibold text-slate-600">
+              {education.school || ""}
+            </p>
+
+            {education.gpa && (
+              <p className="text-sm text-slate-500">
+                GPA: {education.gpa}
+              </p>
+            )}
+
+            {education.coursework && (
+              <p className="mt-2 whitespace-pre-wrap">
+                {education.coursework}
+              </p>
+            )}
+          </div>
+        ))}
+    </PreviewSection>
+)}
+
+{Array.isArray(careerMemory?.languages) &&
+  careerMemory.languages.some(
+    (language: any) => language.language?.trim()
+  ) && (
+    <PreviewSection title="Languages">
+      {careerMemory.languages
+        .filter(
+          (language: any) => language.language?.trim()
+        )
+        .map((language: any, index: number) => (
+          <p key={index}>
+            <span className="font-semibold">
+              {language.language}
+            </span>
+
+            {language.level || language.proficiency
+              ? ` — ${
+                  language.level ||
+                  language.proficiency
+                }`
+              : ""}
+          </p>
+        ))}
+    </PreviewSection>
+)}
+
+{Array.isArray(careerMemory?.certifications) &&
+  careerMemory.certifications.some(
+    (cert: any) => cert.name?.trim()
+  ) && (
+    <PreviewSection title="Certifications">
+      {careerMemory.certifications
+        .filter(
+          (cert: any) => cert.name?.trim()
+        )
+        .map((cert: any, index: number) => (
+          <div
+            key={index}
+            className="mb-5"
+          >
+            <div className="flex justify-between gap-4">
+              <p className="font-bold text-slate-950">
+                {cert.name}
+              </p>
+
+              <p className="text-sm text-slate-500">
+                {cert.date}
+              </p>
+            </div>
+
+            <p className="font-semibold text-slate-600">
+              {cert.issuer}
+            </p>
+
+            {cert.description && (
+              <p className="mt-2 whitespace-pre-wrap">
+                {cert.description}
+              </p>
+            )}
+          </div>
+        ))}
+    </PreviewSection>
+)}
+
+{(careerMemory?.target_roles?.length > 0 ||
+  careerMemory?.target_industry ||
+  careerMemory?.target_location ||
+  careerMemory?.salary_expectation ||
+  careerMemory?.career_goal_summary) && (
+  <PreviewSection title="Career Objective">
+    {careerMemory?.target_roles?.length > 0 && (
+      <p className="mb-2">
+        <strong>Target Role:</strong>{" "}
+        {careerMemory.target_roles.join(", ")}
+      </p>
+    )}
+
+    {careerMemory?.target_industry && (
+      <p className="mb-2">
+        <strong>Industry:</strong>{" "}
+        {careerMemory.target_industry}
+      </p>
+    )}
+
+    {careerMemory?.target_location && (
+      <p className="mb-2">
+        <strong>Preferred Location:</strong>{" "}
+        {careerMemory.target_location}
+      </p>
+    )}
+
+    {careerMemory?.salary_expectation && (
+      <p className="mb-2">
+        <strong>Salary Expectation:</strong>{" "}
+        {careerMemory.salary_expectation}
+      </p>
+    )}
+
+    {careerMemory?.career_goal_summary && (
+      <p className="mt-3 whitespace-pre-wrap">
+        {careerMemory.career_goal_summary}
+      </p>
+    )}
+  </PreviewSection>
+)}
+    </div>
+  );
+}
 
   /*
     업로드한 Resume
   */
   if (previewAsset.type === "uploaded-resume") {
-    const resume = previewAsset.item;
-    const parsed = resume.parsed_data || {};
-
-    return (
-      <div className="mx-auto max-w-[800px] bg-white p-8 text-slate-800">
-        <div className="border-b border-slate-300 pb-5">
-          <p className="text-sm font-black uppercase tracking-wide text-blue-600">
-            Uploaded Resume
-          </p>
-
-          <h1 className="mt-2 text-2xl font-black">
-            {resume.file_name ||
-              "Uploaded Resume"}
-          </h1>
-        </div>
-
-        {resume.original_text ? (
-          <pre className="mt-6 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-700">
-            {resume.original_text}
-          </pre>
-        ) : (
-          <div className="mt-6">
-            <h2 className="text-2xl font-black">
-              {parsed.firstName || ""}{" "}
-              {parsed.lastName || ""}
-            </h2>
-
-            <p className="mt-2 text-sm text-slate-500">
-              {[
-                parsed.email,
-                parsed.phone,
-                parsed.location,
-                parsed.linkedin,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-
-            {parsed.summary && (
-              <PreviewSection title="Summary">
-                <p className="whitespace-pre-wrap">
-                  {parsed.summary}
-                </p>
-              </PreviewSection>
-            )}
-
-            {Array.isArray(parsed.workExperience) &&
-              parsed.workExperience.length > 0 && (
-                <PreviewSection title="Experience">
-                  {parsed.workExperience.map(
-                    (
-                      experience: any,
-                      index: number
-                    ) => (
-                      <div
-                        key={index}
-                        className="mb-6"
-                      >
-                        <div className="flex justify-between gap-4">
-                          <p className="font-bold text-slate-950">
-                            {experience.jobTitle ||
-                              experience.title ||
-                              ""}
-                          </p>
-
-                          <p className="text-sm text-slate-500">
-                            {experience.dates || ""}
-                          </p>
-                        </div>
-
-                        <p className="font-semibold text-slate-600">
-                          {experience.company || ""}
-                        </p>
-
-                        <p className="mt-2 whitespace-pre-wrap">
-                          {experience.description || ""}
-                        </p>
-                      </div>
-                    )
-                  )}
-                </PreviewSection>
-              )}
-          </div>
-        )}
-      </div>
-    );
+    return <ResumePreviewRenderer resume={previewAsset.item} />;
   }
 
   /*
@@ -1778,7 +2568,7 @@ function renderPreviewContent() {
 }
   
   return (
-  <CareerMemoryGuard>
+  
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
      {previewAsset && (
   <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
@@ -2010,7 +2800,7 @@ function renderPreviewContent() {
     <div className="flex items-start justify-between">
       <div>
         <p className="text-sm font-semibold text-gray-500">
-          Career Memory
+            Create Resume & Import Resume
         </p>
 
         <h3 className="mt-3 text-3xl font-extrabold">
@@ -2023,11 +2813,15 @@ function renderPreviewContent() {
       </div>
     </div>
 
-    <p className="mt-3 text-xs text-gray-500">
-      {careerMemoryCompleted
-        ? "Profile ready for personalized applications"
-        : "Complete your profile to improve results"}
-    </p>
+    <div className="mt-3">
+  <p className="text-xs font-bold text-blue-600">
+    {selectedResumeTypeLabel}
+  </p>
+
+  <p className="mt-1 truncate text-xs text-gray-500">
+    {selectedResumeLabel}
+  </p>
+</div>
 
     <div className="mt-5 flex items-center justify-between text-sm">
       <a
@@ -2197,7 +2991,7 @@ Choose which resume and cover letter will be used when generating your applicati
     </button>
   </div>
 
-  {careerMemory?.required_completed && (
+  {careerMemory && (
     <div
       className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
         selectedResume === "career_memory"
@@ -2223,7 +3017,7 @@ Choose which resume and cover letter will be used when generating your applicati
 
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
-            Career Memory Resume
+            Create Resume
           </p>
 
           <p className="truncate text-sm text-gray-500">
@@ -2297,7 +3091,7 @@ Choose which resume and cover letter will be used when generating your applicati
 
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
-            Uploaded Resume
+            Import Resume
           </p>
 
           <p className="truncate text-sm text-gray-500">
@@ -2512,13 +3306,22 @@ Generate automatically
                   <div>
                     <h2 className="text-lg font-bold">Recommended Jobs</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      {careerMemoryCompleted
+                      {hasResumeData
                         ? "Based on your Career Memory and profile."
                         : "General recommendations. Upload your resume to unlock personalized matches."}
                     </p>
                   </div>
                   <a href="/find-jobs" className="text-sm font-bold text-blue-600">View All Jobs</a>
                 </div>
+
+                {!hasResumeData && (
+                  <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                    이력서를 직접 작성하거나 업로드하면 내 프로필 기반으로 맞춤 추천을 받을 수 있어요.{" "}
+                    <a href="/career-memory" className="font-bold underline">
+                      이력서 등록하러 가기
+                    </a>
+                  </div>
+                )}
 
                 <div className="grid gap-5 md:grid-cols-3">
                   {loadingJobs ? (
@@ -2655,147 +3458,258 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 )}
 
                  
+              <div className="relative overflow-hidden rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  {/* Coming Soon Overlay */}
+  <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80 px-6 backdrop-blur-[2px]">
+    <div className="max-w-md text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
+        🎪
+      </div>
+
+      <span className="mt-5 inline-flex rounded-full bg-blue-100 px-4 py-2 text-xs font-black uppercase tracking-wide text-blue-700">
+        Coming Soon
+      </span>
+
+      <h3 className="mt-4 text-2xl font-black text-slate-950">
+        Career Fair Search
+      </h3>
+
+      <p className="mt-3 text-sm leading-6 text-slate-600">
+        Career Fair Search will be available in the official release of
+        Career Élan.
+      </p>
+
+      <p className="mt-2 text-xs font-semibold text-slate-400">
+        This feature is not available during the Free Beta.
+      </p>
+    </div>
+  </div>
+
+  {/* Disabled preview content */}
+  <div
+    aria-hidden="true"
+    className="pointer-events-none select-none opacity-30"
+  >
+    <div className="mb-5 flex items-center justify-between">
+      <div>
+        <h2 className="text-lg font-bold">
+          🎪 Career Fair Search
+        </h2>
+
+        <p className="mt-1 text-sm text-gray-500">
+          {careerMemoryCompleted
+            ? "AI finds career fairs that match your profile and goals."
+            : "Search career fairs by location. Add Career Memory for AI matching."}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        disabled
+        className="cursor-not-allowed text-sm font-bold text-blue-600"
+      >
+        View All
+      </button>
+    </div>
+
+    <div className="mb-6 flex items-center gap-3">
+      <span className="text-xl">📍</span>
+
+      <input
+        type="text"
+        value={careerFairLocation}
+        readOnly
+        disabled
+        placeholder="Toronto, ON"
+        className="w-80 cursor-not-allowed rounded-xl border border-gray-300 bg-slate-50 px-4 py-2 text-slate-400 outline-none"
+      />
+
+      <button
+        type="button"
+        disabled
+        className="cursor-not-allowed rounded-xl bg-blue-600 px-8 py-2 font-semibold text-white"
+      >
+        Search
+      </button>
+    </div>
+
+    <div className="space-y-4">
+      {careerFairs.map((fair) => (
+        <div
+          key={fair.title}
+          className="grid gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm md:grid-cols-12"
+        >
+          <div className="col-span-12 flex items-center gap-4 md:col-span-7">
+            <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-blue-50 text-4xl">
+              {fair.icon}
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+                {fair.match && (
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                    {fair.match} Match
+                  </span>
+                )}
+
+                <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
+                  {fair.date}
+                </span>
               </div>
 
-              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <div className="mb-5 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold">🎪 Career Fair Search</h2>
-                    <p className="mt-1 text-sm text-gray-500">
-                      {careerMemoryCompleted
-                        ? "AI finds career fairs that match your profile and goals."
-                        : "Search career fairs by location. Add Career Memory for AI matching."}
-                    </p>
-                  </div>
-                  <button className="text-sm font-bold text-blue-600 hover:underline">View All</button>
-                </div>
+              <h3 className="mt-2 text-lg font-extrabold">
+                {fair.title}
+              </h3>
 
-                <div className="mb-6 flex items-center gap-3">
-                  <span className="text-xl">📍</span>
-                  <input
-                    type="text"
-                    value={careerFairLocation}
-                    onChange={(e) => setCareerFairLocation(e.target.value)}
-                    placeholder="Toronto, ON"
-                    className="w-80 rounded-xl border border-gray-300 px-4 py-2 outline-none focus:border-blue-600"
-                  />
-                  <button onClick={handleCareerFairSearch} className="rounded-xl bg-blue-600 px-8 py-2 font-semibold text-white hover:bg-blue-700">
-                    Search
-                  </button>
-                </div>
+              <p className="mt-1 text-sm text-gray-500">
+                {fair.location}
+              </p>
 
-                <div className="space-y-4">
-                  {careerFairs.map((fair) => (
-                    <div key={fair.title} className="grid gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm md:grid-cols-12">
-                      <div className="col-span-12 flex items-center gap-4 md:col-span-7">
-                        <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-blue-50 text-4xl">{fair.icon}</div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            {fair.match && <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">{fair.match} Match</span>}
-                            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">{fair.date}</span>
-                          </div>
-                          <h3 className="mt-2 text-lg font-extrabold">{fair.title}</h3>
-                          <p className="mt-1 text-sm text-gray-500">{fair.location}</p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {fair.tags.map((tag) => (
-                              <span key={tag} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">{tag}</span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {fair.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
 
-                      <div className="col-span-12 rounded-xl bg-green-50 p-4 md:col-span-5">
-                        <h4 className="font-bold text-green-700">{careerMemoryCompleted ? "Why this match?" : "Why this event?"}</h4>
-                        <div className="mt-2 space-y-1">
-                          {fair.why.map((reason) => (
-                            <p key={reason} className="text-sm text-green-700">✓ {reason}</p>
-                          ))}
-                        </div>
-                        <button className="mt-3 rounded-lg bg-white px-4 py-2 text-sm font-bold text-blue-600">View Details</button>
-                      </div>
-                    </div>
-                  ))}
+          <div className="col-span-12 rounded-xl bg-green-50 p-4 md:col-span-5">
+            <h4 className="font-bold text-green-700">
+              {careerMemoryCompleted
+                ? "Why this match?"
+                : "Why this event?"}
+            </h4>
+
+            <div className="mt-2 space-y-1">
+              {fair.why.map((reason) => (
+                <p
+                  key={reason}
+                  className="text-sm text-green-700"
+                >
+                  ✓ {reason}
+                </p>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              disabled
+              className="mt-3 cursor-not-allowed rounded-lg bg-white px-4 py-2 text-sm font-bold text-blue-600"
+            >
+              View Details
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+
                 </div>
               </div>
             </section>
 
             <aside className="col-span-12 space-y-6 xl:col-span-3">
-              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-bold">Career Memory</h2>
+  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <h2 className="text-lg font-bold"> Create Resume & Import Resume</h2>
 
-                <div className="mt-5 flex justify-center">
-                  <div className="flex h-28 w-28 items-center justify-center rounded-full border-8 border-blue-200 bg-blue-50 text-4xl">🧠</div>
-                </div>
+    <div className="mt-5 flex justify-center">
+      <div className="flex h-28 w-28 items-center justify-center rounded-full border-8 border-blue-200 bg-blue-50 text-4xl">
+        🧠
+      </div>
+    </div>
 
-                <div className="mt-6 space-y-4">
-                  <div>
-                    <div className="flex justify-between text-xs font-bold text-gray-500">
-                      <span>Memory Completed</span>
-                      <span>{memoryStrength}%</span>
-                    </div>
-                    <div className="mt-2 h-2 rounded-full bg-gray-100">
-                      <div className="h-2 rounded-full bg-blue-600" style={{ width: `${memoryStrength}%`}} />
-                    </div>
-                  </div>
+    <div className="mt-6 space-y-4">
+      {/* Memory Completed */}
+      <div>
+        <div className="flex justify-between text-xs font-bold text-gray-500">
+          <span>Memory Completed</span>
+          <span>{memoryStrength}%</span>
+        </div>
 
-                  <div>
-                    <div className="flex justify-between text-xs font-bold text-gray-500">
-                      <span>AI Personalization</span>
-                      <span>{careerMemoryCompleted ? "70%" : "0%"}</span>
-                    </div>
-                    <div className="mt-2 h-2 rounded-full bg-gray-100">
-                      <div className="h-2 rounded-full bg-cyan-500" style={{ width: careerMemoryCompleted ? "70%" : "0%" }} />
-                    </div>
-                  </div>
-                </div>
-
-                <a href="/career-memory" className="mt-5 block rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white">
-                  {careerMemoryCompleted ? "Improve My Profile →" : "Complete Career Memory →"}
-                </a>
-              </div>
-
-              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-bold">Career Insights</h2>
-               <p className="mt-1 text-sm text-gray-500">
-  Suggestions based on{" "}
-  <span className="font-bold text-blue-600">
-    {selectedResumeLabel}
-  </span>
-  .
-</p>
-
-               <div className="mt-5 space-y-4">
-  {insightItems.map((item) => (
-    <div
-      key={`${item.name}-${item.reason}`}
-      className="rounded-xl bg-slate-50 p-4"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-bold">
-          {item.name}
-        </p>
-
-        <span
-          className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${
-            item.level === "Recommended"
-              ? "bg-red-100 text-red-600"
-              : item.level === "Worth Adding"
-                ? "bg-blue-100 text-blue-600"
-                : "bg-slate-200 text-slate-600"
-          }`}
-        >
-          {item.level}
-        </span>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+          <div
+            className="h-2 rounded-full bg-blue-600 transition-all duration-500"
+            style={{
+              width: `${memoryStrength}%`,
+            }}
+          />
+        </div>
       </div>
 
-      <p className="mt-2 text-xs leading-5 text-slate-500">
-        {item.reason}
-      </p>
+      {/* AI Personalization */}
+      <div>
+        <div className="flex justify-between text-xs font-bold text-gray-500">
+          <span>AI Personalization</span>
+          <span>{aiPersonalization}%</span>
+        </div>
 
-     
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+          <div
+            className="h-2 rounded-full bg-cyan-500 transition-all duration-500"
+            style={{
+              width: `${aiPersonalization}%`,
+            }}
+          />
+        </div>
+      </div>
     </div>
-  ))}
-</div>
+
+    <a
+      href="/career-memory"
+      className="mt-5 block rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white"
+    >
+      Improve My Profile →
+    </a>
+  </div>
+
+  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <h2 className="text-lg font-bold">Career Insights</h2>
+
+    <p className="mt-1 text-sm text-gray-500">
+      Suggestions based on{" "}
+      <span className="font-bold text-blue-600">
+        {selectedResumeLabel}
+      </span>
+      .
+    </p>
+
+    <div className="mt-5 space-y-4">
+      {insightItems.map((item) => (
+        <div
+          key={`${item.name}-${item.reason}`}
+          className="rounded-xl bg-slate-50 p-4"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm font-bold">
+              {item.name}
+            </p>
+
+            <span
+              className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ${
+                item.level === "Recommended"
+                  ? "bg-red-100 text-red-600"
+                  : item.level === "Worth Adding"
+                  ? "bg-blue-100 text-blue-600"
+                  : "bg-slate-200 text-slate-600"
+              }`}
+            >
+              {item.level}
+            </span>
+          </div>
+
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            {item.reason}
+          </p>
+        </div>
+      ))}
+    </div>
+  
+
 
                 
               </div>
@@ -2893,20 +3807,86 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 </div>
 
               <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-bold">Upcoming Interview</h2>
-                <p className="mt-3 text-sm font-bold">TD Bank</p>
-                <p className="text-sm text-gray-500">Law Clerk Interview</p>
-                <p className="mt-2 text-sm font-bold text-blue-600">Tomorrow · 2:00 PM</p>
-                <button className="mt-4 w-full rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-blue-600">
-                  Prepare Now
-                </button>
-              </div>
+  <div className="flex items-start justify-between gap-3">
+    <div>
+      <h2 className="text-lg font-bold">
+        Upcoming Interview
+      </h2>
+
+      <p className="mt-1 text-xs text-gray-400">
+        Your nearest scheduled interview
+      </p>
+    </div>
+
+    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-xl">
+      🗓️
+    </div>
+  </div>
+
+  {upcomingInterview ? (
+    <>
+      <p className="mt-5 text-sm font-bold text-slate-900">
+        {upcomingInterview.company}
+      </p>
+
+      <p className="mt-1 text-sm text-gray-500">
+        {upcomingInterview.jobTitle}
+      </p>
+
+      <p className="mt-3 text-sm font-bold text-blue-600">
+        {formatInterviewDate(
+          upcomingInterview.interviewDate
+        )}
+      </p>
+
+      <button
+        type="button"
+        onClick={() =>
+          router.push(
+            `/job-tracker?application=${encodeURIComponent(
+              upcomingInterview.id
+            )}`
+          )
+        }
+        className="mt-5 w-full rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-blue-600 transition hover:bg-blue-100"
+      >
+        Prepare Now
+      </button>
+    </>
+  ) : (
+    <>
+      <div className="mt-5 rounded-xl bg-slate-50 px-4 py-5 text-center">
+        <p className="text-2xl">
+          📅
+        </p>
+
+        <p className="mt-2 text-sm font-bold text-slate-700">
+          No upcoming interviews
+        </p>
+
+        <p className="mt-1 text-xs leading-5 text-slate-400">
+          Add an interview date in Job Tracker and it will appear here.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() =>
+          router.push("/job-tracker")
+        }
+        className="mt-4 w-full rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-600 transition hover:bg-blue-50"
+      >
+        Open Job Tracker →
+      </button>
+    </>
+  )}
+</div>
             </aside>
           </div>
         </section>
       </div>
     </main>
-  </CareerMemoryGuard>
+  
   );
 }
 function PreviewSection({
