@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useLogin } from "@/lib/auth/LoginManager";
-import CareerMemoryGuard from "@/components/CareerMemoryGuard";
+
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
   { label: "Career Memory", href: "/career-memory", icon: "🧠" },
@@ -17,7 +17,7 @@ const menuItems = [
 export default function CreatePackagePage() {
   const { profile } = useLogin();
  return (
-  <CareerMemoryGuard>
+  
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       <div className="flex min-h-screen">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
@@ -175,6 +175,6 @@ export default function CreatePackagePage() {
         </section>
      </div>
     </main>
-  </CareerMemoryGuard>
+  
   );
 }

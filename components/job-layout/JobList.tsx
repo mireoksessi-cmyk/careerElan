@@ -65,8 +65,10 @@ export default function JobList({
                 setStatus(app.status ?? "Applied");
 
                 setInterviewDate(
-                  app.interview_date ?? ""
-                );
+  app.interview_date
+    ? String(app.interview_date).slice(0, 10)
+    : ""
+);
               }}
 
               className="
@@ -131,31 +133,58 @@ export default function JobList({
 
               </div>
 
-              <div className="mt-5 flex items-center justify-between">
+              <div className="mt-5 flex items-end justify-between gap-4">
+  <div className="space-y-3">
+    <div>
+      <p className="text-xs text-black">
+        Applied
+      </p>
 
-                <div>
+      <p className="font-semibold">
+        {app.applied_date || "-"}
+      </p>
+    </div>
 
-                  <p className="text-xs text-black">
+    {app.status === "Interview" && (
+      <div>
+        <p className="text-xs font-bold text-yellow-700">
+          Interview Date
+        </p>
 
-                    Applied
+        <p className="font-semibold text-slate-900">
+          {app.interview_date
+  ? (() => {
+      const dateOnly = String(
+        app.interview_date
+      ).slice(0, 10);
 
-                  </p>
+      const [year, month, day] =
+        dateOnly.split("-").map(Number);
 
-                  <p className="font-semibold">
+      if (!year || !month || !day) {
+        return "Invalid date";
+      }
 
-                    {app.applied_date || "-"}
+      return new Date(
+        year,
+        month - 1,
+        day
+      ).toLocaleDateString("en-CA", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    })()
+  : "Not scheduled"}
+        </p>
+      </div>
+    )}
+  </div>
 
-                  </p>
-
-                </div>
-
-                <div className="text-blue-600 font-bold">
-
-                  View →
-
-                </div>
-
-              </div>
+  <div className="font-bold text-blue-600">
+    View →
+  </div>
+</div>
 
             </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import CareerMemoryGuard from "@/components/CareerMemoryGuard";
+
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
@@ -193,7 +193,7 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <CareerMemoryGuard>
+   
       <main className="min-h-screen bg-[#f6fbff] text-gray-900">
         <div className="flex min-h-screen">
           <Sidebar active="Analytics" />
@@ -261,6 +261,6 @@ export default function AnalyticsPage() {
           </section>
         </div>
       </main>
-    </CareerMemoryGuard>
+    
   );
 }

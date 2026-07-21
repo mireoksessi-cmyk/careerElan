@@ -27,7 +27,7 @@ type GoogleAutocompleteResponse = {
   suggestions?: GoogleSuggestion[];
 };
 
-const supportedCountries = new Set(["CA", "US", "GB", "AU"]);
+const supportedCountries = new Set(["CA"]);
 
 export async function GET(req: Request) {
   try {
@@ -80,11 +80,10 @@ export async function GET(req: Request) {
             "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat,suggestions.placePrediction.types",
         },
         body: JSON.stringify({
-          input,
-          includedPrimaryTypes: ["(cities)"],
-          includedRegionCodes: [country.toLowerCase()],
-          languageCode: "en",
-        }),
+  input,
+  includedRegionCodes: ["ca"],
+  languageCode: "en",
+}),
         cache: "no-store",
       }
     );

@@ -108,14 +108,15 @@ setSelectedApplication({
 loadApplications();
 }
 async function saveStatus() {
-  if (!selectedApplication) return;
+  if (!selectedApplication || !user) return;
 
   const { error } = await supabase
     .from("applications")
     .update({
       status,
     })
-    .eq("id", selectedApplication.id);
+    .eq("id", selectedApplication.id)
+    .eq("user_id", user.id);
 
   if (error) {
     console.error(error);
@@ -123,39 +124,78 @@ async function saveStatus() {
     return;
   }
 
-  alert("Status updated.");
-
-  setSelectedApplication({
+  const updatedApplication = {
     ...selectedApplication,
     status,
-  });
+  };
 
-  loadApplications();
+  setSelectedApplication(
+    updatedApplication
+  );
+
+  setApplications((current) =>
+    current.map((application) =>
+      application.id ===
+      selectedApplication.id
+        ? updatedApplication
+        : application
+    )
+  );
+
+  alert("Status updated.");
 }
 
 async function saveInterviewDate() {
-  if (!selectedApplication) return;
+  if (!selectedApplication || !user) return;
+
+  if (
+    status === "Interview" &&
+    !interviewDate
+  ) {
+    alert(
+      "Please select an interview date."
+    );
+    return;
+  }
+
+  const savedInterviewDate =
+    interviewDate || null;
 
   const { error } = await supabase
     .from("applications")
     .update({
-      interview_date: interviewDate,
+      interview_date:
+        savedInterviewDate,
     })
-    .eq("id", selectedApplication.id);
+    .eq("id", selectedApplication.id)
+    .eq("user_id", user.id);
 
   if (error) {
+    console.error(error);
     alert(error.message);
     return;
   }
 
-  alert("Interview date saved.");
-
-  setSelectedApplication({
+  const updatedApplication = {
     ...selectedApplication,
-    interview_date: interviewDate,
-  });
+    interview_date:
+      savedInterviewDate,
+  };
 
-  loadApplications();
+  setSelectedApplication(
+    updatedApplication
+  );
+
+  setApplications((current) =>
+    current.map((application) =>
+      application.id ===
+      selectedApplication.id
+        ? updatedApplication
+        : application
+    )
+  );
+
+  alert("Interview date saved.");
 }
 
 async function clearNotes() {
@@ -232,7 +272,7 @@ async function downloadPackage(type: "docx" | "pdf") {
     return;
   }
 
-  if (selectedTab === "coverLetter") {
+  if (selectedTab === "cover") {
     if (type === "docx") {
       await exportDocx(
         selectedApplication.cover_letter_text || "",

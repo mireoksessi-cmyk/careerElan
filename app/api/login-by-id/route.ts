@@ -9,20 +9,13 @@ export async function POST(request: Request) {
     const serviceRoleKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    console.log("LOGIN API ENV =", {
-      hasUrl: Boolean(supabaseUrl),
-      hasServiceRoleKey: Boolean(serviceRoleKey),
-      serviceRoleKeyLength:
-        serviceRoleKey?.length ?? 0,
-    });
-
     if (!supabaseUrl || !serviceRoleKey) {
+      console.error(
+        "LOGIN API ENV ERROR: missing Supabase URL or service role key."
+      );
+
       return NextResponse.json(
-        {
-          error: "Missing server environment variables.",
-          hasUrl: Boolean(supabaseUrl),
-          hasServiceRoleKey: Boolean(serviceRoleKey),
-        },
+        { error: "Unable to process this request." },
         { status: 500 }
       );
     }
@@ -58,21 +51,11 @@ export async function POST(request: Request) {
       .eq("login_id", cleanLoginId)
       .maybeSingle();
 
-    console.log("LOGIN LOOKUP RESULT =", {
-      loginId: cleanLoginId,
-      data,
-      error,
-    });
-
     if (error) {
+      console.error("LOGIN LOOKUP ERROR =", error);
+
       return NextResponse.json(
-        {
-          error: "Unable to verify login ID.",
-          supabaseMessage: error.message,
-          supabaseCode: error.code,
-          supabaseDetails: error.details,
-          supabaseHint: error.hint,
-        },
+        { error: "Unable to process this request." },
         { status: 500 }
       );
     }
@@ -91,13 +74,7 @@ export async function POST(request: Request) {
     console.error("LOGIN API ERROR =", error);
 
     return NextResponse.json(
-      {
-        error: "Unable to process login.",
-        detail:
-          error instanceof Error
-            ? error.message
-            : String(error),
-      },
+      { error: "Unable to process this request." },
       { status: 500 }
     );
   }

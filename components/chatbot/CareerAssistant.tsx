@@ -7,109 +7,272 @@ type HelpTopic = {
   id: string;
   title: string;
   description: string;
+  content?: string;
   icon: string;
   iconClassName: string;
 };
 
 const helpTopics: HelpTopic[] = [
+ {
+  id: "career-memory",
+  title: "Career Memory",
+  description:
+    "Profile, resume selection, and Career Memory setup.",
+
+  content: `
+Career Memory is your personal career profile that powers every application.
+
+Create and manage your career information once, then use it across your entire job search.
+
+• Create 1 Career Memory Resume directly inside Career Élan.
+• Upload and save up to 3 additional resumes.
+• Manage up to 4 resumes in total.
+• Upload and save up to 3 cover letters.
+• Select the resume and cover letter you want to use before generating an application package.
+• Create a different tailored package for each job using your selected resume.
+• Store your experience, education, skills, certifications, projects, languages, and career goals in one place.
+
+Career Élan uses your selected materials to generate a tailored resume, cover letter, email draft, match analysis, missing requirements, and application recommendations.
+`,
+
+  icon: "🧠",
+  iconClassName:
+    "bg-blue-50 text-blue-600",
+},
+ {
+  id: "application-package",
+  title: "Create Package",
+  description:
+    "Generate, review, save, and download your package.",
+
+  content: `
+Create Package creates a complete, job-tailored application in minutes.
+
+Select a resume (required) and, if you'd like, choose a cover letter before generating your application package. Career Élan then analyzes the job posting and creates personalized application materials.
+
+• Generate a tailored resume for the selected job.
+• Create a customized cover letter based on your experience and the job requirements (if a cover letter is selected).
+• Generate a professional email draft ready to send to recruiters or hiring managers.
+• Review your Resume Analysis to understand how well your resume aligns with the job.
+• Identify Missing Requirements that are requested in the job posting but not reflected in your resume.
+• Discover your Transferable Skills that strengthen your application even if you don't meet every requirement.
+• Receive personalized AI Recommendations to improve your application before applying.
+• Download or save your complete application package for future reference.
+
+Career Élan helps you understand not only what was generated, but also why it was generated, giving you confidence before every application.
+`,
+
+  icon: "📦",
+  iconClassName:
+    "bg-purple-50 text-purple-600",
+},
   {
-    id: "career-memory",
-    title: "Career Memory",
-    description:
-      "Profile, resume selection, and Career Memory setup.",
-    icon: "🧠",
-    iconClassName:
-      "bg-blue-50 text-blue-600",
-  },
+  id: "find-jobs",
+  title: "Find Jobs",
+  description:
+    "Job search and personalized recommendations.",
+
+  content: `
+Find Jobs helps you discover opportunities that match your skills, experience, and career goals.
+
+Career Élan uses your Career Memory to recommend jobs that align with your background, making your job search faster and more relevant.
+
+• Search for jobs by keyword, job title, company, or location.
+• Receive personalized job recommendations based on your Career Memory.
+• View key job details before deciding to apply.
+• Save interesting jobs for later.
+• Open the original job posting with a single click.
+• Send any job directly to Application Package to generate a tailored resume, cover letter, email draft, and AI analysis.
+
+By connecting your Career Memory with every job search, Career Élan helps you focus on opportunities that best match your qualifications and career goals.
+`,
+
+  icon: "🔍",
+  iconClassName:
+    "bg-emerald-50 text-emerald-600",
+},
   {
-    id: "application-package",
-    title: "Application Package",
-    description:
-      "Generate, review, save, and download your package.",
-    icon: "📦",
-    iconClassName:
-      "bg-purple-50 text-purple-600",
-  },
+  id: "paste-job",
+  title: "Paste Job",
+  description:
+    "Analyze a job URL, description, or uploaded file.",
+
+  content: `
+Paste Job lets you quickly analyze any job posting and generate a personalized application package.
+
+Simply provide a job URL, paste the job description, or upload a supported job posting file. Career Élan will extract the job details and prepare them for AI analysis.
+
+• Paste a job URL from a supported job board.
+• Paste the full job description directly into Career Élan.
+• Upload a supported job posting file for analysis.
+• Review the extracted job details before continuing.
+• Generate an Application Package tailored to the selected job.
+• Receive Resume Analysis, Missing Requirements, Transferable Skills, and AI Recommendations based on the job posting.
+
+Paste Job makes it easy to turn any job posting into a personalized application package, helping you apply faster and with greater confidence.
+`,
+
+  icon: "📋",
+  iconClassName:
+    "bg-orange-50 text-orange-600",
+},
   {
-    id: "find-jobs",
-    title: "Find Jobs",
-    description:
-      "Job search and personalized recommendations.",
-    icon: "🔍",
-    iconClassName:
-      "bg-emerald-50 text-emerald-600",
-  },
+  id: "job-tracker",
+  title: "Job Tracker",
+  description:
+    "Applications, statuses, interviews, and notes.",
+
+  content: `
+Job Tracker helps you organize and monitor every application in one place.
+
+Track your job search from application to final decision without losing important details.
+
+• View all of your submitted application packages.
+• Track each application's current status, including Applied, Interview, Offer, Accepted, or Rejected.
+• Review your generated resume, cover letter, email draft, and AI insights at any time.
+• Keep your application history organized in one central location.
+• Quickly return to previous applications whenever you need them.
+• Monitor your overall job search progress as your applications move through each stage.
+
+Job Tracker keeps your entire job search organized, making it easy to stay on top of every opportunity and never lose track of an application.
+`,
+
+  icon: "💼",
+  iconClassName:
+    "bg-sky-50 text-sky-600",
+},
   {
-    id: "paste-job",
-    title: "Paste Job",
-    description:
-      "Analyze a job URL, description, or uploaded file.",
-    icon: "📋",
-    iconClassName:
-      "bg-orange-50 text-orange-600",
-  },
+  id: "analytics",
+  title: "Analytics",
+  description:
+    "Application performance and career insights.",
+
+  content: `
+Analytics gives you a clear overview of your job search progress and application performance.
+
+Track your results over time to understand how your job search is progressing and identify opportunities to improve.
+
+• View the total number of applications you've submitted.
+• Track interviews, offers, accepted positions, and rejected applications.
+• Monitor your application progress with easy-to-read charts and statistics.
+• Measure your interview and offer rates to evaluate your job search performance.
+• Review trends to better understand your application outcomes over time.
+• Use your analytics to refine your resume, application strategy, and future job searches.
+
+Analytics helps you measure your progress, stay motivated, and make more informed decisions throughout your job search.
+`,
+
+  icon: "📊",
+  iconClassName:
+    "bg-cyan-50 text-cyan-600",
+},
   {
-    id: "job-tracker",
-    title: "Job Tracker",
-    description:
-      "Applications, statuses, interviews, and notes.",
-    icon: "💼",
-    iconClassName:
-      "bg-sky-50 text-sky-600",
-  },
+  id: "resume-cover-letter",
+  title: "Resume & Cover Letter",
+  description:
+    "Upload, select, preview, edit, or delete documents.",
+
+  content: `
+Resume & Cover Letter helps you manage all of your application documents in one place.
+
+Keep your resumes and cover letters organized so they're always ready for your next application.
+
+• Create and edit one Career Memory Resume directly in Career Élan.
+• Upload and manage up to 3 additional resumes.
+• Upload and manage up to 3 cover letters.
+• Preview, edit, rename, or delete your saved documents at any time.
+• Choose which resume and cover letter to use for each Application Package.
+• Keep multiple versions of your resumes and cover letters for different roles or industries.
+
+Resume & Cover Letter gives you the flexibility to organize your documents and quickly select the right materials for every job application.
+`,
+
+  icon: "📄",
+  iconClassName:
+    "bg-indigo-50 text-indigo-600",
+},
   {
-    id: "analytics",
-    title: "Analytics",
-    description:
-      "Application performance and career insights.",
-    icon: "📊",
-    iconClassName:
-      "bg-cyan-50 text-cyan-600",
-  },
+  id: "account-settings",
+  title: "Account & Settings",
+  description:
+    "Profile, login, password, and account settings.",
+
+  content: `
+Account & Settings lets you manage your Career Élan account and personal preferences.
+
+Keep your account information up to date and customize your experience.
+
+• View and update your profile information.
+• Change your account password at any time.
+• Manage your account preferences and settings.
+• Review your account information.
+• Secure your account with updated login credentials when needed.
+
+Account & Settings helps you keep your Career Élan account secure, personalized, and ready for every stage of your job search.
+`,
+
+  icon: "⚙️",
+  iconClassName:
+    "bg-slate-100 text-slate-600",
+},
   {
-    id: "resume-cover-letter",
-    title: "Resume & Cover Letter",
-    description:
-      "Upload, select, preview, edit, or delete documents.",
-    icon: "📄",
-    iconClassName:
-      "bg-indigo-50 text-indigo-600",
-  },
+  id: "billing-plan",
+  title: "Billing & Plan",
+  description:
+    "Free Beta, Pro plan, usage limits, and billing.",
+
+  content: `
+Career Élan is currently available as a Free Beta.
+
+During the beta period, each account can generate up to 5 Application Packages at no cost.
+
+• Free Beta access.
+• Up to 5 Application Package generations per account.
+• No payment is required during the beta.
+• Additional plans and features will be announced in the future.
+
+Thank you for helping us test and improve Career Élan during the beta period.
+`,
+
+  icon: "💳",
+  iconClassName:
+    "bg-amber-50 text-amber-600",
+},
   {
-    id: "account-settings",
-    title: "Account & Settings",
-    description:
-      "Profile, login, password, and account settings.",
-    icon: "⚙️",
-    iconClassName:
-      "bg-slate-100 text-slate-600",
-  },
-  {
-    id: "billing-plan",
-    title: "Billing & Plan",
-    description:
-      "Free Beta, Pro plan, usage limits, and billing.",
-    icon: "💳",
-    iconClassName:
-      "bg-amber-50 text-amber-600",
-  },
-  {
-    id: "contact-support",
-    title: "Contact Support",
-    description:
-      "Contact Career Élan for additional assistance.",
-    icon: "✉️",
-    iconClassName:
-      "bg-rose-50 text-rose-600",
-  },
+  id: "contact-support",
+  title: "Contact Support",
+  description:
+    "Contact Career Élan for additional assistance.",
+
+  content: `
+Need additional help? We're here to assist you.
+
+If you have questions, encounter an issue, or would like to share feedback or feature suggestions, please contact us at:
+
+careerelanhq@gmail.com
+
+• General questions
+• Technical support
+• Bug reports
+• Feature requests
+• Account-related inquiries
+
+Our team will respond within 2 business days.
+
+Thank you for helping us improve Career Élan.
+`,
+
+  icon: "✉️",
+  iconClassName:
+    "bg-rose-50 text-rose-600",
+},
 ];
 
 export default function CareerAssistant() {
   const [open, setOpen] =
     useState(false);
 
-  const [message, setMessage] =
-    useState("");
+  
 
   const [
     selectedTopic,
@@ -118,19 +281,7 @@ export default function CareerAssistant() {
     null
   );
 
-  function handleSend() {
-    const trimmedMessage =
-      message.trim();
-
-    if (!trimmedMessage) return;
-
-    console.log(
-      "Career Assistant message:",
-      trimmedMessage
-    );
-
-    setMessage("");
-  }
+  
 
   function closeAssistant() {
     setOpen(false);
@@ -304,11 +455,9 @@ export default function CareerAssistant() {
                         }
                       </h3>
 
-                      <p className="mt-2 text-sm leading-6 text-slate-500">
-                        {
-                          selectedTopic.description
-                        }
-                      </p>
+                      <div className="mt-4 whitespace-pre-line text-sm leading-7 text-slate-600">
+  {selectedTopic.content ?? selectedTopic.description}
+</div>
                     </div>
                   </div>
 
@@ -319,46 +468,7 @@ export default function CareerAssistant() {
             )}
           </div>
 
-          {/* Message input */}
-          <footer className="shrink-0 border-t border-slate-100 bg-white px-5 pb-5 pt-4">
-            <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100">
-              <input
-                type="text"
-                value={message}
-                onChange={(event) =>
-                  setMessage(
-                    event.target.value
-                  )
-                }
-                onKeyDown={(
-                  event
-                ) => {
-                  if (
-                    event.key ===
-                    "Enter"
-                  ) {
-                    handleSend();
-                  }
-                }}
-                placeholder="Type your message..."
-                className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
-              />
-
-              <button
-                type="button"
-                onClick={handleSend}
-                aria-label="Send message"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-lg text-white transition hover:bg-blue-700"
-              >
-                ➤
-              </button>
-            </div>
-
-            <p className="mt-3 text-center text-xs font-medium text-slate-400">
-              We&apos;re here to help
-              you succeed. 💙
-            </p>
-          </footer>
+          
         </section>
       )}
     </>

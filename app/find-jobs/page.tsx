@@ -10,7 +10,7 @@ import {
   searchCities,
   type CitySuggestion,
 } from "@/lib/job-search/cities";
-import CareerMemoryGuard from "@/components/CareerMemoryGuard";
+
 
 type Job = {
   id: number;
@@ -96,9 +96,7 @@ const statesByCountry = {
 
 const countryNameByCode: Record<string, keyof typeof provinces> = {
   CA: "Canada",
-  US: "United States",
-  GB: "United Kingdom",
-  AU: "Australia",
+  
 };
 
 
@@ -159,7 +157,7 @@ export default function FindJobsPage() {
   const router = useRouter();
 const { careerMemory } = useLogin();
   const [query, setQuery] = useState("");
- const [country, setCountry] = useState("CA");
+ const country = "CA";
  const [province, setProvince] = useState("All");
 const [city, setCity] = useState("All");
 const [cityInput, setCityInput] = useState("");
@@ -230,7 +228,7 @@ useEffect(() => {
       const state = JSON.parse(saved);
 
       setQuery(state.query || "");
-setCountry(state.country || "CA");
+
 setProvince(state.province || "All");
 setCity(state.city || "All");
 setCityInput(state.cityInput || "");
@@ -364,7 +362,7 @@ setCategory(state.category || "All");
   }
 
   return (
-  <CareerMemoryGuard>
+  
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
       <div className="flex min-h-screen">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
@@ -442,11 +440,14 @@ setCategory(state.category || "All");
   className="rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-4"
 />
 
-             <select
-  value={country}
+            <div className="rounded-xl border border-blue-100 bg-slate-50 px-4 py-3 text-sm text-gray-700 lg:col-span-2">
+  Canada
+</div>
+              
+  <select
+  value={province}
   onChange={(e) => {
-    setCountry(e.target.value);
-    setProvince("All");
+    setProvince(e.target.value);
     setCity("All");
     setCityInput("");
     setCitySuggestions([]);
@@ -454,36 +455,16 @@ setCategory(state.category || "All");
   }}
   className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
 >
-  {countries.map((c) => (
-    <option key={c.code} value={c.code}>
-      {c.name}
+  <option value="All">Province / Territory</option>
+
+  {provinces.Canada.map((provinceName) => (
+    <option
+      key={provinceName}
+      value={provinceName}
+    >
+      {provinceName}
     </option>
   ))}
-</select>
-              
-   <select
-  value={province}
-  onChange={(e) => {
-  setProvince(e.target.value);
-  setCity("All");
-  setCityInput("");
-  setCitySuggestions([]);
-  clearSearchResults();
-}}
-  className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
->
-  <option value="All">Province / State</option>
-
-  {(provinces[countryNameByCode[country]] || []).map(
-    (provinceName) => (
-      <option
-        key={provinceName}
-        value={provinceName}
-      >
-        {provinceName}
-      </option>
-    )
-  )}
 </select>
 
 <div className="relative lg:col-span-2">
@@ -777,6 +758,6 @@ setCategory(state.category || "All");
         </section>
      </div>
     </main>
-  </CareerMemoryGuard>
+  
   );
 }

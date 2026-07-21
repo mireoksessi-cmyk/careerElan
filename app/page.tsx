@@ -7,7 +7,11 @@ import { supabase } from "@/lib/supabase";
 
 
 
-type AuthMode = "login" | "signup";
+type AuthMode =
+  | "login"
+  | "signup"
+  | "forgot-password"
+  | "new-password";
 
 export default function HomePage() {
   const router = useRouter();
@@ -18,7 +22,13 @@ export default function HomePage() {
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [newPassword, setNewPassword] =
+  useState("");
 
+const [
+  confirmNewPassword,
+  setConfirmNewPassword,
+] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
@@ -42,6 +52,62 @@ useEffect(() => {
       window.location.pathname
     );
   }
+}, []);
+
+useEffect(() => {
+  let mounted = true;
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange(
+    (event) => {
+      if (!mounted) return;
+
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthMode("new-password");
+        setShowAuthModal(true);
+        setMessage("");
+      }
+    }
+  );
+
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  if (
+    params.get("resetPassword") === "true"
+  ) {
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return;
+
+        if (error || !data.session) {
+          setAuthMode("login");
+          setShowAuthModal(true);
+          setMessage(
+            "This password reset link is invalid or expired."
+          );
+          return;
+        }
+
+        setAuthMode("new-password");
+        setShowAuthModal(true);
+        setMessage("");
+      });
+
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname
+    );
+  }
+
+  return () => {
+    mounted = false;
+    subscription.unsubscribe();
+  };
 }, []);
 
   function openAuth(mode: AuthMode = "login") {
@@ -300,7 +366,115 @@ async function resendConfirmationEmail() {
     "Verification email sent again. Please check your inbox and spam folder."
   );
 }
+async function handleForgotPassword() {
+  const cleanLoginId = loginEmail.trim();
 
+  if (!cleanLoginId) {
+    setMessage("Please enter your ID first.");
+    return;
+  }
+
+  setLoading(true);
+  setMessage("");
+
+  try {
+    const lookupResponse = await fetch(
+      "/api/login-by-id",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          loginId: cleanLoginId,
+        }),
+      }
+    );
+
+    const lookupData =
+      await lookupResponse.json();
+
+    if (!lookupResponse.ok) {
+      setMessage(
+        lookupData.error ||
+          "Unable to send the password reset email."
+      );
+      return;
+    }
+
+    setMessage(
+      lookupData.message ||
+        "If an account exists for this ID, a password reset email has been sent."
+    );
+  } catch (error) {
+    console.error(
+      "PASSWORD RESET ERROR =",
+      error
+    );
+
+    setMessage(
+      "Unable to send the password reset email."
+    );
+  } finally {
+    setLoading(false);
+  }
+}
+async function handleUpdatePassword() {
+  if (newPassword.length < 8) {
+    setMessage(
+      "Password must contain at least 8 characters."
+    );
+    return;
+  }
+
+  if (
+    newPassword !== confirmNewPassword
+  ) {
+    setMessage(
+      "Passwords do not match."
+    );
+    return;
+  }
+
+  setLoading(true);
+  setMessage("");
+
+  try {
+    const { error } =
+      await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    await supabase.auth.signOut();
+
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginPassword("");
+
+    setAuthMode("login");
+    setShowAuthModal(true);
+
+    setMessage(
+      "Your password has been changed. Please log in with your new password."
+    );
+  } catch (error) {
+    console.error(
+      "UPDATE PASSWORD ERROR =",
+      error
+    );
+
+    setMessage(
+      "Unable to update your password."
+    );
+  } finally {
+    setLoading(false);
+  }
+}
   return (
   <main className="min-h-screen w-screen overflow-x-hidden bg-white text-slate-950">
     <section className="relative overflow-hidden bg-gradient-to-br from-white via-blue-50 to-slate-50">
@@ -785,21 +959,88 @@ async function resendConfirmationEmail() {
           <div className="w-full max-w-md rounded-[2rem] border border-slate-200 bg-white p-8 shadow-2xl">
             <div className="mb-6 flex items-start justify-between">
               <div>
-                <h2 className="text-2xl font-black text-slate-950">{authMode === "login" ? "Welcome back" : "Create your account"}</h2>
-                <p className="mt-2 text-sm font-medium text-slate-500">{authMode === "login" ? "Continue building smarter applications." : "Start with one profile. Apply everywhere."}</p>
+                <h2 className="text-2xl font-black text-slate-950">
+  {authMode === "login"
+    ? "Welcome back"
+    : authMode === "signup"
+    ? "Create your account"
+    : authMode === "forgot-password"
+    ? "Reset your password"
+    : "Create a new password"}
+</h2>
+
+<p className="mt-2 text-sm font-medium text-slate-500">
+  {authMode === "login"
+    ? "Continue building smarter applications."
+    : authMode === "signup"
+    ? "Start with one profile. Apply everywhere."
+    : authMode === "forgot-password"
+    ? "Enter your ID and we will email you a password reset link."
+    : "Enter and confirm your new password."}
+</p>
               </div>
               <button type="button" onClick={() => setShowAuthModal(false)} className="text-2xl leading-none text-slate-400 transition hover:text-slate-700">×</button>
             </div>
 
-            <div className="space-y-3">
-              <button type="button" onClick={() => signInWithProvider("google")} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50">G Continue with Google</button>
-              <button type="button" onClick={() => signInWithProvider("linkedin_oidc")} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50"><span className="flex h-5 w-5 items-center justify-center rounded bg-blue-700 text-xs font-black text-white">in</span> Continue with LinkedIn</button>
-              <button type="button" onClick={() => signInWithProvider("facebook")} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">f</span> Continue with Facebook</button>
-            </div>
+           {authMode !== "forgot-password" &&
+  authMode !== "new-password" && (
+    <>
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() =>
+            signInWithProvider("google")
+          }
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50"
+        >
+          G Continue with Google
+        </button>
 
-            <div className="my-6 flex items-center gap-4"><div className="h-px flex-1 bg-slate-200" /><span className="text-sm font-bold text-slate-400">or</span><div className="h-px flex-1 bg-slate-200" /></div>
+        <button
+          type="button"
+          onClick={() =>
+            signInWithProvider(
+              "linkedin_oidc"
+            )
+          }
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded bg-blue-700 text-xs font-black text-white">
+            in
+          </span>
+          Continue with LinkedIn
+        </button>
 
-            {authMode === "signup" ? (
+        <button
+          type="button"
+          onClick={() =>
+            signInWithProvider("facebook")
+          }
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">
+            f
+          </span>
+          Continue with Facebook
+        </button>
+      </div>
+
+      <div className="my-6 flex items-center gap-4">
+        <div className="h-px flex-1 bg-slate-200" />
+
+        <span className="text-sm font-bold text-slate-400">
+          or
+        </span>
+
+        <div className="h-px flex-1 bg-slate-200" />
+      </div>
+    </>
+  )}
+
+{authMode === "signup" ? (
   <form className="space-y-4">
     <Input
       value={fullName}
@@ -843,19 +1084,83 @@ async function resendConfirmationEmail() {
       type="button"
       onClick={handleEmailSignup}
       disabled={loading}
-      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700"
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
     >
-      Create Account
+      {loading
+        ? "Creating account..."
+        : "Create Account"}
     </button>
 
     <button
-  type="button"
-  onClick={resendConfirmationEmail}
-  disabled={loading}
-  className="w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600"
->
-  Resend Verification Email
-</button>
+      type="button"
+      onClick={resendConfirmationEmail}
+      disabled={loading}
+      className="w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600 disabled:opacity-50"
+    >
+      Resend Verification Email
+    </button>
+  </form>
+) : authMode === "forgot-password" ? (
+  <form className="space-y-4">
+    <Input
+      value={loginEmail}
+      onChange={setLoginEmail}
+      placeholder="Enter your ID"
+      icon="🆔"
+      type="text"
+    />
+
+    <button
+      type="button"
+      onClick={handleForgotPassword}
+      disabled={loading}
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
+    >
+      {loading
+        ? "Sending..."
+        : "Send Reset Email"}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => {
+        setAuthMode("login");
+        setMessage("");
+      }}
+      disabled={loading}
+      className="w-full rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+    >
+      Back to Login
+    </button>
+  </form>
+) : authMode === "new-password" ? (
+  <form className="space-y-4">
+    <Input
+      value={newPassword}
+      onChange={setNewPassword}
+      placeholder="New password"
+      icon="🔒"
+      type="password"
+    />
+
+    <Input
+      value={confirmNewPassword}
+      onChange={setConfirmNewPassword}
+      placeholder="Confirm new password"
+      icon="✅"
+      type="password"
+    />
+
+    <button
+      type="button"
+      onClick={handleUpdatePassword}
+      disabled={loading}
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
+    >
+      {loading
+        ? "Updating..."
+        : "Update Password"}
+    </button>
   </form>
 ) : (
   <form className="space-y-4">
@@ -875,31 +1180,73 @@ async function resendConfirmationEmail() {
       type="password"
     />
 
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={() => {
+          setAuthMode(
+            "forgot-password"
+          );
+          setMessage("");
+        }}
+        className="text-sm font-bold text-blue-600 transition hover:text-blue-700"
+      >
+        Forgot password?
+      </button>
+    </div>
+
     <button
       type="button"
       onClick={handleEmailLogin}
       disabled={loading}
-      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700"
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
     >
-      Continue
+      {loading
+        ? "Signing in..."
+        : "Continue"}
     </button>
   </form>
 )}
 
-            {message && <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-600">{message}</p>}
+{message && (
+  <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-600">
+    {message}
+  </p>
+)}
 
-            <p className="mt-6 text-center text-sm text-slate-500">
-              {authMode === "login" ? "No account? " : "Already have an account? "}
-              <button type="button" onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")} className="font-black text-blue-600">
-                {authMode === "login" ? "Sign up" : "Log in"}
-              </button>
-            </p>
+{authMode !== "forgot-password" &&
+  authMode !== "new-password" && (
+    <p className="mt-6 text-center text-sm text-slate-500">
+      {authMode === "login"
+        ? "No account? "
+        : "Already have an account? "}
+
+      <button
+        type="button"
+        onClick={() => {
+          setAuthMode(
+            authMode === "login"
+              ? "signup"
+              : "login"
+          );
+          setMessage("");
+        }}
+        className="font-black text-blue-600"
+      >
+        {authMode === "login"
+          ? "Sign up"
+          : "Log in"}
+      </button>
+    </p>
+  )}
           </div>
         </div>
       )}
     </main>
   );
 }
+
+
 
 function Stat({ label, value, icon, accent = "text-blue-600", highlight = false }: { label: string; value: string; icon?: string; accent?: string; highlight?: boolean }) {
   return (
