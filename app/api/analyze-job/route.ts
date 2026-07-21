@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { toSafeResponse } from "@/lib/errors/publicError";
+import { JOB_ANALYSIS_MODEL } from "@/lib/config/aiModels";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -78,6 +80,8 @@ function extractJson(text: string) {
 }
 
 export async function POST(req: Request) {
+  const requestId = crypto.randomUUID();
+
   try {
     const { jobText } = await req.json();
 
@@ -89,7 +93,7 @@ export async function POST(req: Request) {
     }
 
     const response = await client.responses.create({
-      model: "gpt-5.5",
+      model: JOB_ANALYSIS_MODEL,
       input: `
 Analyze this job posting and return ONLY valid JSON.
 
@@ -266,11 +270,9 @@ json.keywordCount =
 
 return NextResponse.json(json);
   } catch (error) {
-    console.error(error);
-
-    return NextResponse.json(
-      { error: "Failed to analyze job." },
-      { status: 500 }
-    );
+    return toSafeResponse(error, {
+      requestId,
+      route: "/api/analyze-job",
+    });
   }
 }

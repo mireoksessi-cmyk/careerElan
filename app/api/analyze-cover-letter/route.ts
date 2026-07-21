@@ -3,6 +3,12 @@ import OpenAI from "openai";
 import pdf from "pdf-parse-new";
 import mammoth from "mammoth";
 import { fromBuffer } from "pdf2pic";
+import { createClient } from "@/lib/supabase-server";
+import { logSafeError } from "@/lib/errors/publicError";
+import {
+  COVER_LETTER_PARSE_DRAFT_MODEL,
+  COVER_LETTER_PARSE_MODEL,
+} from "@/lib/config/aiModels";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -67,7 +73,7 @@ async function visionOCR(images: string[]) {
 
     const res = await openai.chat.completions.create({
 
-      model: "gpt-4.1",
+      model: COVER_LETTER_PARSE_MODEL,
 
       messages: [
         {
@@ -96,7 +102,22 @@ async function visionOCR(images: string[]) {
   return text;
 }
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
+
   try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
 
     const formData = await req.formData();
 
@@ -220,7 +241,7 @@ export async function POST(req: NextRequest) {
     const rebuilt =
       await openai.chat.completions.create({
 
-        model: "gpt-4.1-mini",
+        model: COVER_LETTER_PARSE_DRAFT_MODEL,
 
         temperature: 0,
 
@@ -324,7 +345,7 @@ ${numberedLetter}
     const completion =
       await openai.chat.completions.create({
 
-        model: "gpt-4.1",
+        model: COVER_LETTER_PARSE_MODEL,
 
         temperature: 0,
 
@@ -367,7 +388,7 @@ ${numberedLetter}
       const verify =
         await openai.chat.completions.create({
 
-          model: "gpt-4.1-mini",
+          model: COVER_LETTER_PARSE_DRAFT_MODEL,
 
           temperature: 0,
 
@@ -432,8 +453,7 @@ Return ONLY valid JSON.
         {
           success: false,
           message:
-            "AI returned invalid JSON.",
-          raw: content,
+            "We couldn't process this cover letter. Please try again.",
         },
         {
           status: 500,
@@ -481,28 +501,17 @@ Return ONLY valid JSON.
 
   } catch (error) {
 
-    console.error(
-      "Cover Letter Parser Error:",
-      error
-    );
+    logSafeError(error, {
+      requestId,
+      route: "/api/analyze-cover-letter",
+    });
 
     return NextResponse.json(
-
       {
-
         success: false,
-
-        message:
-          "Failed to analyze cover letter.",
-
+        message: "Failed to analyze cover letter.",
       },
-
-      {
-
-        status: 500,
-
-      }
-
+      { status: 500 }
     );
 
   }

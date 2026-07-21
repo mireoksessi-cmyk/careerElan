@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import pdf from "pdf-parse-new";
 import mammoth from "mammoth";
+import { createClient } from "@/lib/supabase-server";
+import { logSafeError } from "@/lib/errors/publicError";
+import {
+  RESUME_PARSE_DRAFT_MODEL,
+  RESUME_PARSE_MODEL,
+} from "@/lib/config/aiModels";
 
 
 function normalizeSkills(data: any) {
@@ -124,7 +130,23 @@ import path from "path";
 
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
+
   try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
+
     const formData = await req.formData();
 
     const file = formData.get("file") as File | null;
@@ -224,7 +246,7 @@ export async function POST(req: NextRequest) {
   .replace(/\n{3,}/g, "\n\n")
   .trim();
  const cleanedResume = await openai.chat.completions.create({
-  model: "gpt-4.1-mini",
+  model: RESUME_PARSE_DRAFT_MODEL,
   temperature: 0,
   messages: [
     {
@@ -421,7 +443,7 @@ Resume:
 ${numberedResume}
 `;
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: RESUME_PARSE_MODEL,
       temperature: 0,
       messages: [
         {
@@ -455,7 +477,7 @@ ${numberedResume}
   parsed.certifications = normalizeCertifications(parsed.certifications);
   parsed.projects = normalizeProjects(parsed.projects);
   const verify = await openai.chat.completions.create({
-  model: "gpt-4.1-mini",
+  model: RESUME_PARSE_DRAFT_MODEL,
   temperature: 0,
   response_format: {
     type: "json_object",
@@ -523,8 +545,7 @@ parsed.projects = normalizeProjects(parsed.projects);
   return NextResponse.json(
     {
       success: false,
-      message: "AI returned invalid JSON.",
-      raw: content,
+      message: "We couldn't process this resume. Please try again.",
     },
     { status: 500 }
   );
@@ -555,19 +576,18 @@ console.log("resumeText preview =", resumeText?.substring(0, 300));
     originalText: resumeText,   // ⭐ 이 한 줄 추가
   },
 });
-    } catch (error: any) {
-  console.error("Resume Parser Error:", error);
+    } catch (error) {
+  logSafeError(error, {
+    requestId,
+    route: "/api/analyze-resume",
+  });
 
   return NextResponse.json(
     {
       success: false,
       message: "Failed to analyze resume.",
-      error: error?.message,
-      stack: error?.stack,
     },
-    {
-      status: 500,
-    }
+    { status: 500 }
   );
 }
 }

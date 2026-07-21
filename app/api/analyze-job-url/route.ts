@@ -1,9 +1,125 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { assertSafeJobUrl, UnsafeUrlError } from "@/lib/security/ssrfGuard";
+import { toSafeResponse } from "@/lib/errors/publicError";
+import { JOB_ANALYSIS_MODEL } from "@/lib/config/aiModels";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+const MAX_REDIRECTS = 5;
+const TOTAL_FETCH_DEADLINE_MS = 20000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+class JobFetchHttpError extends Error {
+  status: number;
+
+  constructor(status: number) {
+    super(`Job URL responded with HTTP ${status}`);
+    this.status = status;
+  }
+}
+
+/*
+  Reads a fetch Response body as text with a hard byte cap, cancelling the
+  stream as soon as the cap is exceeded rather than trusting the
+  (spoofable) Content-Length header.
+*/
+async function readWithSizeLimit(
+  response: Response,
+  maxBytes: number
+): Promise<string> {
+  const reader = response.body?.getReader();
+
+  if (!reader) return await response.text();
+
+  const decoder = new TextDecoder();
+  let received = 0;
+  let result = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) break;
+
+    received += value.byteLength;
+
+    if (received > maxBytes) {
+      await reader.cancel();
+      throw new UnsafeUrlError("Response too large.");
+    }
+
+    result += decoder.decode(value, { stream: true });
+  }
+
+  result += decoder.decode();
+
+  return result;
+}
+
+/*
+  Fetches a user-supplied job URL with SSRF protections: the initial URL
+  and every redirect target are validated with assertSafeJobUrl before any
+  request is made to them, redirects are followed manually (never
+  automatically) so each hop can be re-validated, and the whole chain
+  shares one deadline and one response-size cap.
+*/
+async function fetchJobUrlSafely(rawUrl: string): Promise<string> {
+  let currentUrl = await assertSafeJobUrl(rawUrl);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    TOTAL_FETCH_DEADLINE_MS
+  );
+
+  try {
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const response = await fetch(currentUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+        cache: "no-store",
+        redirect: "manual",
+        signal: controller.signal,
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+
+        if (!location) {
+          throw new UnsafeUrlError("Redirect with no location header.");
+        }
+
+        const nextUrl = new URL(location, currentUrl);
+
+        // Re-validated against the exact same policy as the initial URL -
+        // a redirect from an allowed dev host to a private address is
+        // blocked here even though the first hop was allowed.
+        currentUrl = await assertSafeJobUrl(
+          nextUrl.toString(),
+          hop + 1,
+          MAX_REDIRECTS
+        );
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new JobFetchHttpError(response.status);
+      }
+
+      return await readWithSizeLimit(response, MAX_RESPONSE_BYTES);
+    }
+
+    throw new UnsafeUrlError("Too many redirects.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 type RequirementCategory =
   | "mandatory"
@@ -221,6 +337,8 @@ function normalizeStringList(
 export async function POST(req: Request) {
   console.time("total analyze-job-url");
 
+  const requestId = crypto.randomUUID();
+
   try {
     const { jobUrl } = await req.json();
 
@@ -234,47 +352,41 @@ export async function POST(req: Request) {
 
     const finalUrl = normalizeUrl(jobUrl);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    let response: Response;
+    let html: string;
 
     try {
       console.time("1 fetch job url");
-      response = await fetch(finalUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-        cache: "no-store",
-        signal: controller.signal,
-      });
+      html = await fetchJobUrlSafely(finalUrl);
       console.timeEnd("1 fetch job url");
     } catch (error) {
       console.timeEnd("1 fetch job url");
       console.timeEnd("total analyze-job-url");
 
+      if (error instanceof UnsafeUrlError) {
+        // Never echo the blocked hostname/IP back to the client.
+        return NextResponse.json(
+          {
+            error:
+              "This URL cannot be analyzed. Please paste the job description instead.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (error instanceof JobFetchHttpError) {
+        return NextResponse.json(
+          { error: fallbackMessage() },
+          { status: 422 }
+        );
+      }
+
+      // Network error, DNS failure, or the shared deadline aborting the
+      // fetch - all fall back to the same "couldn't read it" message.
       return NextResponse.json(
         { error: fallbackMessage() },
         { status: 408 }
       );
-    } finally {
-      clearTimeout(timeout);
     }
-
-    if (!response.ok) {
-      console.timeEnd("total analyze-job-url");
-      return NextResponse.json(
-        { error: fallbackMessage() },
-        { status: 422 }
-      );
-    }
-
-    console.time("2 read html");
-    const html = await response.text();
-    console.timeEnd("2 read html");
 
     console.time("3 clean html");
     const jobText = cleanHtml(html).slice(0, 8000);
@@ -293,7 +405,7 @@ export async function POST(req: Request) {
 
     console.time("4 openai analyze");
     const aiResponse = await client.responses.create({
-      model: "gpt-5.5",
+      model: JOB_ANALYSIS_MODEL,
       input: `
 Analyze this job posting page text and return ONLY valid JSON.
 
@@ -972,12 +1084,11 @@ json.match = "--";
 json.requirementsMatched = 0;
     return NextResponse.json(json);
   } catch (error) {
-    console.error(error);
     console.timeEnd("total analyze-job-url");
 
-    return NextResponse.json(
-      { error: fallbackMessage() },
-      { status: 500 }
-    );
+    return toSafeResponse(error, {
+      requestId,
+      route: "/api/analyze-job-url",
+    });
   }
 }

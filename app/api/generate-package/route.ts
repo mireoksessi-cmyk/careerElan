@@ -2,6 +2,9 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { getResumeText } from "@/lib/resume-service";
 import { normalizeResumeSource } from "@/lib/types/resume-source";
+import { createClient } from "@/lib/supabase-server";
+import { logSafeError } from "@/lib/errors/publicError";
+import { PACKAGE_GENERATION_MODEL } from "@/lib/config/aiModels";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -3055,7 +3058,23 @@ function fallbackPackage(
 export async function POST(
   req: Request
 ) {
+  const requestId = crypto.randomUUID();
+
   try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
+
     const body =
       await req.json();
 
@@ -3258,7 +3277,7 @@ export async function POST(
         model:
           process.env
             .OPENAI_PACKAGE_MODEL ||
-          "gpt-5.5",
+          PACKAGE_GENERATION_MODEL,
 
         input: `
 You are Career Élan's Canadian resume strategist, ATS specialist, recruiter, and application writer.
@@ -3862,22 +3881,17 @@ ${jobText}
       packageAnalysis,
     });
   } catch (error) {
-    console.error(
-      "PACKAGE GENERATION ERROR =",
-      error
-    );
-
-    const details =
-      error instanceof Error
-        ? error.message
-        : "Unknown package generation error.";
+    logSafeError(error, {
+      requestId,
+      route: "/api/generate-package",
+    });
 
     return NextResponse.json(
       {
         error:
-          "Failed to generate application package.",
+          "Failed to generate application package. Please try again.",
 
-        details,
+        requestId,
 
         ...fallbackPackage(),
       },

@@ -37,14 +37,12 @@ export type ErrorLogContext = {
 
 /*
   Logs a short structured summary server-side - never the full prompt,
-  resume text, career_memory row, or raw AI response. Returns a safe,
-  retryable message to the client with no stack trace, no internal file
-  paths, and no Supabase/OpenAI error internals.
+  resume text, career_memory row, or raw AI response.
 */
-export function toSafeResponse(
+export function logSafeError(
   error: unknown,
   context: ErrorLogContext
-): NextResponse {
+): void {
   console.error(
     JSON.stringify({
       requestId: context.requestId,
@@ -54,6 +52,22 @@ export function toSafeResponse(
       message: error instanceof Error ? error.message : String(error),
     })
   );
+}
+
+/*
+  Logs via logSafeError, then returns a safe, retryable {error, requestId}
+  response with no stack trace, no internal file paths, and no
+  Supabase/OpenAI error internals. Only fits routes whose response
+  envelope is already {error: string} - routes with a different existing
+  contract (e.g. analyze-resume/analyze-cover-letter's {success, message})
+  should call logSafeError directly and build their own response so the
+  client's existing parsing keeps working.
+*/
+export function toSafeResponse(
+  error: unknown,
+  context: ErrorLogContext
+): NextResponse {
+  logSafeError(error, context);
 
   if (error instanceof PublicApiError) {
     return NextResponse.json(
