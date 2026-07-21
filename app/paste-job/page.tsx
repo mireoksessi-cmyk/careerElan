@@ -1952,13 +1952,13 @@ async function downloadDocx() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
             <h2 className="text-lg font-black text-slate-950">
-              이력서를 먼저 등록해주세요
+              Add a resume first
             </h2>
 
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Career Memory를 직접 작성하거나 이력서 파일을 업로드해야
-              이 페이지에서 맞춤 지원 서류(이력서·자기소개서·이메일)를
-              만들 수 있어요. 페이지는 계속 둘러보실 수 있습니다.
+              Create your Career Memory or upload a resume before using
+              Paste Job. This helps us generate a tailored resume and
+              cover letter for the job.
             </p>
 
             <div className="mt-5 flex flex-col gap-2">
@@ -1966,7 +1966,7 @@ async function downloadDocx() {
                 href="/career-memory"
                 className="rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-blue-700"
               >
-                이력서 작성 / 업로드하러 가기
+                Create or upload a resume
               </a>
 
               <button
@@ -1974,7 +1974,7 @@ async function downloadDocx() {
                 onClick={() => setShowResumeRequiredModal(false)}
                 className="rounded-xl px-4 py-2 text-center text-sm font-semibold text-slate-500 transition hover:bg-slate-100"
               >
-                나중에 하기
+                Maybe later
               </button>
             </div>
           </div>
