@@ -3088,6 +3088,13 @@ export async function POST(
 ) {
   const requestId = crypto.randomUUID();
 
+  /*
+    Declared outside the try block so the catch handler below can mark this
+    generation attempt as failed even when the error is thrown after the
+    row was already claimed - the id would otherwise be out of scope.
+  */
+  let applicationId: string | null = null;
+
   try {
     const supabase = await createClient();
 
@@ -3163,6 +3170,32 @@ export async function POST(
         memory?.full_name
       ) ||
       "Applicant";
+
+    const generationRequestId =
+      typeof body.generationRequestId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        body.generationRequestId
+      )
+        ? body.generationRequestId
+        : null;
+
+    if (!generationRequestId) {
+      return NextResponse.json(
+        {
+          error:
+            "A generation request id is required.",
+
+          ...fallbackPackage(
+            title,
+            company,
+            applicantName
+          ),
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     if (
       !process.env
@@ -3243,6 +3276,161 @@ export async function POST(
           status: 400,
         }
       );
+    }
+
+    /*
+      Idempotent claim: the client reuses the same generationRequestId for
+      every "Generate Package" click against the same analyzed job, so a
+      duplicate request (double-click, retry) lands on the unique
+      (user_id, generation_request_id) index below instead of creating a
+      second applications row or re-running the AI generation.
+    */
+    const jobUrl = getFirstText(body.jobUrl) || null;
+    const appliedDate = new Date()
+      .toISOString()
+      .split("T")[0];
+
+    const { data: claimedRow, error: claimInsertError } =
+      await supabase
+        .from("applications")
+        .insert({
+          user_id: user.id,
+          generation_request_id: generationRequestId,
+          generation_status: "pending",
+          company,
+          job_title: title,
+          job_url: jobUrl,
+          job_description: jobText,
+          job_analysis: analysis,
+          location:
+            getFirstText(analysis.location) || null,
+          job_type:
+            getFirstText(analysis.type) || null,
+          resume_id:
+            resolvedResume.source === "uploaded"
+              ? resolvedResume.resumeId
+              : null,
+          applied_date: appliedDate,
+          status: "package_generated",
+        })
+        .select("id")
+        .single();
+
+    if (claimInsertError) {
+      if (claimInsertError.code === "23505") {
+        const { data: existing, error: existingError } =
+          await supabase
+            .from("applications")
+            .select(
+              "id, generation_status, resume_text, cover_letter_text, email_draft, ai_insight"
+            )
+            .eq("user_id", user.id)
+            .eq(
+              "generation_request_id",
+              generationRequestId
+            )
+            .single();
+
+        if (existingError || !existing) {
+          logSafeError(
+            existingError ??
+              new Error(
+                "Existing generation row not found after unique-constraint conflict."
+              ),
+            {
+              requestId,
+              route: "/api/generate-package",
+              generationRequestId,
+            }
+          );
+
+          return NextResponse.json(
+            {
+              error:
+                "Failed to generate application package. Please try again.",
+
+              requestId,
+
+              ...fallbackPackage(
+                title,
+                company,
+                applicantName
+              ),
+            },
+            { status: 500 }
+          );
+        }
+
+        if (existing.generation_status === "succeeded") {
+          /*
+            Idempotent replay - same generationRequestId as an already
+            completed attempt. Return the stored result without calling
+            OpenAI again.
+          */
+          return NextResponse.json({
+            resume: existing.resume_text,
+            coverLetter: existing.cover_letter_text,
+            emailDraft: existing.email_draft,
+            packageAnalysis: existing.ai_insight,
+            selectedResume: {
+              source: resolvedResume.source,
+              resumeId: resolvedResume.resumeId,
+              selectedName: resolvedResume.selectedName,
+            },
+            applicationId: existing.id,
+          });
+        }
+
+        if (existing.generation_status === "pending") {
+          return NextResponse.json(
+            {
+              error:
+                "Generation is already in progress for this job. Please wait a moment and check Job Tracker.",
+              applicationId: existing.id,
+            },
+            { status: 409 }
+          );
+        }
+
+        /*
+          generation_status === "failed" - a previous attempt with this
+          same id failed. Reuse (update) that row rather than inserting a
+          new one, then fall through to regenerate.
+        */
+        applicationId = existing.id;
+
+        await supabase
+          .from("applications")
+          .update({
+            generation_status: "pending",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", applicationId);
+      } else {
+        logSafeError(claimInsertError, {
+          requestId,
+          route: "/api/generate-package",
+          generationRequestId,
+        });
+
+        return NextResponse.json(
+          {
+            error:
+              "Failed to generate application package. Please try again.",
+
+            requestId,
+
+            ...fallbackPackage(
+              title,
+              company,
+              applicantName
+            ),
+          },
+          { status: 500 }
+        );
+      }
+    } else {
+      applicationId = claimedRow.id;
     }
 
     const selectedUploadedResume =
@@ -3904,6 +4092,18 @@ ${jobText}
       packageAnalysis
     );
 
+    await supabase
+      .from("applications")
+      .update({
+        generation_status: "succeeded",
+        resume_text: resume,
+        cover_letter_text: coverLetter,
+        email_draft: emailDraft,
+        ai_insight: packageAnalysis,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", applicationId);
+
     return NextResponse.json({
       resume,
       coverLetter,
@@ -3920,8 +4120,28 @@ ${jobText}
         resumeId: resolvedResume.resumeId,
         selectedName: resolvedResume.selectedName,
       },
+      applicationId,
     });
   } catch (error) {
+    if (applicationId) {
+      try {
+        const supabase = await createClient();
+
+        await supabase
+          .from("applications")
+          .update({
+            generation_status: "failed",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", applicationId);
+      } catch {
+        /*
+          Best-effort only - a failure to mark this row as failed must
+          never mask or replace the original error being reported below.
+        */
+      }
+    }
+
     logSafeError(error, {
       requestId,
       route: "/api/generate-package",
@@ -3933,6 +4153,8 @@ ${jobText}
           "Failed to generate application package. Please try again.",
 
         requestId,
+
+        applicationId,
 
         ...fallbackPackage(),
       },

@@ -879,6 +879,17 @@ export default function PasteJobPage() {
   const [fileText, setFileText] = useState("");
   const [message, setMessage] = useState("");
   const [analysis, setAnalysis] = useState<JobAnalysis>(emptyAnalysis);
+  /*
+    applicationId identifies the persisted applications row for the
+    currently analyzed job, once one exists - set from the server's
+    response, never derived from company/job_title text. generationRequestId
+    is generated once per newly analyzed job and reused across every
+    "Generate Package" click for that same job, so accidental double-clicks
+    or retries are idempotent on the server instead of creating duplicate
+    rows or duplicate AI calls.
+  */
+  const [applicationId, setApplicationId] = useState<string | null>(null);
+  const [generationRequestId, setGenerationRequestId] = useState<string | null>(null);
  const isSupportedJob =
   analysis?.jobContext
     ?.supportedByCareerElan === true;
@@ -1232,6 +1243,8 @@ packageAnalysis: null,
       setAnalysis(nextAnalysis);
     setAnalyzed(true);
     setGenerated(false);
+    setApplicationId(null);
+    setGenerationRequestId(crypto.randomUUID());
     setMessage(successMessage);
     } catch (error: any) {
       console.error(error);
@@ -1399,6 +1412,13 @@ async function loadSelectedApplicationMaterials() {
     return;
   }
 
+  if (!generationRequestId) {
+    alert(
+      "Please analyze the job posting first."
+    );
+    return;
+  }
+
   let progressTimer:
     | ReturnType<
         typeof setInterval
@@ -1461,12 +1481,21 @@ async function loadSelectedApplicationMaterials() {
           jobAnalysis: analysis,
           jobDescription:
             getOriginalJobSnippet(),
+          jobUrl: jobUrl.trim(),
+          generationRequestId,
         }),
       }
     );
 
     const data =
       await response.json();
+
+    if (response.status === 409) {
+      throw new Error(
+        data.error ||
+          "Generation is already in progress for this job. Please wait a moment."
+      );
+    }
 
     if (!response.ok) {
       throw new Error(
@@ -1492,65 +1521,15 @@ async function loadSelectedApplicationMaterials() {
     setSelectedPreview("resume");
     setGenerated(true);
 
-   if (user) {
-  const originalJobDescription =
-    getOriginalJobSnippet();
-
-  const { error: insertError } =
-    await supabase
-      .from("applications")
-      .insert({
-        user_id: user.id,
-
-        company: analysis.company,
-        job_title: analysis.title,
-
-        status: "package_generated",
-
-        applied_date: new Date()
-          .toISOString()
-          .split("T")[0],
-
-        job_url: jobUrl.trim(),
-
-        job_description:
-          originalJobDescription,
-
-        location: analysis.location,
-        job_type: analysis.type,
-
-        resume_text: data.resume,
-        cover_letter_text:
-          data.coverLetter,
-        email_draft:
-          data.emailDraft,
-
-        job_analysis: analysis,
-
-        ai_insight:
-          data.packageAnalysis
-            ? {
-                mismatch:
-                  data.packageAnalysis
-                    .mismatch,
-
-                matches:
-                  data.packageAnalysis
-                    .matches,
-
-                recommendation:
-                  data.packageAnalysis
-                    .recommendation,
-              }
-            : null,
-      });
-
-  if (insertError) {
-    throw new Error(
-      insertError.message
+    /*
+      The server persists the applications row itself as part of this same
+      request (claimed before generation, updated on success) - the client
+      only needs to remember which row that was, by id, for savePackage()
+      to update later. No client-side insert here anymore.
+    */
+    setApplicationId(
+      data.applicationId || null
     );
-  }
-}
 
     setMessage(
       "Your AI-tailored application package has been generated successfully."
@@ -1776,58 +1755,89 @@ async function downloadDocx() {
 }
 
   async function savePackage() {
-  
+
 
   if (!user) return;
 
-  const { error } = await supabase
-    .from("applications")
-    .update({
-  job_url: jobUrl.trim(),
+  const sharedFields = {
+    job_url: jobUrl.trim(),
 
-  job_description:
-    getOriginalJobSnippet(),
+    job_description:
+      getOriginalJobSnippet(),
 
-  location: analysis.location,
-  job_type: analysis.type,
+    location: analysis.location,
+    job_type: analysis.type,
 
-  resume_text: packageData.resume,
+    resume_text: packageData.resume,
 
-  cover_letter_text:
-    packageData.coverLetter,
+    cover_letter_text:
+      packageData.coverLetter,
 
-  email_draft:
-    packageData.emailDraft,
+    email_draft:
+      packageData.emailDraft,
 
-  job_analysis: analysis,
+    job_analysis: analysis,
 
-  ai_insight:
-    packageData.packageAnalysis
-      ? {
-          mismatch:
-            packageData.packageAnalysis
-              .mismatch,
+    ai_insight:
+      packageData.packageAnalysis
+        ? {
+            mismatch:
+              packageData.packageAnalysis
+                .mismatch,
 
-          matches:
-            packageData.packageAnalysis
-              .matches,
+            matches:
+              packageData.packageAnalysis
+                .matches,
 
-          recommendation:
-            packageData.packageAnalysis
-              .recommendation,
-        }
-      : null,
+            recommendation:
+              packageData.packageAnalysis
+                .recommendation,
+          }
+        : null,
 
-  updated_at:
-    new Date().toISOString(),
-})
-    .eq("user_id", user.id)
-    .eq("company", analysis.company)
-    .eq("job_title", analysis.title);
+    updated_at:
+      new Date().toISOString(),
+  };
 
-  if (error) {
-    alert(error.message);
-    return;
+  /*
+    applicationId-based, never company/job_title text matching - that could
+    match zero, one, or several rows. If no row exists yet (e.g. "Apply with
+    Saved Resume" was used without ever calling /api/generate-package),
+    create one here and remember its id, same as the generate path does.
+  */
+  if (applicationId) {
+    const { error } = await supabase
+      .from("applications")
+      .update(sharedFields)
+      .eq("id", applicationId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+  } else {
+    const { data, error } = await supabase
+      .from("applications")
+      .insert({
+        ...sharedFields,
+        user_id: user.id,
+        company: analysis.company,
+        job_title: analysis.title,
+        status: "package_generated",
+        applied_date: new Date()
+          .toISOString()
+          .split("T")[0],
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setApplicationId(data.id);
   }
 
   alert("Application package has been saved successfully!");
