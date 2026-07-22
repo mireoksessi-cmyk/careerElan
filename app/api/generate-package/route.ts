@@ -1,4 +1,8 @@
-import OpenAI from "openai";
+import OpenAI, {
+  APIError,
+  APIConnectionTimeoutError,
+  RateLimitError,
+} from "openai";
 import { NextResponse } from "next/server";
 import {
   resolveSelectedResume,
@@ -6,7 +10,10 @@ import {
 } from "@/lib/resume-service";
 import { createClient } from "@/lib/supabase-server";
 import { logSafeError } from "@/lib/errors/publicError";
-import { PACKAGE_GENERATION_MODEL } from "@/lib/config/aiModels";
+import {
+  PACKAGE_GENERATION_MODEL,
+  PACKAGE_PROMPT_VERSION,
+} from "@/lib/config/aiModels";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -3025,6 +3032,68 @@ function safeResumeResolutionMessage(
   }
 }
 
+type GenerationErrorCode =
+  | "OPENAI_TIMEOUT"
+  | "OPENAI_RATE_LIMITED"
+  | "OPENAI_ERROR"
+  | "VALIDATION_FAILED"
+  | "MALFORMED_AI_RESPONSE"
+  | "UNKNOWN";
+
+/*
+  Maps a caught error to a small closed code + a summary drawn only from the
+  fixed dictionary below - never the caught error's own message, and never
+  anything from the AI response. This is what makes it safe to persist in
+  the applications table: there is no code path that copies raw error text,
+  a stack trace, or AI/prompt content into these two columns.
+
+  Ordering matters: APIConnectionTimeoutError and RateLimitError are both
+  subclasses of APIError, so they're checked first. Every validator in this
+  file (validateSourceIntegrity, validateProtectedClaims,
+  validateDocumentQuality, validateCanadianScope,
+  validateRequirementEvidence, validateAnalysisLogic) throws a plain Error
+  with its own message text with no shared keyword, so rather than
+  string-matching each one, anything that reaches this function as a plain
+  Error (not an OpenAI SDK error, not a JSON parse failure) is - by this
+  route's own structure, since it only runs after the OpenAI call already
+  succeeded - definitionally one of those content-quality checks.
+*/
+function classifyGenerationError(error: unknown): {
+  code: GenerationErrorCode;
+  summary: string;
+} {
+  let code: GenerationErrorCode = "UNKNOWN";
+
+  if (error instanceof APIConnectionTimeoutError) {
+    code = "OPENAI_TIMEOUT";
+  } else if (error instanceof RateLimitError) {
+    code = "OPENAI_RATE_LIMITED";
+  } else if (error instanceof APIError) {
+    code = "OPENAI_ERROR";
+  } else if (error instanceof SyntaxError) {
+    code = "MALFORMED_AI_RESPONSE";
+  } else if (error instanceof Error) {
+    code = "VALIDATION_FAILED";
+  }
+
+  const summaries: Record<GenerationErrorCode, string> = {
+    OPENAI_TIMEOUT:
+      "The AI generation request took too long and was stopped.",
+    OPENAI_RATE_LIMITED:
+      "The AI service is temporarily rate-limited or out of quota.",
+    OPENAI_ERROR:
+      "The AI service returned an error while generating the package.",
+    VALIDATION_FAILED:
+      "The generated package failed a content-quality check.",
+    MALFORMED_AI_RESPONSE:
+      "The AI response could not be parsed into a valid package.",
+    UNKNOWN:
+      "An unexpected error occurred while generating the package.",
+  };
+
+  return { code, summary: summaries[code] };
+}
+
 function fallbackPackage(
   title = "the position",
   company = "the company",
@@ -3083,6 +3152,18 @@ function fallbackPackage(
    ROUTE
 ========================================================= */
 
+// Per-call OpenAI timeout - comfortably above observed real latency
+// (30-55s) but well under the client's own 90s timeout, so a hung request
+// reliably fails on the server (marking the row "failed") before the
+// client ever gives up waiting.
+const OPENAI_CALL_TIMEOUT_MS = 60_000;
+
+// If a claim conflicts with an existing "pending" row older than this, the
+// process that claimed it was almost certainly killed (platform timeout,
+// crash) before it could ever reach its own success/failure update -
+// reclaim the row and regenerate instead of returning 409 forever.
+const PENDING_STALE_THRESHOLD_MS = 3 * OPENAI_CALL_TIMEOUT_MS;
+
 export async function POST(
   req: Request
 ) {
@@ -3094,6 +3175,7 @@ export async function POST(
     row was already claimed - the id would otherwise be out of scope.
   */
   let applicationId: string | null = null;
+  let userId: string | null = null;
 
   try {
     const supabase = await createClient();
@@ -3109,6 +3191,8 @@ export async function POST(
         { status: 401 }
       );
     }
+
+    userId = user.id;
 
     const body =
       await req.json();
@@ -3290,6 +3374,16 @@ export async function POST(
       .toISOString()
       .split("T")[0];
 
+    /*
+      The AI already produced this prose summary during the earlier
+      analyze-job step (it's part of jobAnalysis) - stored as its own
+      column so it's directly queryable without unpacking job_analysis
+      jsonb. The structured analysis data itself stays only in
+      job_analysis, not duplicated here.
+    */
+    const jobDescriptionNormalized =
+      getFirstText(analysis.summary) || null;
+
     const { data: claimedRow, error: claimInsertError } =
       await supabase
         .from("applications")
@@ -3297,10 +3391,12 @@ export async function POST(
           user_id: user.id,
           generation_request_id: generationRequestId,
           generation_status: "pending",
+          generation_started_at: new Date().toISOString(),
           company,
           job_title: title,
           job_url: jobUrl,
           job_description: jobText,
+          job_description_normalized: jobDescriptionNormalized,
           job_analysis: analysis,
           location:
             getFirstText(analysis.location) || null,
@@ -3322,7 +3418,7 @@ export async function POST(
           await supabase
             .from("applications")
             .select(
-              "id, generation_status, resume_text, cover_letter_text, email_draft, ai_insight"
+              "id, generation_status, generation_started_at, resume_text, cover_letter_text, email_draft, ai_insight"
             )
             .eq("user_id", user.id)
             .eq(
@@ -3381,7 +3477,15 @@ export async function POST(
           });
         }
 
-        if (existing.generation_status === "pending") {
+        const pendingStartedAt = existing.generation_started_at
+          ? new Date(existing.generation_started_at).getTime()
+          : 0;
+        const pendingAgeMs = Date.now() - pendingStartedAt;
+
+        if (
+          existing.generation_status === "pending" &&
+          pendingAgeMs < PENDING_STALE_THRESHOLD_MS
+        ) {
           return NextResponse.json(
             {
               error:
@@ -3393,9 +3497,13 @@ export async function POST(
         }
 
         /*
-          generation_status === "failed" - a previous attempt with this
-          same id failed. Reuse (update) that row rather than inserting a
-          new one, then fall through to regenerate.
+          Either generation_status === "failed" (a previous attempt with
+          this same id failed), or it's "pending" but older than
+          PENDING_STALE_THRESHOLD_MS - almost certainly an attempt whose
+          process was killed before it could ever reach its own
+          success/failure update. Either way: reclaim and reuse this row
+          rather than inserting a new one, then fall through to
+          (re)generate.
         */
         applicationId = existing.id;
 
@@ -3403,9 +3511,11 @@ export async function POST(
           .from("applications")
           .update({
             generation_status: "pending",
+            generation_started_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
-          .eq("id", applicationId);
+          .eq("id", applicationId)
+          .eq("user_id", user.id);
       } else {
         logSafeError(claimInsertError, {
           requestId,
@@ -3998,7 +4108,7 @@ COMPLETE JOB DESCRIPTION
 
 ${jobText}
 `,
-      });
+      }, { timeout: OPENAI_CALL_TIMEOUT_MS });
 
     const rawPackage =
       extractJson(
@@ -4100,9 +4210,16 @@ ${jobText}
         cover_letter_text: coverLetter,
         email_draft: emailDraft,
         ai_insight: packageAnalysis,
+        generation_model:
+          process.env.OPENAI_PACKAGE_MODEL ||
+          PACKAGE_GENERATION_MODEL,
+        prompt_version: PACKAGE_PROMPT_VERSION,
+        resume_source: resolvedResume.source,
+        generation_completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", applicationId);
+      .eq("id", applicationId)
+      .eq("user_id", userId);
 
     return NextResponse.json({
       resume,
@@ -4126,14 +4243,23 @@ ${jobText}
     if (applicationId) {
       try {
         const supabase = await createClient();
+        const { code, summary } =
+          classifyGenerationError(error);
 
-        await supabase
+        const updateQuery = supabase
           .from("applications")
           .update({
             generation_status: "failed",
+            generation_error_code: code,
+            generation_error_summary: summary,
+            generation_completed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
           .eq("id", applicationId);
+
+        await (userId
+          ? updateQuery.eq("user_id", userId)
+          : updateQuery);
       } catch {
         /*
           Best-effort only - a failure to mark this row as failed must

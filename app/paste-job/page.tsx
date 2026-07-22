@@ -1484,6 +1484,15 @@ async function loadSelectedApplicationMaterials() {
           jobUrl: jobUrl.trim(),
           generationRequestId,
         }),
+
+        /*
+          The server may still finish and persist a result after this
+          fires - it doesn't cancel server-side work, only this client's
+          wait for it. 90s sits above the server's own 60s OpenAI timeout,
+          so a hung request is caught server-side first in the normal case;
+          this is the backstop for when the server itself never responds.
+        */
+        signal: AbortSignal.timeout(90_000),
       }
     );
 
@@ -1550,10 +1559,28 @@ async function loadSelectedApplicationMaterials() {
 
     setGenerationProgress(0);
 
-    alert(
-      error?.message ||
-        "Failed to generate package."
-    );
+    /*
+      AbortSignal.timeout() rejects fetch with a "TimeoutError"; a manual
+      controller.abort() would reject with "AbortError" - either way this
+      is not the same as a hard failure, since the server may still finish
+      and persist a result after the client gave up waiting. The same
+      generationRequestId is still set, so a manual retry click safely
+      becomes an idempotent replay/409/reclaim per the server's own logic,
+      not a duplicate generation.
+    */
+    if (
+      error?.name === "TimeoutError" ||
+      error?.name === "AbortError"
+    ) {
+      alert(
+        "This is taking longer than expected. Check Job Tracker in a moment, or try again."
+      );
+    } else {
+      alert(
+        error?.message ||
+          "Failed to generate package."
+      );
+    }
   } finally {
     if (progressTimer) {
       clearInterval(
@@ -1817,6 +1844,17 @@ async function downloadDocx() {
       return;
     }
   } else {
+    /*
+      No prior applicationId - this is the "Apply with Saved Resume" quick
+      path (no AI generation ever ran for this job). resume_id/
+      cover_letter_id come straight from savedApplicationMaterial, the same
+      ownership-checked, no-fallback selection loadSelectedApplicationMaterials()
+      already resolved - never re-derived, never substituted. status is a
+      distinct value from "package_generated" (reserved for the AI path) so
+      the two are never confused; generation_status/generation_model/
+      prompt_version/job_description_normalized are deliberately omitted
+      (left null) since no AI generation happened here.
+    */
     const { data, error } = await supabase
       .from("applications")
       .insert({
@@ -1824,7 +1862,11 @@ async function downloadDocx() {
         user_id: user.id,
         company: analysis.company,
         job_title: analysis.title,
-        status: "package_generated",
+        status: "saved",
+        resume_id:
+          savedApplicationMaterial?.resume.id ?? null,
+        cover_letter_id:
+          savedApplicationMaterial?.coverLetter.id ?? null,
         applied_date: new Date()
           .toISOString()
           .split("T")[0],
