@@ -5,7 +5,6 @@ import { exportDocx, exportPdf } from "@/lib/exportDocument";
 
 import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
-import { normalizeResumeSource } from "@/lib/types/resume-source";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
@@ -19,7 +18,7 @@ type SavedApplicationMaterial = {
   resume: {
     sourceType:
       | "career_memory"
-      | "upload";
+      | "uploaded";
     id: string | null;
     name: string;
     text: string;
@@ -35,6 +34,14 @@ type SavedApplicationMaterial = {
     text: string;
   };
 };
+
+/*
+  "loading" until /api/resumes/selected resolves; "error" means the
+  authoritative resolver could not resolve a valid selection (no
+  selection made, unknown source, a deleted/foreign resume id, etc) -
+  never silently substituted with a different resume, per Phase 2.
+*/
+type ResumeSelectionStatus = "loading" | "ready" | "error";
 
 type SavedPreviewType =
   | "resume"
@@ -863,33 +870,6 @@ export default function PasteJobPage() {
     if (!user) return;
     setShowResumeRequiredModal(!hasResumeData);
   }, [loading, user, hasResumeData]);
-  async function getApplicationData() {
-  
-
-  if (!user) return null;
-
-  const { data: memory } = await supabase
-    .from("career_memory")
-    .select("*")
-    .eq("user_id", user.id)
-    .single();
-
-  const { data: resumes } = await supabase
-    .from("resumes")
-    .select("*")
-    .eq("user_id", user.id);
-
-  const { data: covers } = await supabase
-    .from("cover_letters")
-    .select("*")
-    .eq("user_id", user.id);
-
-  return {
-    memory,
-    resumes,
-    covers,
-  };
-}
 
   const router = useRouter();
   const [activeMode, setActiveMode] = useState<PasteMode>("url");
@@ -909,6 +889,11 @@ export default function PasteJobPage() {
   useState<SavedApplicationMaterial | null>(
     null
   );
+
+  const [
+    resumeSelectionStatus,
+    setResumeSelectionStatus,
+  ] = useState<ResumeSelectionStatus>("loading");
 
 const [
   savedPreviewType,
@@ -1266,127 +1251,82 @@ packageAnalysis: null,
   }
 
 async function loadSelectedApplicationMaterials() {
-  const applicationData =
-    await getApplicationData();
-
-  if (!applicationData) {
+  if (!user) {
     setSavedApplicationMaterial(null);
+    setResumeSelectionStatus("error");
     return null;
   }
 
-  const {
-    memory,
-    resumes,
-    covers,
-  } = applicationData;
+  setResumeSelectionStatus("loading");
 
   /*
-    Supabase 응답은 null일 수 있으므로
-    항상 배열로 정규화
+    Authoritative resume resolution - the exact same
+    resolveSelectedResume() function app/api/generate-package/route.ts
+    calls, via /api/resumes/selected. Never falls back to a different
+    resume or to Career Memory: any non-200 response means the current
+    Dashboard selection is invalid (none made, unknown source, a
+    deleted/foreign resume id, empty content, etc), and this function
+    stops here rather than guessing.
   */
-  const resumeList =
-    resumes ?? [];
-
-  const coverList =
-    covers ?? [];
-
-  let selectedResumeMaterial:
-    SavedApplicationMaterial["resume"];
-
-  /*
-    Shared with lib/resume-service.ts and app/api/generate-package/route.ts
-    - a genuinely unset selection (no Dashboard choice made yet) defaults to
-    career_memory, matching existing behavior for rows created before this
-    field existed. Any other unrecognized value throws instead of being
-    silently guessed, so it's caught below rather than mislabeled.
-  */
-  let canonicalResumeSource: "uploaded" | "career_memory" | null = null;
+  let selectedResumeMaterial: SavedApplicationMaterial["resume"];
 
   try {
-    canonicalResumeSource = normalizeResumeSource(
-      memory?.selected_resume_type ?? "career_memory"
-    );
-  } catch (sourceError) {
-    console.error(
-      "UNKNOWN RESUME SOURCE =",
-      sourceError
-    );
-  }
+    const res = await fetch("/api/resumes/selected");
+    const data = await res.json();
 
-  if (canonicalResumeSource === "uploaded") {
-    const uploadedResume =
-      resumeList.find(
-        (item: any) =>
-          item.id ===
-          memory.selected_resume_id
-      );
+    if (!res.ok) {
+      console.error("SELECTED RESUME RESOLUTION ERROR =", data?.error);
+      setSavedApplicationMaterial(null);
+      setResumeSelectionStatus("error");
+      return null;
+    }
 
-    /*
-      선택 ID가 있지만 실제 Resume가
-      삭제되었거나 조회되지 않은 경우
-      Career Memory Resume로 안전하게 대체
-    */
-    if (uploadedResume) {
+    if (data.source === "uploaded") {
       selectedResumeMaterial = {
-        sourceType: "upload",
-        id: uploadedResume.id,
-        name:
-          uploadedResume.file_name ||
-          "Selected Uploaded Resume",
-        text:
-          uploadedResume.original_text ||
-          "",
-        resumeRow: uploadedResume,
+        sourceType: "uploaded",
+        id: data.resumeId,
+        name: data.selectedName,
+        text: data.previewData?.original_text || "",
+        resumeRow: data.previewData,
       };
     } else {
       selectedResumeMaterial = {
-        sourceType:
-          "career_memory",
+        sourceType: "career_memory",
         id: null,
-        name:
-          memory?.resume_name ||
-          "Career Memory Resume",
-        text:
-          buildCareerMemoryResumeText(
-            memory
-          ),
+        name: data.selectedName,
+        text: buildCareerMemoryResumeText(data.previewData),
       };
     }
-  } else if (canonicalResumeSource === "career_memory") {
-    /*
-      Dashboard에서 Career Memory Resume 선택
-      또는 선택값이 없는 경우
-    */
-    selectedResumeMaterial = {
-      sourceType:
-        "career_memory",
-      id: null,
-      name:
-        memory?.resume_name ||
-        "Career Memory Resume",
-      text:
-        buildCareerMemoryResumeText(
-          memory
-        ),
-    };
-  } else {
-    /*
-      selected_resume_type held an unrecognized value - fail explicitly
-      instead of guessing a source, per normalizeResumeSource's contract.
-    */
+  } catch (fetchError) {
+    console.error("SELECTED RESUME FETCH ERROR =", fetchError);
     setSavedApplicationMaterial(null);
+    setResumeSelectionStatus("error");
     return null;
   }
 
   /*
-    Dashboard에서 선택한 Cover Letter 조회
+    Cover letter selection is a separate concern from Phase 2's resume
+    consistency goal - kept as its own direct, RLS-scoped query, unchanged
+    in behavior from before.
   */
-  const selectedCover =
-    coverList.find(
-      (item: any) =>
-        item.id ===
-        memory?.selected_cover_letter_id
-    );
+  const { data: memory } = await supabase
+    .from("career_memory")
+    .select("selected_cover_letter_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  let selectedCover = null;
+
+  if (memory?.selected_cover_letter_id) {
+    const { data: coverRow } = await supabase
+      .from("cover_letters")
+      .select("*")
+      .eq("id", memory.selected_cover_letter_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    selectedCover = coverRow;
+  }
 
   const selectedCoverMaterial:
     SavedApplicationMaterial["coverLetter"] =
@@ -1422,6 +1362,7 @@ async function loadSelectedApplicationMaterials() {
   setSavedApplicationMaterial(
     result
   );
+  setResumeSelectionStatus("ready");
 
   return result;
 }
@@ -1447,6 +1388,13 @@ async function loadSelectedApplicationMaterials() {
   if (!analyzed) {
     alert(
       "Please analyze the job posting first."
+    );
+    return;
+  }
+
+  if (resumeSelectionStatus !== "ready") {
+    alert(
+      "Please select a resume from Dashboard."
     );
     return;
   }
@@ -1493,9 +1441,6 @@ async function loadSelectedApplicationMaterials() {
       1000
     );
 
-    const applicationData =
-      await getApplicationData();
-
     const response = await fetch(
       "/api/generate-package",
       {
@@ -1506,11 +1451,16 @@ async function loadSelectedApplicationMaterials() {
             "application/json",
         },
 
+        /*
+          Minimal job data only - the server resolves the caller's actual
+          selected resume itself (resolveSelectedResume(), keyed off the
+          authenticated session), so no resume/career_memory data is sent
+          from here anymore.
+        */
         body: JSON.stringify({
-          analysis,
-          jobText:
+          jobAnalysis: analysis,
+          jobDescription:
             getOriginalJobSnippet(),
-          applicationData,
         }),
       }
     );
@@ -2352,19 +2302,26 @@ async function downloadDocx() {
         </p>
 
         <h4 className="mt-1 truncate font-extrabold">
-          {savedApplicationMaterial?.resume.name ||
-            "Loading selected resume..."}
+          {resumeSelectionStatus === "loading"
+            ? "Loading selected resume..."
+            : resumeSelectionStatus === "error"
+              ? "No resume selected"
+              : savedApplicationMaterial?.resume.name ||
+                "Loading selected resume..."}
         </h4>
 
         <p className="mt-2 text-sm leading-6 text-gray-500">
-          {savedApplicationMaterial?.resume.sourceType === "upload"
-            ? "The uploaded resume selected on your Dashboard will be used."
-            : "Your Career Memory Resume selected on the Dashboard will be used."}
+          {resumeSelectionStatus === "error"
+            ? "Please select a resume from Dashboard."
+            : savedApplicationMaterial?.resume.sourceType === "uploaded"
+              ? "The uploaded resume selected on your Dashboard will be used."
+              : "Your Career Memory Resume selected on the Dashboard will be used."}
         </p>
 
         <button
           type="button"
          disabled={
+  resumeSelectionStatus !== "ready" ||
   !savedApplicationMaterial?.resume.text?.trim()
 }
           onClick={() =>
@@ -2486,7 +2443,8 @@ async function downloadDocx() {
   disabled={
     !analyzed ||
     isGenerating ||
-    !isSupportedJob
+    !isSupportedJob ||
+    resumeSelectionStatus !== "ready"
   }
   className="mt-6 flex w-full items-center justify-between rounded-2xl bg-gradient-to-r from-purple-600 to-violet-700 px-6 py-5 text-left text-white shadow-sm transition hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
 >

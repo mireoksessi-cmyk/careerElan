@@ -1,7 +1,9 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { getResumeText } from "@/lib/resume-service";
-import { normalizeResumeSource } from "@/lib/types/resume-source";
+import {
+  resolveSelectedResume,
+  ResumeResolutionError,
+} from "@/lib/resume-service";
 import { createClient } from "@/lib/supabase-server";
 import { logSafeError } from "@/lib/errors/publicError";
 import { PACKAGE_GENERATION_MODEL } from "@/lib/config/aiModels";
@@ -2997,6 +2999,32 @@ function warnCardDifferences(
    FALLBACK
 ========================================================= */
 
+/*
+  Maps a ResumeResolutionError code to a message that is safe and useful
+  to show the user directly - none of these reveal anything beyond "you
+  need to fix your selection in Dashboard," never an internal reason.
+*/
+function safeResumeResolutionMessage(
+  code: string
+): string {
+  switch (code) {
+    case "NO_CAREER_MEMORY":
+      return "Please complete your Career Memory before generating a package.";
+    case "NO_SELECTION":
+      return "Please select a resume from Dashboard.";
+    case "UNKNOWN_SOURCE":
+      return "Your resume selection could not be recognized. Please reselect a resume from Dashboard.";
+    case "NO_RESUME_ID":
+      return "Please select a resume from Dashboard.";
+    case "RESUME_NOT_FOUND":
+      return "The selected resume could not be found. Please reselect a resume from Dashboard.";
+    case "EMPTY_GENERATION_TEXT":
+      return "The selected resume has no usable content. Please re-upload it or edit your Career Memory.";
+    default:
+      return "Please select a resume from Dashboard.";
+  }
+}
+
 function fallbackPackage(
   title = "the position",
   company = "the company",
@@ -3078,20 +3106,19 @@ export async function POST(
     const body =
       await req.json();
 
+    /*
+      Minimal request body - job data only. The client no longer sends
+      applicationData/memory/resumes/covers or any resume text: the server
+      resolves the caller's actual selected resume itself, below, using
+      only the authenticated user.id. Nothing the client sends can
+      substitute for that resolution.
+    */
     const analysis =
-      body.analysis || {};
-
-    const applicationData =
-      body.applicationData ||
-      {};
-
-    const memory =
-      applicationData.memory ||
-      {};
+      body.jobAnalysis || {};
 
     const jobText =
       getFirstText(
-        body.jobText
+        body.jobDescription
       );
 
     const title =
@@ -3107,38 +3134,33 @@ export async function POST(
       ) || "the company";
 
     /*
-      normalizeResumeSource is the single canonical judgment shared with
-      lib/resume-service.ts and app/paste-job/page.tsx - previously this
-      route and getResumeText() used opposite conditions ("upload" here vs
-      "career_memory" there), which could disagree on a third/unset value.
-      A genuinely unset selection defaults to career_memory here (matching
-      existing behavior for rows created before this field existed); any
-      other unrecognized value now throws instead of being silently guessed.
+      Directly fetched (not client-supplied) - used below for the
+      applicant's name and their selected cover letter, both properties of
+      the Career Memory profile independent of which resume source is
+      selected. resolveSelectedResume() also reads career_memory itself
+      when resolving an uploaded-vs-career_memory selection; fetching it
+      again here is a small, accepted redundancy in exchange for never
+      trusting a client-supplied copy.
     */
-    const canonicalResumeSource =
-      normalizeResumeSource(
-        memory.selected_resume_type ?? "career_memory"
-      );
-
-    const resumeSource:
-      ResumeSource =
-      canonicalResumeSource === "uploaded"
-        ? "upload"
-        : "career_memory";
+    const { data: memory } = await supabase
+      .from("career_memory")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     const applicantName =
       [
         getFirstText(
-          memory.first_name
+          memory?.first_name
         ),
         getFirstText(
-          memory.last_name
+          memory?.last_name
         ),
       ]
         .filter(Boolean)
         .join(" ") ||
       getFirstText(
-        memory.full_name
+        memory?.full_name
       ) ||
       "Applicant";
 
@@ -3163,33 +3185,47 @@ export async function POST(
       );
     }
 
-    /*
-      getResumeText는 사용자가 선택한
-      원본을 문자열로 반환해야 한다.
-    */
-    const resumeText =
-      await getResumeText(
-        memory,
-        applicationData
-      );
+    let resolvedResume;
 
-    if (!resumeText.trim()) {
-      return NextResponse.json(
-        {
-          error:
-            "The selected resume could not be loaded.",
-
-          ...fallbackPackage(
-            title,
-            company,
-            applicantName
-          ),
-        },
-        {
-          status: 400,
-        }
+    try {
+      resolvedResume = await resolveSelectedResume(
+        supabase,
+        user.id
       );
+    } catch (error) {
+      if (error instanceof ResumeResolutionError) {
+        const status =
+          error.code === "NO_CAREER_MEMORY" ||
+          error.code === "RESUME_NOT_FOUND"
+            ? 404
+            : error.code === "FETCH_FAILED"
+              ? 500
+              : 400;
+
+        return NextResponse.json(
+          {
+            error: safeResumeResolutionMessage(error.code),
+
+            ...fallbackPackage(
+              title,
+              company,
+              applicantName
+            ),
+          },
+          { status }
+        );
+      }
+
+      throw error;
     }
+
+    const resumeSource:
+      ResumeSource =
+      resolvedResume.source === "uploaded"
+        ? "upload"
+        : "career_memory";
+
+    const resumeText = resolvedResume.generationText;
 
     if (!jobText) {
       return NextResponse.json(
@@ -3211,14 +3247,7 @@ export async function POST(
 
     const selectedUploadedResume =
       resumeSource === "upload"
-        ? (
-            applicationData.resumes ||
-            []
-          ).find(
-            (item: any) =>
-              item.id ===
-              memory.selected_resume_id
-          ) || null
+        ? resolvedResume.previewData
         : null;
 
     const manifest =
@@ -3235,21 +3264,22 @@ export async function POST(
     /*
       기존 Cover Letter는 사실 출처가 아니다.
       문체 참고용으로만 전달한다.
+
+      Server-fetched directly (ownership-checked), not read from a
+      client-supplied covers array.
     */
     let existingCoverLetter =
       "";
 
     if (
-      memory.selected_cover_letter_id
+      memory?.selected_cover_letter_id
     ) {
-      const selectedCover = (
-        applicationData.covers ||
-        []
-      ).find(
-        (item: any) =>
-          item.id ===
-          memory.selected_cover_letter_id
-      );
+      const { data: selectedCover } = await supabase
+        .from("cover_letters")
+        .select("*")
+        .eq("id", memory.selected_cover_letter_id)
+        .eq("user_id", user.id)
+        .maybeSingle();
 
       existingCoverLetter =
         getFirstText(
@@ -3258,7 +3288,7 @@ export async function POST(
     } else {
       existingCoverLetter =
         getFirstText(
-          memory.cover_letter
+          memory?.cover_letter
         );
     }
 
@@ -3879,6 +3909,17 @@ ${jobText}
       coverLetter,
       emailDraft,
       packageAnalysis,
+      /*
+        Lets the client verify (never derive) that what was generated
+        matches what Dashboard/Paste Job show as selected - no resume
+        text or other personal data, just the same three fields
+        resolveSelectedResume() returned.
+      */
+      selectedResume: {
+        source: resolvedResume.source,
+        resumeId: resolvedResume.resumeId,
+        selectedName: resolvedResume.selectedName,
+      },
     });
   } catch (error) {
     logSafeError(error, {

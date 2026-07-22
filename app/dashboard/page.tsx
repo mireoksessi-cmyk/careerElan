@@ -3082,7 +3082,7 @@ Choose which resume and cover letter will be used when generating your applicati
             setSelectedResume(resume.id);
 
             await saveSelection(
-              "upload",
+              "uploaded",
               resume.id,
               selectedCoverLetter || null
             );
@@ -3163,7 +3163,7 @@ setSelectedCoverLetter("");
 await saveSelection(
 selectedResume==="career_memory"
 ? "career_memory"
-: "upload",
+: "uploaded",
 
 selectedResume==="career_memory"
 ? null
@@ -3212,7 +3212,7 @@ Generate automatically
             selectedResume ===
               "career_memory"
               ? "career_memory"
-              : "upload",
+              : "uploaded",
 
             selectedResume ===
               "career_memory"
