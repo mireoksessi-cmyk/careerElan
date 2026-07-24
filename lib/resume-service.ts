@@ -1,4 +1,4 @@
-import { buildResumeFromCareerMemory } from "./resume-builder";
+import { buildCareerMemoryDraftText } from "./resume-builder";
 import { normalizeResumeSource, ResumeSource } from "./types/resume-source";
 import type { createClient } from "@/lib/supabase-server";
 
@@ -39,14 +39,14 @@ export type ResolvedSelectedResume = {
 
 export type ResolveSelectedResumeOptions = {
   /*
-    Career Memory's generationText is produced by an OpenAI call
-    (buildResumeFromCareerMemory). Callers that only need to know WHICH
-    resume is selected - e.g. a preview endpoint that renders its own
-    lightweight Career Memory text locally - should pass
-    includeGenerationText: false to skip that call entirely. Defaults to
-    true so the existing generate-package call site is unaffected.
-    Uploaded-resume resolution is unaffected either way (its
-    generationText is just a stored column, never an AI call).
+    Career Memory's generationText is now a deterministic, synchronous
+    build (buildCareerMemoryDraftText) - no AI call, so this flag no
+    longer skips anything expensive. Kept for call-site compatibility
+    (a caller that only needs to know WHICH resume is selected can still
+    pass includeGenerationText: false to skip the empty-text validation
+    below, e.g. a preview endpoint that doesn't need generation to fail
+    just because the profile is incomplete). Uploaded-resume resolution is
+    unaffected either way (its generationText is just a stored column).
   */
   includeGenerationText?: boolean;
 };
@@ -157,7 +157,7 @@ export async function resolveSelectedResume(
 
   // source === "career_memory"
   const generationText = includeGenerationText
-    ? await buildResumeFromCareerMemory(memory)
+    ? buildCareerMemoryDraftText(memory)
     : "";
 
   if (includeGenerationText && !generationText.trim()) {

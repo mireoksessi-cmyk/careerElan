@@ -101,6 +101,18 @@ export default function JobList({
 
                   </p>
 
+                  {app.generation_status === "pending" && (
+                    <p className="mt-1 text-xs font-semibold text-amber-600">
+                      ⏳ Generating your package...
+                    </p>
+                  )}
+
+                  {app.generation_status === "failed" && (
+                    <p className="mt-1 text-xs font-semibold text-red-600">
+                      ⚠ Package generation failed — try again from Paste Job
+                    </p>
+                  )}
+
                 </div>
 
                 <span

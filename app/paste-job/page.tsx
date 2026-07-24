@@ -8,6 +8,9 @@ import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
+import CareerMemoryTemplatePreview, {
+  mapCareerMemoryRowToPreviewData,
+} from "@/components/resume/CareerMemoryTemplatePreview";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
@@ -23,6 +26,7 @@ type SavedApplicationMaterial = {
     name: string;
     text: string;
     resumeRow?: any;
+    careerMemoryRow?: any;
   };
 
   coverLetter: {
@@ -932,7 +936,147 @@ const [
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const autoAnalyzeStartedRef = useRef(false);
-  
+
+  /*
+    Generate Package is now async (claim -> 202 -> Background Function ->
+    poll). These refs (not state) hold the live interval/timeout ids so a
+    cleanup effect can always clear them on unmount, regardless of which
+    render triggered them.
+  */
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  const PENDING_GENERATION_STORAGE_KEY = "pendingGenerationApplicationId";
+  const POLL_INTERVAL_MS = 3000;
+  const MAX_POLL_MS = 3 * 60 * 1000;
+
+  function stopPolling() {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
+
+  /*
+    Survives a tab close/reopen or manual refresh mid-generation: the
+    Background Function keeps running server-side regardless of whether
+    anyone is watching, so on mount we just check whether we were mid-poll
+    and resume - no new claim, no new AI call, same applicationId.
+  */
+  useEffect(() => {
+    if (loading || !user) return;
+
+    const pendingId = sessionStorage.getItem(
+      PENDING_GENERATION_STORAGE_KEY
+    );
+
+    if (pendingId) {
+      setApplicationId(pendingId);
+      setIsGenerating(true);
+      setGenerationProgress(95);
+      pollGenerationStatus(pendingId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user]);
+
+  function pollGenerationStatus(id: string) {
+    stopPolling();
+
+    let consecutiveFailures = 0;
+    const pollStartedAt = Date.now();
+
+    pollingTimeoutRef.current = setTimeout(() => {
+      stopPolling();
+      sessionStorage.removeItem(PENDING_GENERATION_STORAGE_KEY);
+      setIsGenerating(false);
+      setGenerationProgress(0);
+      alert(
+        "This is taking longer than expected. Check Job Tracker for the current status."
+      );
+    }, MAX_POLL_MS);
+
+    pollingIntervalRef.current = setInterval(async () => {
+      if (Date.now() - pollStartedAt > MAX_POLL_MS) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/applications/${id}/status`, {
+          credentials: "include",
+        });
+
+        if (!res.ok) {
+          throw new Error(`status ${res.status}`);
+        }
+
+        const data = await res.json();
+        consecutiveFailures = 0;
+
+        if (data.status === "succeeded") {
+          stopPolling();
+          sessionStorage.removeItem(PENDING_GENERATION_STORAGE_KEY);
+
+          setPackageData({
+            resume: data.resume,
+            coverLetter: data.coverLetter,
+            emailDraft: data.emailDraft,
+            packageAnalysis: data.packageAnalysis || null,
+          });
+
+          setSelectedPreview("resume");
+          setGenerated(true);
+          setGenerationProgress(100);
+          setMessage(
+            "Your AI-tailored application package has been generated successfully."
+          );
+          setIsGenerating(false);
+        } else if (data.status === "failed") {
+          stopPolling();
+          sessionStorage.removeItem(PENDING_GENERATION_STORAGE_KEY);
+
+          const { message, isAuthError } = describeGeneratePackageFailure(
+            200,
+            data
+          );
+
+          setGenerationProgress(0);
+          setIsGenerating(false);
+
+          if (isAuthError) {
+            alert(message);
+            router.push("/login");
+          } else {
+            alert(message);
+          }
+        }
+        // "pending": keep polling, stay at 95%.
+      } catch (pollError) {
+        consecutiveFailures += 1;
+
+        if (consecutiveFailures >= 5) {
+          stopPolling();
+          setIsGenerating(false);
+          setGenerationProgress(0);
+          alert(
+            "A network error occurred. Please check your connection and try again, or check Job Tracker for the current status."
+          );
+        }
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
 useEffect(() => {
   if (loading) return;
   if (!user) return;
@@ -1308,6 +1452,7 @@ async function loadSelectedApplicationMaterials() {
         id: null,
         name: data.selectedName,
         text: buildCareerMemoryResumeText(data.previewData),
+        careerMemoryRow: data.previewData,
       };
     }
   } catch (fetchError) {
@@ -1389,6 +1534,85 @@ async function loadSelectedApplicationMaterials() {
     );
   }
 
+  /*
+    Maps the server's classified generation_error code (see
+    classifyGenerationError() in app/api/generate-package/route.ts) to a
+    distinct client message, instead of one generic string for every
+    failure. Falls back to the server's own safe summary/error text (never
+    a raw exception message) for any code this client doesn't specifically
+    recognize.
+  */
+  function describeGeneratePackageFailure(
+    status: number,
+    data: any
+  ): { message: string; isAuthError: boolean } {
+    const code = data?.code;
+
+    if (status === 409 || code === "GENERATION_IN_PROGRESS") {
+      return {
+        message:
+          "Generation is already in progress. Check Job Tracker shortly.",
+        isAuthError: false,
+      };
+    }
+
+    if (status === 401 || code === "UNAUTHENTICATED") {
+      return {
+        message: "Please log in again to generate your application package.",
+        isAuthError: true,
+      };
+    }
+
+    if (code === "OPENAI_TIMEOUT") {
+      return {
+        message: "AI generation took too long. Please try again.",
+        isAuthError: false,
+      };
+    }
+
+    if (
+      code === "VALIDATION_FAILED" ||
+      code === "MALFORMED_AI_RESPONSE"
+    ) {
+      return {
+        message:
+          "We couldn't verify your selected resume or job posting details. Please check your resume selection and job posting information (including that it's a Canadian job posting) and try again.",
+        isAuthError: false,
+      };
+    }
+
+    if (code === "OPENAI_RATE_LIMITED") {
+      return {
+        message: "AI service is busy. Please try again shortly.",
+        isAuthError: false,
+      };
+    }
+
+    if (code === "NETWORK_ERROR") {
+      return {
+        message:
+          "A network error occurred. Please check your connection and try again.",
+        isAuthError: false,
+      };
+    }
+
+    if (code === "OPENAI_ERROR") {
+      return {
+        message:
+          "The AI service is temporarily unavailable. Please try again in a moment.",
+        isAuthError: false,
+      };
+    }
+
+    return {
+      message:
+        data?.details ||
+        data?.error ||
+        "Failed to generate package. Please try again.",
+      isAuthError: false,
+    };
+  }
+
   async function handleGeneratePackage() {
   if (!hasResumeData) {
     alert(
@@ -1419,47 +1643,21 @@ async function loadSelectedApplicationMaterials() {
     return;
   }
 
-  let progressTimer:
-    | ReturnType<
-        typeof setInterval
-      >
-    | undefined;
-
-  const generationStartedAt =
-    Date.now();
-
   try {
     setIsGenerating(true);
     setGenerationProgress(10);
     setMessage("");
 
     /*
-      실제 API의 세부 진행 상황은
-      전달받을 수 없으므로 예상 진행률을
-      10 → 30 → 50 → 70으로 표시한다.
-
-      API 완료 시에만 100이 된다.
+      This request now only claims the row and enqueues the Background
+      Function - target is well under 2s server-side. The ladder below is
+      a short, fixed ramp for that brief wait, distinct from the old
+      elapsed-time-based animation that used to track the entire
+      generation. 95% is where this hands off to poll-driven progress
+      (pollGenerationStatus) once the 202 arrives - 100% only ever gets
+      set from an actual "succeeded" poll result.
     */
-    progressTimer = setInterval(
-      () => {
-        const elapsed =
-          Date.now() -
-          generationStartedAt;
-
-       if (elapsed >= 45000) {
-  setGenerationProgress(85);
-} else if (elapsed >= 30000) {
-  setGenerationProgress(70);
-} else if (elapsed >= 15000) {
-  setGenerationProgress(50);
-} else if (elapsed >= 6000) {
-  setGenerationProgress(30);
-} else {
-  setGenerationProgress(10);
-}
-      },
-      1000
-    );
+    setGenerationProgress(40);
 
     const response = await fetch(
       "/api/generate-package",
@@ -1486,71 +1684,47 @@ async function loadSelectedApplicationMaterials() {
         }),
 
         /*
-          The server may still finish and persist a result after this
-          fires - it doesn't cancel server-side work, only this client's
-          wait for it. 90s sits above the server's own 60s OpenAI timeout,
-          so a hung request is caught server-side first in the normal case;
-          this is the backstop for when the server itself never responds.
+          This call only claims + enqueues now (~2s target), not the full
+          generation - 15s is a generous backstop for that alone, not for
+          the AI call anymore.
         */
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(15_000),
       }
     );
 
     const data =
       await response.json();
 
-    if (response.status === 409) {
-      throw new Error(
-        data.error ||
-          "Generation is already in progress for this job. Please wait a moment."
-      );
-    }
-
     if (!response.ok) {
-      throw new Error(
-        data.details ||
-          data.error ||
-          "Failed to generate package."
-      );
+      const { message, isAuthError } =
+        describeGeneratePackageFailure(response.status, data);
+
+      const generationError: any = new Error(message);
+      generationError.isAuthError = isAuthError;
+      throw generationError;
     }
 
-    setGenerationProgress(100);
+    setGenerationProgress(95);
 
-    setPackageData({
-      resume: data.resume,
-      coverLetter:
-        data.coverLetter,
-      emailDraft:
-        data.emailDraft,
-      packageAnalysis:
-        data.packageAnalysis ||
-        null,
-    });
-
-    setSelectedPreview("resume");
-    setGenerated(true);
-
-    /*
-      The server persists the applications row itself as part of this same
-      request (claimed before generation, updated on success) - the client
-      only needs to remember which row that was, by id, for savePackage()
-      to update later. No client-side insert here anymore.
-    */
     setApplicationId(
       data.applicationId || null
     );
 
-    setMessage(
-      "Your AI-tailored application package has been generated successfully."
-    );
+    if (data.applicationId) {
+      sessionStorage.setItem(
+        PENDING_GENERATION_STORAGE_KEY,
+        data.applicationId
+      );
+      pollGenerationStatus(data.applicationId);
+    }
 
     /*
-      100%가 화면에 잠시 보이도록 함
+      isGenerating/generationProgress stay as-is here - pollGenerationStatus
+      owns clearing them once the poll reaches succeeded/failed, so the UI
+      keeps showing "generating" through the handoff instead of flashing
+      back to idle between this response and the first poll tick.
     */
-    await new Promise(
-      (resolve) =>
-        setTimeout(resolve, 500)
-    );
+    return;
   } catch (error: any) {
     console.error(
       "PACKAGE GENERATION ERROR =",
@@ -1558,37 +1732,27 @@ async function loadSelectedApplicationMaterials() {
     );
 
     setGenerationProgress(0);
+    setIsGenerating(false);
 
-    /*
-      AbortSignal.timeout() rejects fetch with a "TimeoutError"; a manual
-      controller.abort() would reject with "AbortError" - either way this
-      is not the same as a hard failure, since the server may still finish
-      and persist a result after the client gave up waiting. The same
-      generationRequestId is still set, so a manual retry click safely
-      becomes an idempotent replay/409/reclaim per the server's own logic,
-      not a duplicate generation.
-    */
     if (
       error?.name === "TimeoutError" ||
       error?.name === "AbortError"
     ) {
       alert(
-        "This is taking longer than expected. Check Job Tracker in a moment, or try again."
+        "A network error occurred. Please check your connection and try again."
       );
+    } else if (error?.isAuthError) {
+      alert(
+        error?.message ||
+          "Please log in again to generate your application package."
+      );
+      router.push("/login");
     } else {
       alert(
         error?.message ||
           "Failed to generate package."
       );
     }
-  } finally {
-    if (progressTimer) {
-      clearInterval(
-        progressTimer
-      );
-    }
-
-    setIsGenerating(false);
   }
 }
   async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -1694,44 +1858,76 @@ async function loadSelectedApplicationMaterials() {
    
   
 
+  /*
+    Only http/https may ever be handed to window.open()/location.href for an
+    employer "apply" link - blocks javascript:, data:, ftp:, and any other
+    scheme a job posting's applyUrl/pasted URL could contain.
+  */
+  function isSafeExternalApplyUrl(value: string): boolean {
+    if (!value) return false;
+
+    try {
+      const parsed = new URL(value, window.location.href);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
   async function handleApplyNow() {
-    const { resume, coverLetter } =
-  await getSavedApplicationMaterials();
-    const hasCompleteResume = isCompleteApplicationMaterial(resume);
-    const hasCompleteCoverLetter = isCompleteApplicationMaterial(coverLetter);
+    const targetUrl = analysis.jobDetails.applyUrl || jobUrl.trim();
+    const canOpenTab = isSafeExternalApplyUrl(targetUrl);
 
-    if (!hasCompleteResume && !hasCompleteCoverLetter) {
-      const shouldGoToCareerMemory = window.confirm(
-        "Your saved resume or cover letter is missing or incomplete. Go to Career Memory to complete it now?"
-      );
+    /*
+      Opened synchronously here, before any await, so it stays inside the
+      browser's "triggered by a user gesture" window and popup blockers
+      don't block it. Navigated to the real employer URL (or closed) once
+      saving finishes below - this is what makes the save-then-open
+      ordering possible without losing the click-event-safe open.
+    */
+    const newTab = canOpenTab
+      ? window.open("", "_blank")
+      : null;
 
-      if (shouldGoToCareerMemory) {
-        router.push("/career-memory");
-      } else {
-        setMessage(
-          "Your saved application materials are missing or incomplete. Complete Career Memory before using this option."
-        );
-      }
-
-      return;
+    if (newTab) {
+      newTab.opener = null;
     }
 
-   setPackageData((prev) => ({
-  resume:
-    hasCompleteResume
-      ? resume
-      : prev.resume ||
-        "No complete saved resume found.",
+    try {
+      const { resume, coverLetter } =
+    await getSavedApplicationMaterials();
+      const hasCompleteResume = isCompleteApplicationMaterial(resume);
+      const hasCompleteCoverLetter = isCompleteApplicationMaterial(coverLetter);
 
-  coverLetter:
-    hasCompleteCoverLetter
-      ? coverLetter
-      : prev.coverLetter ||
-        "No complete saved cover letter found.",
+      if (!hasCompleteResume && !hasCompleteCoverLetter) {
+        newTab?.close();
 
-  emailDraft:
-    prev.emailDraft ||
-    `Subject: Application for ${analysis.title}
+        const shouldGoToCareerMemory = window.confirm(
+          "Your saved resume or cover letter is missing or incomplete. Go to Career Memory to complete it now?"
+        );
+
+        if (shouldGoToCareerMemory) {
+          router.push("/career-memory");
+        } else {
+          setMessage(
+            "Your saved application materials are missing or incomplete. Complete Career Memory before using this option."
+          );
+        }
+
+        return;
+      }
+
+      const resumeText = hasCompleteResume
+        ? resume
+        : "No complete saved resume found.";
+
+      const coverLetterText = hasCompleteCoverLetter
+        ? coverLetter
+        : "No complete saved cover letter found.";
+
+      const emailDraftText =
+        packageData.emailDraft ||
+        `Subject: Application for ${analysis.title}
 
 Dear Hiring Manager,
 
@@ -1740,19 +1936,85 @@ I hope you are doing well.
 I would like to apply for the ${analysis.title} position at ${analysis.company}. Please find my application materials attached.
 
 Best regards,
-David Kwak`,
+David Kwak`;
 
-  packageAnalysis: prev.packageAnalysis,
-}));
+      setPackageData((prev) => ({
+        resume: resumeText,
+        coverLetter: coverLetterText,
+        emailDraft: emailDraftText,
+        packageAnalysis: prev.packageAnalysis,
+      }));
 
-    setSelectedPreview(hasCompleteResume ? "resume" : "coverLetter");
-    setGenerated(true);
-    setShowDefaultApplication(true);
-    setMessage(
-      hasCompleteResume && hasCompleteCoverLetter
-        ? "Your saved resume and cover letter are ready. Preview, edit, save, or continue to the employer website."
-        : "One complete saved application material was found. You can preview, edit, save, or continue to the employer website."
-    );
+      setSelectedPreview(hasCompleteResume ? "resume" : "coverLetter");
+      setGenerated(true);
+      setShowDefaultApplication(true);
+
+      /*
+        Explicit fresh values, not packageData state - setPackageData()
+        above hasn't re-rendered yet, so reading packageData here would
+        save last job's stale text instead of what was just resolved.
+      */
+      const saved = await savePackage({
+        resumeText,
+        coverLetterText,
+        emailDraftText,
+        silent: true,
+      });
+
+      if (!saved) {
+        newTab?.close();
+        return;
+      }
+
+      if (!targetUrl) {
+        newTab?.close();
+        setMessage(
+          "Saved to Job Tracker. No employer apply link was found for this job - add one from the job posting to open it in a new tab next time."
+        );
+        return;
+      }
+
+      if (!canOpenTab) {
+        newTab?.close();
+        setMessage(
+          "Saved to Job Tracker, but the employer link isn't a valid web address, so it wasn't opened."
+        );
+        return;
+      }
+
+      /*
+        A blocked popup returns a window that's either null or already
+        .closed - window.open() alone can't be trusted to mean success, so
+        this is checked explicitly rather than assumed from a truthy
+        return value. Without this check, a blocked popup would silently
+        report "opened in a new tab" even though nothing opened.
+      */
+      let tabOpened = false;
+
+      if (newTab && !newTab.closed) {
+        newTab.location.href = targetUrl;
+        tabOpened = true;
+      } else {
+        const opened = window.open(
+          targetUrl,
+          "_blank",
+          "noopener,noreferrer"
+        );
+        tabOpened = Boolean(opened && !opened.closed);
+      }
+
+      setMessage(
+        tabOpened
+          ? "Saved to Job Tracker and opened the employer's application page in a new tab."
+          : "Saved to Job Tracker. Your browser blocked the pop-up - use \"Apply on Employer Website\" below to open it manually."
+      );
+    } catch (error) {
+      newTab?.close();
+      console.error("APPLY WITH SAVED RESUME ERROR =", error);
+      setMessage(
+        "We couldn't complete Apply with Saved Resume. Please try again."
+      );
+    }
   }
 
   function continueToApply() {
@@ -1760,6 +2022,11 @@ David Kwak`,
 
     if (!targetUrl) {
       alert("No employer apply link is available. Paste the job URL first.");
+      return;
+    }
+
+    if (!isSafeExternalApplyUrl(targetUrl)) {
+      alert("This employer link isn't a valid web address, so it can't be opened.");
       return;
     }
 
@@ -1781,10 +2048,15 @@ async function downloadDocx() {
   );
 }
 
-  async function savePackage() {
+  async function savePackage(options?: {
+    resumeText?: string;
+    coverLetterText?: string;
+    emailDraftText?: string;
+    silent?: boolean;
+  }): Promise<boolean> {
 
 
-  if (!user) return;
+  if (!user) return false;
 
   const sharedFields = {
     job_url: jobUrl.trim(),
@@ -1795,13 +2067,13 @@ async function downloadDocx() {
     location: analysis.location,
     job_type: analysis.type,
 
-    resume_text: packageData.resume,
+    resume_text: options?.resumeText ?? packageData.resume,
 
     cover_letter_text:
-      packageData.coverLetter,
+      options?.coverLetterText ?? packageData.coverLetter,
 
     email_draft:
-      packageData.emailDraft,
+      options?.emailDraftText ?? packageData.emailDraft,
 
     job_analysis: analysis,
 
@@ -1841,7 +2113,7 @@ async function downloadDocx() {
 
     if (error) {
       alert(error.message);
-      return;
+      return false;
     }
   } else {
     /*
@@ -1876,15 +2148,18 @@ async function downloadDocx() {
 
     if (error) {
       alert(error.message);
-      return;
+      return false;
     }
 
     setApplicationId(data.id);
   }
 
-  alert("Application package has been saved successfully!");
+  if (!options?.silent) {
+    alert("Application package has been saved successfully!");
+  }
 
   setMessage("Application package saved to cloud.");
+  return true;
 }
 
   function sanitizeFileName(value: string) {
@@ -2040,6 +2315,13 @@ async function downloadDocx() {
                   resume={savedApplicationMaterial.resume.resumeRow}
                   fallbackText={savedApplicationMaterial.resume.text}
                 />
+              ) : savedPreviewType === "resume" &&
+                savedApplicationMaterial.resume.careerMemoryRow ? (
+                <CareerMemoryTemplatePreview
+                  data={mapCareerMemoryRowToPreviewData(
+                    savedApplicationMaterial.resume.careerMemoryRow
+                  )}
+                />
               ) : (
                 <div className="mx-auto min-h-[900px] max-w-[794px] bg-white p-10 shadow">
                   <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-slate-700">
@@ -2068,8 +2350,8 @@ async function downloadDocx() {
 
       
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
-      <div className="flex min-h-screen">
-        <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+      <div className="flex min-h-screen flex-col md:flex-row">
+        <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
@@ -2110,7 +2392,7 @@ async function downloadDocx() {
           </div>
         </aside>
 
-        <section className="flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1 px-8 py-6">
           <header className="mb-8 flex items-center justify-between">
             <div>
               <div className="text-xs font-bold text-blue-600">
@@ -2133,12 +2415,12 @@ async function downloadDocx() {
           </header>
 
           <div className="grid gap-6 xl:grid-cols-12">
-            <section className="xl:col-span-8">
+            <section className="min-w-0 xl:col-span-8">
               <div className="rounded-2xl border border-blue-100 bg-white shadow-sm">
                 <div className="grid grid-cols-3 border-b border-blue-100 bg-slate-50">
                   <button
                     onClick={() => setActiveMode("url")}
-                    className={`px-5 py-4 text-sm font-extrabold ${
+                    className={`min-w-0 px-5 py-4 text-sm font-extrabold ${
                       activeMode === "url"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
                         : "text-gray-500 hover:bg-blue-50"
@@ -2149,7 +2431,7 @@ async function downloadDocx() {
 
                   <button
                     onClick={() => setActiveMode("description")}
-                    className={`px-5 py-4 text-sm font-extrabold ${
+                    className={`min-w-0 px-5 py-4 text-sm font-extrabold ${
                       activeMode === "description"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
                         : "text-gray-500 hover:bg-blue-50"
@@ -2163,7 +2445,7 @@ async function downloadDocx() {
                       setActiveMode("file");
                       fileInputRef.current?.click();
                     }}
-                    className={`px-5 py-4 text-sm font-extrabold ${
+                    className={`min-w-0 px-5 py-4 text-sm font-extrabold ${
                       activeMode === "file"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
                         : "text-gray-500 hover:bg-blue-50"
@@ -2177,7 +2459,7 @@ async function downloadDocx() {
                   {activeMode === "url" && (
                     <div>
                       <label className="text-sm font-bold">Job Posting URL</label>
-                      <div className="mt-3 flex gap-3">
+                      <div className="mt-3 flex flex-wrap gap-3">
                         <input
                           value={jobUrl}
                           onChange={(e) => {
@@ -2185,7 +2467,7 @@ async function downloadDocx() {
                             setMessage("New job detected. Click Analyze Job to update the page.");
                           }}
                           placeholder="https://www.linkedin.com/jobs/view/1234567890"
-                          className="flex-1 rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500"
+                          className="min-w-0 flex-1 rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500"
                         />
                         <button
                           onClick={handleAnalyze}
@@ -2342,7 +2624,7 @@ async function downloadDocx() {
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
   {/* 선택된 Resume */}
-  <div className="rounded-2xl border border-gray-100 bg-white p-5">
+  <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
     <div className="flex items-start gap-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-2xl">
         📄
@@ -2388,7 +2670,7 @@ async function downloadDocx() {
   </div>
 
   {/* 선택된 Cover Letter */}
-  <div className="rounded-2xl border border-gray-100 bg-white p-5">
+  <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
     <div className="flex items-start gap-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-2xl">
         ✉️
@@ -2551,15 +2833,15 @@ async function downloadDocx() {
             <span>
               {generationProgress <= 10
   ? "Preparing selected resume"
-  : generationProgress <= 30
-    ? "Analyzing job requirements"
-    : generationProgress <= 50
-      ? "Tailoring resume content"
-      : generationProgress <= 70
-        ? "Creating cover letter and email"
-        : generationProgress <= 85
-          ? "Verifying claims and match analysis"
-          : "Finalizing package"}
+  : generationProgress <= 40
+    ? "Creating tailored resume"
+    : generationProgress <= 70
+      ? "Creating cover letter and email"
+      : generationProgress <= 85
+        ? "Verifying claims and match analysis"
+        : generationProgress <= 95
+          ? "Saving your application package"
+          : "Complete"}
             </span>
 
             <span className="whitespace-nowrap">
@@ -2594,12 +2876,12 @@ async function downloadDocx() {
                     onClick={handleApplyNow}
                     className="mt-4 flex w-full items-center justify-between rounded-2xl border border-blue-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50"
                   >
-                    <div className="flex items-center gap-4">
+                    <div className="flex min-w-0 items-center gap-4">
                       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
                         🛩️
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-xl font-extrabold text-gray-900">
                             Apply with Saved Resume
                           </h3>
@@ -2619,11 +2901,11 @@ async function downloadDocx() {
                     onClick={continueToApply}
                     className="mt-4 flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
                   >
-                    <div className="flex items-center gap-4">
+                    <div className="flex min-w-0 items-center gap-4">
                       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
                         🌐
                       </div>
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <h3 className="text-xl font-extrabold text-gray-900">
                           Apply on Employer Website ↗
                         </h3>
@@ -2639,7 +2921,7 @@ async function downloadDocx() {
             </section>
 
             {/* 오른쪽 위: 스크롤을 따라오지 않는 안내 카드 */}
-            <aside className="self-start xl:col-span-4">
+            <aside className="min-w-0 self-start xl:col-span-4">
               <div className="rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
                 <h2 className="text-2xl font-extrabold">
                   What happens next?
@@ -2720,7 +3002,7 @@ async function downloadDocx() {
 
                   {generated && (
                     <button
-                      onClick={savePackage}
+                      onClick={() => savePackage()}
                       className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
                     >
                       Save Package
@@ -2741,7 +3023,7 @@ async function downloadDocx() {
                 {generated && (
   <div className="mt-6 grid items-start gap-5 xl:grid-cols-12">
     {/* 왼쪽: 원본 채용공고 */}
-    <aside className="xl:col-span-3">
+    <aside className="min-w-0 xl:col-span-3">
       <div className="h-full rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="border-b border-gray-100 p-5">
           <div className="flex items-center gap-3">
@@ -2950,7 +3232,7 @@ async function downloadDocx() {
     </aside>
 
     {/* 가운데: 생성된 Resume / Cover Letter / Email */}
-    <section className="xl:col-span-5">
+    <section className="min-w-0 xl:col-span-5">
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
           <div>
@@ -3155,7 +3437,7 @@ async function downloadDocx() {
 
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         <button
-          onClick={savePackage}
+          onClick={() => savePackage()}
           className="rounded-xl border border-blue-200 bg-white px-5 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50"
         >
           Save Package
@@ -3171,7 +3453,7 @@ async function downloadDocx() {
     </section>
 
     {/* 오른쪽: AI 분석 카드 */}
-    <aside className="xl:col-span-4">
+    <aside className="min-w-0 xl:col-span-4">
       <PackageAnalysisPanel
         analysis={
           packageData.packageAnalysis

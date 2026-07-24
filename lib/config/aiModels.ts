@@ -14,7 +14,16 @@
 
 // app/api/generate-package/route.ts - main resume+coverLetter+email call
 export const PACKAGE_GENERATION_MODEL = "gpt-5.5";
-export const PACKAGE_PROMPT_VERSION = "package-v1";
+/*
+  Bumped v1 -> v2: removed the duplicate full resume text (SOURCE
+  MANIFEST.originalText was byte-identical to the PRIMARY RESUME block)
+  and the "PREVIOUS JOB ANALYSIS" block (a JSON dump of the earlier
+  analyze-job result that the prompt's own "JOB POSTING ANALYSIS - DO THIS
+  FIRST" instructions already require the model to re-derive from the
+  complete job description anyway). No instruction/rule text changed -
+  same required output shape, same fact-checking constraints.
+*/
+export const PACKAGE_PROMPT_VERSION = "package-v2";
 
 // lib/resume-builder.ts - first-pass draft used for career_memory sources
 export const CAREER_MEMORY_DRAFT_MODEL = "gpt-4.1";

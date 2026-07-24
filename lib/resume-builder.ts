@@ -1,12 +1,18 @@
-import OpenAI from "openai";
+/*
+  Deterministic, non-AI Career Memory -> plain-text resume assembly.
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-export async function buildResumeFromCareerMemory(memory: any) {
-  try {
-    const draft = `
+  This used to call OpenAI (gpt-4.1) to "polish" this same draft text before
+  handing it to the main package-generation call. That extra AI call added
+  several seconds of latency to every career_memory-sourced generation
+  attempt and, once the Generate Package flow moved to an async Background
+  Function architecture, was replaced with this pure function per explicit
+  product decision: the main package-generation AI call is the only AI call
+  in the whole pipeline now. No other caller ever used the AI-polished
+  version (confirmed: resolveSelectedResume's includeGenerationText:true
+  path, which triggered it, was only ever invoked from generate-package).
+*/
+export function buildCareerMemoryDraftText(memory: any): string {
+  const draft = `
 Name:
 ${memory.first_name || ""} ${memory.last_name || ""}
 
@@ -117,67 +123,5 @@ ${(memory.languages || [])
   .join("\n")}
 `;
 
-    const prompt = `
-You are one of the world's best Canadian ATS resume writers.
-
-Your task is to convert the Career Memory Draft below into a professional ATS-friendly Canadian resume.
-
-Requirements:
-
-- Never invent information.
-- Never fabricate jobs, employers, degrees, dates or certifications.
-- Preserve every fact.
-- Preserve measurable achievements.
-- Improve wording while keeping meaning.
-- Use concise professional bullet points.
-- Organize into a modern ATS resume.
-
-Include sections only if information exists:
-
-• Name
-• Contact Information
-• Headline
-• Professional Summary
-• Skills
-• Work Experience
-• Volunteer Experience
-• Education
-• Projects
-• Certifications
-• Languages
-
-Output ONLY the finished resume.
-
-Career Memory Draft:
-
-${draft}
-`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      temperature: 0,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an expert Canadian ATS resume writer.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    });
-
-    const resume =
-      completion.choices[0].message.content?.trim() || "";
-
-    console.log("===== AI RESUME BUILDER =====");
-    console.log(resume);
-
-    return resume;
-  } catch (err) {
-    console.error("Resume Builder Error:", err);
-    return "";
-  }
+  return draft.trim();
 }
