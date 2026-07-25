@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  hashContent,
+  normalizeText,
+} from "@/lib/cache/contentHash";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -28,7 +33,66 @@ function extractJson(text: string) {
   );
 }
 
+/*
+  Only the substantive profile content that can actually change what
+  gets recommended - never identity/contact fields (name, email, phone,
+  linkedin), styling/selection-state columns (resume_template,
+  cover_template, theme, font, text_size, tone, profile_strength,
+  required_completed, resume_name, selected_resume_type,
+  selected_resume_id, selected_cover_letter_id), or timestamps. Editing
+  any of those must never invalidate the cache; editing anything below
+  must always invalidate it.
+*/
+function careerMemoryContentFields(
+  memory: Record<string, unknown>
+) {
+  return {
+    summary: memory.summary ?? null,
+    target_roles: Array.isArray(memory.target_roles)
+      ? [...(memory.target_roles as string[])].sort()
+      : [],
+    skills: Array.isArray(memory.skills)
+      ? [...(memory.skills as string[])].sort()
+      : [],
+    languages: memory.languages ?? null,
+    education: memory.education ?? null,
+    experience: memory.experience ?? null,
+    certifications: memory.certifications ?? null,
+    career_goal_summary: memory.career_goal_summary ?? null,
+    headline: memory.headline ?? null,
+    target_industry: memory.target_industry ?? null,
+    target_location: memory.target_location ?? null,
+    location: memory.location ?? null,
+    salary_expectation: memory.salary_expectation ?? null,
+    projects: memory.projects ?? null,
+    volunteer_experience: memory.volunteer_experience ?? null,
+  };
+}
+
 export async function POST(req: Request) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return NextResponse.json(
+      {
+        jobs: [],
+        error: "Unauthorized.",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
+  let resumeId: string | null = null;
+  let resumeSource: "uploaded" | "career_memory" | null = null;
+  let resumeContentHash: string | null = null;
+
   try {
     const body = await req.json();
 
@@ -47,25 +111,6 @@ export async function POST(req: Request) {
       typeof body.selectedKeyword === "string"
         ? body.selectedKeyword.trim()
         : "";
-
-    const supabase = await createClient();
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json(
-        {
-          jobs: [],
-          error: "Unauthorized.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
 
     let careerMemory: Record<
       string,
@@ -124,6 +169,13 @@ export async function POST(req: Request) {
         source: "career-memory",
         ...data,
       };
+
+      resumeId = data.id;
+      resumeSource = "career_memory";
+      resumeContentHash = hashContent({
+        profile: careerMemoryContentFields(data),
+        selectedKeyword,
+      });
     }
 
     /*
@@ -152,6 +204,8 @@ export async function POST(req: Request) {
       } = await supabase
         .from("resumes")
         .select("*")
+        // ownership check independent of RLS - a client-supplied resume
+        // id belonging to a different user can never match this query.
         .eq("id", selectedResumeId)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -191,9 +245,23 @@ export async function POST(req: Request) {
         source: "uploaded-resume",
         ...data,
       };
+
+      resumeId = data.id;
+      resumeSource = "uploaded";
+      resumeContentHash = hashContent({
+        resumeText: normalizeText(
+          data.original_text || ""
+        ),
+        selectedKeyword,
+      });
     }
 
-    if (!careerMemory) {
+    if (
+      !careerMemory ||
+      !resumeId ||
+      !resumeSource ||
+      !resumeContentHash
+    ) {
       return NextResponse.json(
         {
           jobs: [],
@@ -206,11 +274,79 @@ export async function POST(req: Request) {
       );
     }
 
-    const response =
-      await client.responses.create({
-        model: "gpt-5.5",
+    /*
+      Permanent, content-addressed cache: identical resume content for
+      this exact user/resume always returns the same stored result with
+      zero further OpenAI calls, regardless of file rename, re-selection,
+      refresh, re-login, or device. Claim is atomic (advisory-locked
+      inside the RPC) so concurrent requests for the same key can never
+      both call OpenAI.
+    */
+    const { data: claimRows, error: claimError } =
+      await supabaseAdmin.rpc(
+        "claim_recommended_job_cache",
+        {
+          p_user_id: user.id,
+          p_resume_id: resumeId,
+          p_resume_source: resumeSource,
+          p_resume_content_hash: resumeContentHash,
+        }
+      );
 
-        input: `
+    if (claimError) {
+      console.error(
+        "Recommended jobs cache claim error:",
+        claimError
+      );
+
+      return NextResponse.json(
+        {
+          jobs: [],
+          error:
+            "Failed to check cached recommendations.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const claim = Array.isArray(claimRows)
+      ? claimRows[0]
+      : claimRows;
+
+    if (!claim?.claimed) {
+      if (claim?.status === "completed") {
+        const cached = claim.result || {};
+
+        return NextResponse.json({
+          jobs: cached.jobs ?? [],
+          selectedResumeSource,
+          selectedResumeId,
+          cached: true,
+        });
+      }
+
+      return NextResponse.json(
+        {
+          jobs: [],
+          error:
+            "Recommendations are already being generated for this resume. Please wait a moment.",
+        },
+        {
+          status: 409,
+        }
+      );
+    }
+
+    let response;
+
+    try {
+      response =
+        await client.responses.create({
+          model: "gpt-5.5",
+
+          input: `
 You are an AI career advisor for a Canadian career platform.
 
 Your job is to recommend realistic occupations based on the
@@ -351,11 +487,70 @@ Career Memory:
 
 ${JSON.stringify(careerMemory)}
 `,
-      });
+        });
+    } catch (openAiError) {
+      console.error(
+        "Recommended jobs OpenAI error:",
+        openAiError
+      );
 
-    const json = extractJson(
-      response.output_text
-    );
+      await supabaseAdmin.rpc(
+        "fail_recommended_job_cache",
+        {
+          p_user_id: user.id,
+          p_resume_id: resumeId,
+          p_resume_source: resumeSource,
+          p_resume_content_hash: resumeContentHash,
+          p_error_code: "OPENAI_ERROR",
+        }
+      );
+
+      return NextResponse.json(
+        {
+          jobs: [],
+          error:
+            "Failed to generate recommended jobs.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    let json;
+
+    try {
+      json = extractJson(
+        response.output_text
+      );
+    } catch (parseError) {
+      console.error(
+        "Recommended jobs parse error:",
+        parseError
+      );
+
+      await supabaseAdmin.rpc(
+        "fail_recommended_job_cache",
+        {
+          p_user_id: user.id,
+          p_resume_id: resumeId,
+          p_resume_source: resumeSource,
+          p_resume_content_hash: resumeContentHash,
+          p_error_code: "MALFORMED_AI_RESPONSE",
+        }
+      );
+
+      return NextResponse.json(
+        {
+          jobs: [],
+          error:
+            "Failed to generate recommended jobs.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
 
     const jobs = (
       Array.isArray(json.jobs)
@@ -442,16 +637,94 @@ ${JSON.stringify(careerMemory)}
           : [],
       }));
 
+    /*
+      A few quick, cheap DB-only retries (no OpenAI cost) before giving
+      up - this is the one call that must not silently fail while still
+      reporting success, or the same resume content would be re-billed
+      on every future request.
+    */
+    let completeError = null;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { error } = await supabaseAdmin.rpc(
+        "complete_recommended_job_cache",
+        {
+          p_user_id: user.id,
+          p_resume_id: resumeId,
+          p_resume_source: resumeSource,
+          p_resume_content_hash: resumeContentHash,
+          p_result: { jobs },
+        }
+      );
+
+      completeError = error;
+
+      if (!completeError) {
+        break;
+      }
+
+      if (attempt < 2) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 200)
+        );
+      }
+    }
+
+    if (completeError) {
+      /*
+        Fail closed: the generation itself succeeded, but it could not be
+        confirmed as cached even after retrying - never report success
+        while that is unconfirmed, since a later request for the same
+        resume content would otherwise find no completed cache row and
+        pay for another OpenAI call. The client's existing retry (re-open
+        the resume / reload Dashboard) lands on the same cache key and
+        reclaims it normally.
+      */
+      console.error(
+        "Recommended jobs cache completion error:",
+        completeError
+      );
+
+      return NextResponse.json(
+        {
+          jobs: [],
+          error:
+            "Recommendations were generated, but could not be saved. Please try again.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
     return NextResponse.json({
       jobs,
       selectedResumeSource,
       selectedResumeId,
+      cached: false,
     });
   } catch (error) {
     console.error(
       "Recommended jobs error:",
       error
     );
+
+    if (resumeId && resumeSource && resumeContentHash) {
+      try {
+        await supabaseAdmin.rpc(
+          "fail_recommended_job_cache",
+          {
+            p_user_id: user.id,
+            p_resume_id: resumeId,
+            p_resume_source: resumeSource,
+            p_resume_content_hash: resumeContentHash,
+            p_error_code: "UNKNOWN",
+          }
+        );
+      } catch {
+        // best-effort only
+      }
+    }
 
     return NextResponse.json(
       {
