@@ -923,6 +923,19 @@ const [
   const [selectedPreview, setSelectedPreview] = useState<PreviewType>("resume");
   const [showDefaultApplication, setShowDefaultApplication] = useState(false);
 
+  /*
+    Display-only hint for the lifetime Generate Package quota (Production
+    only - enforced is false everywhere else, including local dev). Never
+    used to decide whether to allow a click; the server always re-checks
+    at generation time. Loaded once via a plain GET, no OpenAI call.
+  */
+  const [generatePackageQuota, setGeneratePackageQuota] = useState<{
+    enforced: boolean;
+    limit: number;
+    used: number | null;
+    remaining: number | null;
+  } | null>(null);
+
   const [packageData, setPackageData] = useState<GeneratedPackage>({
   resume: "",
   coverLetter: "",
@@ -938,6 +951,41 @@ useEffect(() => {
   if (!user) return;
 
   void loadSelectedApplicationMaterials();
+}, [loading, user]);
+
+useEffect(() => {
+  if (loading) return;
+  if (!user) return;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const res = await fetch("/api/generate-package/usage");
+
+      if (!res.ok) return;
+
+      const data = await res.json();
+
+      if (!cancelled) {
+        setGeneratePackageQuota({
+          enforced: Boolean(data.enforced),
+          limit: data.limit,
+          used: data.used ?? null,
+          remaining: data.remaining ?? null,
+        });
+      }
+    } catch (error) {
+      console.error(
+        "GENERATE PACKAGE USAGE ERROR =",
+        error
+      );
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
 }, [loading, user]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1499,6 +1547,34 @@ async function loadSelectedApplicationMaterials() {
     const data =
       await response.json();
 
+    if (
+      response.status === 429 &&
+      data.code === "GENERATE_PACKAGE_LIMIT_REACHED"
+    ) {
+      setGeneratePackageQuota({
+        enforced: true,
+        limit:
+          typeof data.limit === "number"
+            ? data.limit
+            : 5,
+        used:
+          typeof data.used === "number"
+            ? data.used
+            : null,
+        remaining: 0,
+      });
+
+      const limitError: Error & { code?: string } =
+        new Error(
+          "You have used all 5 Generate Package generations available for your account."
+        );
+
+      limitError.code =
+        "GENERATE_PACKAGE_LIMIT_REACHED";
+
+      throw limitError;
+    }
+
     if (response.status === 409) {
       throw new Error(
         data.error ||
@@ -1569,6 +1645,12 @@ async function loadSelectedApplicationMaterials() {
       not a duplicate generation.
     */
     if (
+      error?.code === "GENERATE_PACKAGE_LIMIT_REACHED"
+    ) {
+      alert(
+        "Generate Package limit reached\n\nYou have used all 5 Generate Package generations available for your account."
+      );
+    } else if (
       error?.name === "TimeoutError" ||
       error?.name === "AbortError"
     ) {
@@ -2525,6 +2607,18 @@ async function downloadDocx() {
           ? "Package generation usually takes about 30 seconds to 1 minute."
           : "Generate a tailored resume, cover letter, and email draft so you’re ready to apply in minutes."}
       </p>
+
+      {!isGenerating &&
+      generatePackageQuota?.enforced &&
+      typeof generatePackageQuota.remaining === "number" ? (
+        <p className="mt-1 text-xs font-bold text-white/80">
+          {generatePackageQuota.remaining > 0
+            ? `${generatePackageQuota.remaining} generation${
+                generatePackageQuota.remaining === 1 ? "" : "s"
+              } remaining`
+            : "No generations remaining"}
+        </p>
+      ) : null}
 
       {isGenerating ? (
         <div className="mt-4">

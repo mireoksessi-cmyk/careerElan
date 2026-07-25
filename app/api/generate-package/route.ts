@@ -9,11 +9,16 @@ import {
   ResumeResolutionError,
 } from "@/lib/resume-service";
 import { createClient } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { logSafeError } from "@/lib/errors/publicError";
 import {
   PACKAGE_GENERATION_MODEL,
   PACKAGE_PROMPT_VERSION,
 } from "@/lib/config/aiModels";
+import {
+  GENERATE_PACKAGE_LIFETIME_LIMIT,
+  isNetlifyProductionRuntime,
+} from "@/lib/config/packageQuota";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -3176,6 +3181,8 @@ export async function POST(
   */
   let applicationId: string | null = null;
   let userId: string | null = null;
+  let generationRequestId: string | null = null;
+  let quotaReserved = false;
 
   try {
     const supabase = await createClient();
@@ -3255,7 +3262,7 @@ export async function POST(
       ) ||
       "Applicant";
 
-    const generationRequestId =
+    generationRequestId =
       typeof body.generationRequestId === "string" &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         body.generationRequestId
@@ -3279,6 +3286,64 @@ export async function POST(
           status: 400,
         }
       );
+    }
+
+    /*
+      Lifetime Generate Package quota - Production only (see
+      isNetlifyProductionRuntime()'s doc comment). Reserves against the
+      same generationRequestId already used for the applications-table
+      idempotent claim below, so a retry/double-click/recovery-poll with
+      the same id can never be double-charged - reserve_generate_package_
+      usage() is itself idempotent per (user_id, request_id). Runs before
+      any OpenAI call or the applications claim, so a caller at their
+      limit never reaches either.
+    */
+    if (isNetlifyProductionRuntime()) {
+      const { data: quotaRows, error: quotaError } =
+        await supabaseAdmin.rpc(
+          "reserve_generate_package_usage",
+          {
+            p_user_id: user.id,
+            p_request_id: generationRequestId,
+            p_limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
+          }
+        );
+
+      if (quotaError) {
+        logSafeError(quotaError, {
+          requestId,
+          route: "/api/generate-package",
+          generationRequestId,
+        });
+
+        return NextResponse.json(
+          {
+            error:
+              "Failed to verify your Generate Package usage. Please try again.",
+            requestId,
+          },
+          { status: 500 }
+        );
+      }
+
+      const quota = Array.isArray(quotaRows)
+        ? quotaRows[0]
+        : quotaRows;
+
+      if (!quota?.reserved) {
+        return NextResponse.json(
+          {
+            error: "Generate Package limit reached.",
+            code: "GENERATE_PACKAGE_LIMIT_REACHED",
+            limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
+            used: quota?.used ?? GENERATE_PACKAGE_LIFETIME_LIMIT,
+            remaining: 0,
+          },
+          { status: 429 }
+        );
+      }
+
+      quotaReserved = true;
     }
 
     if (
@@ -4221,6 +4286,31 @@ ${jobText}
       .eq("id", applicationId)
       .eq("user_id", userId);
 
+    if (quotaReserved && generationRequestId) {
+      const { error: completeError } = await supabaseAdmin.rpc(
+        "complete_generate_package_usage",
+        {
+          p_user_id: userId,
+          p_request_id: generationRequestId,
+        }
+      );
+
+      if (completeError) {
+        /*
+          Best-effort only - the generation itself already succeeded and
+          was persisted above; a failure to flip the quota row to
+          'completed' must never turn a real success into an error
+          response. Worst case, this row stays 'reserved' and self-heals
+          once GENERATE_PACKAGE_QUOTA_STALE_SECONDS elapses.
+        */
+        logSafeError(completeError, {
+          requestId,
+          route: "/api/generate-package",
+          generationRequestId,
+        });
+      }
+    }
+
     return NextResponse.json({
       resume,
       coverLetter,
@@ -4240,6 +4330,29 @@ ${jobText}
       applicationId,
     });
   } catch (error) {
+    if (quotaReserved && generationRequestId && userId) {
+      try {
+        /*
+          Refund the reservation on any final failure so it never counts
+          toward the lifetime limit - a no-op if the row is already
+          'completed'/'released' (e.g. this catch fired after the
+          generation itself already succeeded, for an unrelated reason).
+        */
+        await supabaseAdmin.rpc(
+          "release_generate_package_usage",
+          {
+            p_user_id: userId,
+            p_request_id: generationRequestId,
+          }
+        );
+      } catch {
+        /*
+          Best-effort only - must never mask or replace the original
+          error being reported below.
+        */
+      }
+    }
+
     if (applicationId) {
       try {
         const supabase = await createClient();
