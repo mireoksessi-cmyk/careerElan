@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createClient } from "@/lib/supabase-server";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -8,10 +9,25 @@ const client = new OpenAI({
 
 export async function POST(req: Request) {
   try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
+
+    const authenticatedUserId = user.id;
+
     const body = await req.json();
 
     const {
-      userId,
       total,
       interviewRate,
       offerRate,
@@ -27,7 +43,7 @@ export async function POST(req: Request) {
     const { data: cache } = await supabaseAdmin
       .from("analytics_cache")
       .select("summary")
-      .eq("user_id", userId)
+      .eq("user_id", authenticatedUserId)
       .single();
 
     if (cache?.summary) {
@@ -93,7 +109,7 @@ Instructions
     await supabaseAdmin
       .from("analytics_cache")
       .upsert({
-        user_id: userId,
+        user_id: authenticatedUserId,
         summary,
         updated_at:
           new Date().toISOString(),
