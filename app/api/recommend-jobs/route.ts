@@ -206,36 +206,6 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log(
-      "===== SELECTED RESUME SOURCE ====="
-    );
-    console.log(selectedResumeSource);
-
-    console.log(
-      "===== SELECTED RESUME ID ====="
-    );
-    console.log(
-      selectedResumeId || "None"
-    );
-
-    console.log(
-      "===== CAREER MEMORY ====="
-    );
-    console.log(
-      JSON.stringify(
-        careerMemory,
-        null,
-        2
-      )
-    );
-
-    console.log(
-      "===== SELECTED KEYWORD ====="
-    );
-    console.log(
-      selectedKeyword || "None"
-    );
-
     const response =
       await client.responses.create({
         model: "gpt-5.5",
@@ -383,11 +353,6 @@ ${JSON.stringify(careerMemory)}
 `,
       });
 
-    console.log(
-      "===== GPT RAW OUTPUT ====="
-    );
-    console.log(response.output_text);
-
     const json = extractJson(
       response.output_text
     );
@@ -476,13 +441,6 @@ ${JSON.stringify(careerMemory)}
               .slice(0, 3)
           : [],
       }));
-
-    console.log(
-      "===== FINAL JOBS ====="
-    );
-    console.log(
-      JSON.stringify(jobs, null, 2)
-    );
 
     return NextResponse.json({
       jobs,

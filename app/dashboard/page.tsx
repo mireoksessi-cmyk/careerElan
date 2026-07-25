@@ -1455,16 +1455,16 @@ if (!selectedPayload) {
 
   setCareerFairs(defaultCareerFairs);
 
-  if (
+  const isCacheStale =
     !cachedJobs ||
     !cachedTime ||
-    Date.now() - Number(cachedTime) > 1000 * 60 * 60
-  ) {
-    console.log("12. setLoadingJobs(true)");
-    setLoadingJobs(true);
+    Date.now() - Number(cachedTime) > 1000 * 60 * 60;
+
+  if (!isCacheStale) {
+    return;
   }
 
-  console.log("13. FETCH START");
+  setLoadingJobs(true);
 
   fetch("/api/recommend-jobs", {
   method: "POST",
