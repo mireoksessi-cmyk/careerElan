@@ -3169,6 +3169,50 @@ const OPENAI_CALL_TIMEOUT_MS = 60_000;
 // reclaim the row and regenerate instead of returning 409 forever.
 const PENDING_STALE_THRESHOLD_MS = 3 * OPENAI_CALL_TIMEOUT_MS;
 
+/*
+  Immediately refunds a quota reservation on any early-return failure path
+  after it was taken - never left to the outer catch block alone, since
+  several failure paths below (missing OPENAI_API_KEY, resume resolution
+  errors, the applications claim itself failing) return directly instead
+  of throwing. Best-effort: the reserve_generate_package_usage() reconcile
+  step is a second, delayed safety net for any path this call itself
+  can't reach, so a release failure here is logged, never thrown.
+*/
+async function releaseQuotaReservation(
+  quotaReserved: boolean,
+  userId: string | null,
+  generationRequestId: string | null,
+  context: { requestId: string }
+) {
+  if (!quotaReserved || !userId || !generationRequestId) {
+    return;
+  }
+
+  try {
+    const { error } = await supabaseAdmin.rpc(
+      "release_generate_package_usage",
+      {
+        p_user_id: userId,
+        p_request_id: generationRequestId,
+      }
+    );
+
+    if (error) {
+      logSafeError(error, {
+        requestId: context.requestId,
+        route: "/api/generate-package",
+        generationRequestId,
+      });
+    }
+  } catch (error) {
+    logSafeError(error, {
+      requestId: context.requestId,
+      route: "/api/generate-package",
+      generationRequestId,
+    });
+  }
+}
+
 export async function POST(
   req: Request
 ) {
@@ -3350,6 +3394,13 @@ export async function POST(
       !process.env
         .OPENAI_API_KEY
     ) {
+      await releaseQuotaReservation(
+        quotaReserved,
+        userId,
+        generationRequestId,
+        { requestId }
+      );
+
       return NextResponse.json(
         {
           error:
@@ -3384,6 +3435,13 @@ export async function POST(
               ? 500
               : 400;
 
+        await releaseQuotaReservation(
+          quotaReserved,
+          userId,
+          generationRequestId,
+          { requestId }
+        );
+
         return NextResponse.json(
           {
             error: safeResumeResolutionMessage(error.code),
@@ -3410,6 +3468,13 @@ export async function POST(
     const resumeText = resolvedResume.generationText;
 
     if (!jobText) {
+      await releaseQuotaReservation(
+        quotaReserved,
+        userId,
+        generationRequestId,
+        { requestId }
+      );
+
       return NextResponse.json(
         {
           error:
@@ -3505,6 +3570,13 @@ export async function POST(
             }
           );
 
+          await releaseQuotaReservation(
+            quotaReserved,
+            userId,
+            generationRequestId,
+            { requestId }
+          );
+
           return NextResponse.json(
             {
               error:
@@ -3527,7 +3599,34 @@ export async function POST(
             Idempotent replay - same generationRequestId as an already
             completed attempt. Return the stored result without calling
             OpenAI again.
+
+            Also (re)confirms the quota row as 'completed' here - this is
+            the recovery path for a prior attempt whose generation
+            succeeded but whose complete_generate_package_usage() call
+            itself failed to run or persist: this call is a no-op if the
+            row is already 'completed', and heals it otherwise. Never
+            re-reserves or re-charges anything - it only ever flips an
+            existing 'reserved' row for this same request_id.
           */
+          if (quotaReserved && generationRequestId && userId) {
+            const { error: completeError } =
+              await supabaseAdmin.rpc(
+                "complete_generate_package_usage",
+                {
+                  p_user_id: userId,
+                  p_request_id: generationRequestId,
+                }
+              );
+
+            if (completeError) {
+              logSafeError(completeError, {
+                requestId,
+                route: "/api/generate-package",
+                generationRequestId,
+              });
+            }
+          }
+
           return NextResponse.json({
             resume: existing.resume_text,
             coverLetter: existing.cover_letter_text,
@@ -3587,6 +3686,13 @@ export async function POST(
           route: "/api/generate-package",
           generationRequestId,
         });
+
+        await releaseQuotaReservation(
+          quotaReserved,
+          userId,
+          generationRequestId,
+          { requestId }
+        );
 
         return NextResponse.json(
           {
@@ -4287,27 +4393,67 @@ ${jobText}
       .eq("user_id", userId);
 
     if (quotaReserved && generationRequestId) {
-      const { error: completeError } = await supabaseAdmin.rpc(
-        "complete_generate_package_usage",
-        {
-          p_user_id: userId,
-          p_request_id: generationRequestId,
+      let completeError = null;
+
+      /*
+        A handful of quick, cheap DB-only retries (no OpenAI cost) before
+        giving up - a transient blip here is far more likely than a real
+        outage, and this is the one call that must not silently fail
+        while still reporting success.
+      */
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await supabaseAdmin.rpc(
+          "complete_generate_package_usage",
+          {
+            p_user_id: userId,
+            p_request_id: generationRequestId,
+          }
+        );
+
+        completeError = error;
+
+        if (!completeError) {
+          break;
         }
-      );
+
+        if (attempt < 2) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, 200)
+          );
+        }
+      }
 
       if (completeError) {
         /*
-          Best-effort only - the generation itself already succeeded and
-          was persisted above; a failure to flip the quota row to
-          'completed' must never turn a real success into an error
-          response. Worst case, this row stays 'reserved' and self-heals
-          once GENERATE_PACKAGE_QUOTA_STALE_SECONDS elapses.
+          Fail closed: the generation itself succeeded and its full
+          result is already safely persisted on the applications row
+          above, but quota completion could not be confirmed even after
+          retrying - a real success must never be handed back while that
+          is unconfirmed (it would risk silently becoming a free
+          generation, e.g. if the row is later reconciled from stale
+          'reserved' state). Not a signal to regenerate: the client's
+          existing retry path reuses this same generationRequestId, which
+          lands on the succeeded-replay branch above - that branch itself
+          retries this same completion call (idempotent, no OpenAI call,
+          no re-charge) and returns this exact already-generated result
+          once it succeeds.
         */
         logSafeError(completeError, {
           requestId,
           route: "/api/generate-package",
           generationRequestId,
         });
+
+        return NextResponse.json(
+          {
+            error:
+              "Your application package was generated successfully, but we couldn't confirm your usage count. Please try again - this will not use an additional generation.",
+            code: "GENERATION_SUCCEEDED_QUOTA_PENDING",
+            requestId,
+            applicationId,
+          },
+          { status: 500 }
+        );
       }
     }
 
