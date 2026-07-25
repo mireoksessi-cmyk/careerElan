@@ -7,6 +7,40 @@ import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
 import { useLogin } from "@/lib/auth/LoginManager";
 
+/*
+  Career Elan only operates in Canada, so Country is fixed - not a free-form
+  choice - and Timezone is restricted to real Canadian IANA zones rather
+  than forced to a single one (Canada spans 6 time zones).
+*/
+const FIXED_COUNTRY = "Canada";
+
+const CANADIAN_TIMEZONES = [
+  { value: "America/St_Johns", label: "Newfoundland Time (St. John's)" },
+  { value: "America/Halifax", label: "Atlantic Time (Halifax)" },
+  { value: "America/Toronto", label: "Eastern Time (Toronto)" },
+  { value: "America/Winnipeg", label: "Central Time (Winnipeg)" },
+  { value: "America/Regina", label: "Central Time - no DST (Regina)" },
+  { value: "America/Edmonton", label: "Mountain Time (Edmonton)" },
+  { value: "America/Vancouver", label: "Pacific Time (Vancouver)" },
+] as const;
+
+const DEFAULT_CANADIAN_TIMEZONE = "America/Toronto";
+
+function isCanadianTimezone(value: string): boolean {
+  return CANADIAN_TIMEZONES.some((zone) => zone.value === value);
+}
+
+function detectDefaultTimezone(): string {
+  try {
+    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return isCanadianTimezone(detected)
+      ? detected
+      : DEFAULT_CANADIAN_TIMEZONE;
+  } catch {
+    return DEFAULT_CANADIAN_TIMEZONE;
+  }
+}
+
 export default function SettingsPage() {
  const { user, loading } = useLogin();
 
@@ -22,6 +56,8 @@ export default function SettingsPage() {
   const [userId, setUserId] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteText, setDeleteText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const [profile, setProfile] = useState({
     full_name: "",
@@ -70,13 +106,23 @@ export default function SettingsPage() {
       }
 
       if (data) {
+        /*
+          Preserve an already-valid stored Canadian timezone as-is; only
+          fall back to browser-detection (then America/Toronto) when the
+          stored value is empty or not a real Canadian zone (e.g. a legacy
+          non-Canadian value from before this restriction existed).
+        */
+        const storedTimezone = data.timezone ?? "";
+
         setProfile({
           full_name: data.full_name ?? "",
           login_id: data.login_id ?? "",
           email: data.email ?? "",
           phone: data.phone ?? "",
-          country: data.country ?? "",
-          timezone: data.timezone ?? "",
+          country: FIXED_COUNTRY,
+          timezone: isCanadianTimezone(storedTimezone)
+            ? storedTimezone
+            : detectDefaultTimezone(),
           email_notifications: data.email_notifications ?? true,
           marketing_notifications: data.marketing_notifications ?? false,
         });
@@ -97,8 +143,10 @@ export default function SettingsPage() {
       .update({
   full_name: profile.full_name,
   phone: profile.phone,
-  country: profile.country,
-  timezone: profile.timezone,
+  country: FIXED_COUNTRY,
+  timezone: isCanadianTimezone(profile.timezone)
+    ? profile.timezone
+    : DEFAULT_CANADIAN_TIMEZONE,
 
   email_notifications:
     profile.email_notifications,
@@ -158,38 +206,56 @@ async function logout() {
 }
 
 async function deleteAccount() {
-
-  const ok = confirm(
-    "This will permanently delete your account.\n\nAre you sure?"
-  );
-
-  if (!ok) return;
-
-  const res = await fetch(
-    "/api/delete-account",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
-      body: JSON.stringify({
-        userId,
-      }),
-    }
-  );
-
-  const data = await res.json();
-
-  if (!data.success) {
-    alert("Failed to delete account.");
+  if (!deletePassword) {
+    alert("Please enter your password to confirm.");
     return;
   }
 
-  await supabase.auth.signOut();
+  setDeletingAccount(true);
 
-  router.push("/");
+  try {
+    const res = await fetch(
+      "/api/delete-account",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          password: deletePassword,
+        }),
+      }
+    );
 
+    const data = await res.json();
+
+    if (!data.success) {
+      /*
+        data.error is always the safe, generic message the server
+        route builds itself - the server never forwards a raw Supabase
+        error or stack trace in this response.
+      */
+      alert(
+        data.error ||
+          "We couldn't delete your account. Please try again."
+      );
+      return;
+    }
+
+    setShowDeleteModal(false);
+    setDeleteText("");
+    setDeletePassword("");
+
+    await supabase.auth.signOut();
+
+    router.push("/");
+  } catch (error) {
+    console.error("DELETE ACCOUNT ERROR =", error);
+    alert("We couldn't delete your account. Please try again.");
+  } finally {
+    setDeletingAccount(false);
+  }
 }
 
   if (loading) {
@@ -305,27 +371,12 @@ async function deleteAccount() {
                       Country
                     </label>
 
-                    <select
-                      className="mt-2 w-full rounded-xl border p-3"
-                      value={profile.country}
-                      onChange={(e) =>
-                        setProfile({
-                          ...profile,
-                          country: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="">
-                        Select Country
-                      </option>
-
-                      <option>Canada</option>
-                      <option>United States</option>
-                      <option>South Korea</option>
-                      <option>Australia</option>
-                      <option>United Kingdom</option>
-
-                    </select>
+                    <input
+                      disabled
+                      className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
+                      value={FIXED_COUNTRY}
+                      title="Career Élan currently operates in Canada only."
+                    />
 
                   </div>
 
@@ -345,16 +396,11 @@ async function deleteAccount() {
                         })
                       }
                     >
-                      <option value="">
-                        Select Time Zone
-                      </option>
-
-                      <option>America/Toronto</option>
-                      <option>America/New_York</option>
-                      <option>America/Vancouver</option>
-                      <option>Europe/London</option>
-                      <option>Asia/Seoul</option>
-
+                      {CANADIAN_TIMEZONES.map((zone) => (
+                        <option key={zone.value} value={zone.value}>
+                          {zone.label}
+                        </option>
+                      ))}
                     </select>
 
                   </div>
@@ -439,15 +485,27 @@ async function deleteAccount() {
     Choose which emails you want to receive.
   </p>
 
+  <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+    These preferences are saved, but Career Élan doesn&apos;t send
+    automated emails yet - turning a toggle on will not cause you to
+    receive anything right now.
+  </p>
+
   <div className="mt-6 space-y-6">
 
-    <label className="flex items-center justify-between">
+    <label className="flex items-center justify-between opacity-60">
 
       <div>
 
-        <p className="font-semibold">
-          Email Notifications
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="font-semibold">
+            Email Notifications
+          </p>
+
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">
+            Coming soon
+          </span>
+        </div>
 
         <p className="text-sm text-gray-500">
           Receive important account updates.
@@ -457,6 +515,7 @@ async function deleteAccount() {
 
       <input
         type="checkbox"
+        disabled
         checked={profile.email_notifications}
         onChange={(e) =>
           setProfile({
@@ -464,18 +523,24 @@ async function deleteAccount() {
             email_notifications: e.target.checked,
           })
         }
-        className="h-5 w-5"
+        className="h-5 w-5 cursor-not-allowed"
       />
 
     </label>
 
-    <label className="flex items-center justify-between">
+    <label className="flex items-center justify-between opacity-60">
 
       <div>
 
-        <p className="font-semibold">
-          Marketing Emails
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="font-semibold">
+            Marketing Emails
+          </p>
+
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">
+            Coming soon
+          </span>
+        </div>
 
         <p className="text-sm text-gray-500">
           Receive product updates and feature announcements.
@@ -485,6 +550,7 @@ async function deleteAccount() {
 
       <input
   type="checkbox"
+  disabled
   checked={profile.marketing_notifications}
   onChange={(e) =>
     setProfile({
@@ -492,7 +558,7 @@ async function deleteAccount() {
       marketing_notifications: e.target.checked,
     })
   }
-  className="h-5 w-5"
+  className="h-5 w-5 cursor-not-allowed"
 />
 
     </label>
@@ -569,12 +635,25 @@ async function deleteAccount() {
               placeholder="Type DELETE"
             />
 
+            <p className="mt-4 text-sm text-gray-600">
+              Enter your password to confirm.
+            </p>
+
+            <input
+              type="password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              className="mt-2 w-full rounded-xl border p-3"
+              placeholder="Password"
+            />
+
             <div className="mt-8 flex justify-end gap-3">
 
               <button
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDeleteText("");
+                  setDeletePassword("");
                 }}
                 className="rounded-xl border px-5 py-2"
               >
@@ -582,11 +661,17 @@ async function deleteAccount() {
               </button>
 
               <button
-                disabled={deleteText !== "DELETE"}
+                disabled={
+                  deleteText !== "DELETE" ||
+                  !deletePassword ||
+                  deletingAccount
+                }
                 onClick={deleteAccount}
                 className="rounded-xl bg-red-600 px-5 py-2 font-bold text-white disabled:opacity-40"
               >
-                Delete Account
+                {deletingAccount
+                  ? "Deleting…"
+                  : "Delete Account"}
               </button>
 
             </div>

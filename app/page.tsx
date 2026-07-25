@@ -402,6 +402,42 @@ async function handleForgotPassword() {
       return;
     }
 
+    /*
+      The lookup above only resolves loginId -> email (the same helper
+      regular login uses) - it never sends anything itself. The actual
+      reset email comes from Supabase Auth's own resetPasswordForEmail().
+
+      redirectTo points at /auth/callback (not straight at "/") because
+      this project's Supabase client is createBrowserClient() from
+      @supabase/ssr, which does NOT auto-exchange a PKCE ?code= param on
+      the client - only /auth/callback's server route does that (via
+      exchangeCodeForSession()). Landing directly on "/" with a bare
+      ?code= would leave the user permanently unauthenticated, no session
+      ever created, no PASSWORD_RECOVERY event ever fired. The `next`
+      param tells the callback route to redirect to ?resetPassword=true
+      after establishing the session, instead of its OAuth-flow default
+      of /dashboard.
+    */
+    const { error: resetError } =
+      await supabase.auth.resetPasswordForEmail(
+        lookupData.email,
+        {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/?resetPassword=true")}`,
+        }
+      );
+
+    if (resetError) {
+      console.error(
+        "PASSWORD RESET EMAIL ERROR =",
+        resetError
+      );
+
+      setMessage(
+        "Unable to send the password reset email."
+      );
+      return;
+    }
+
     setMessage(
       lookupData.message ||
         "If an account exists for this ID, a password reset email has been sent."

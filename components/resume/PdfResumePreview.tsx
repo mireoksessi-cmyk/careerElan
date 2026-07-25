@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 /*
   resume.preview_mode is either:
@@ -25,15 +25,51 @@ type PdfPage = {
   blocks: PdfBlock[];
 };
 
-export default function PdfResumePreview({ resume }: { resume: any }) {
+export default function PdfResumePreview({
+  resume,
+  onOriginalUnavailable,
+}: {
+  resume: any;
+  /*
+    Called only when the signed-URL request for the original file itself
+    genuinely fails (deleted from Storage, network error) - the one case
+    where falling back to this resume's own extracted text is correct.
+    Optional so existing callers (e.g. a row already known to be
+    conversion_status="succeeded") keep their current plain error message
+    if they don't pass it.
+  */
+  onOriginalUnavailable?: () => ReactNode;
+}) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [showOriginal, setShowOriginal] = useState(
-    resume?.preview_mode === "pdf_original"
-  );
+  /*
+    Always defaults to the true original PDF, regardless of preview_mode -
+    the reconstructed layout (naive x/y-positioned text spans from
+    pdfjs-dist) is a best-effort auxiliary view, not a substitute for the
+    real file, and can look visibly broken for complex real-world resumes.
+    Previously this defaulted to `preview_mode === "pdf_original"`, which
+    meant any resume whose reconstruction had succeeded
+    (preview_mode "pdf_reconstructed") silently showed the shaky
+    reconstructed layout first instead of the actual PDF - the opposite of
+    the intended "original always wins unless the user opts into the
+    reconstruction" behavior. The toggle button still lets the user switch
+    to the reconstructed view manually.
+  */
+  const [showOriginal, setShowOriginal] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+
+    /*
+      Reset every piece of per-resume state up front, before the new
+      fetch resolves - without this, switching from resume A to resume B
+      briefly (or, if B's fetch fails, permanently) kept showing A's
+      signedUrl/iframe, and showOriginal stayed stuck at whatever A's
+      preview_mode had set it to instead of reflecting B's.
+    */
+    setSignedUrl(null);
+    setError("");
+    setShowOriginal(true);
 
     async function load() {
       try {
@@ -62,9 +98,13 @@ export default function PdfResumePreview({ resume }: { resume: any }) {
     return () => {
       cancelled = true;
     };
-  }, [resume?.id]);
+  }, [resume?.id, resume?.preview_mode]);
 
   if (error) {
+    if (onOriginalUnavailable) {
+      return <>{onOriginalUnavailable()}</>;
+    }
+
     return (
       <div className="mx-auto max-w-[800px] bg-white p-8 text-sm text-slate-500">
         {error}

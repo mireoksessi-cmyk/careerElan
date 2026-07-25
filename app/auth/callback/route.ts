@@ -7,6 +7,18 @@ export async function GET(request: Request) {
   const code = requestUrl.searchParams.get("code");
 
   /*
+    Only ever a same-origin relative path (e.g. "/?resetPassword=true"
+    from the password-reset flow) - never followed as-is if it looks like
+    it could redirect off-site, since this value comes from a URL query
+    string an attacker could craft.
+  */
+  const nextParam = requestUrl.searchParams.get("next");
+  const next =
+    nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
+      ? nextParam
+      : null;
+
+  /*
     Supabase가 로그인 쿠키를 이 response에 저장해야 하므로
     response를 먼저 만든다.
 
@@ -91,6 +103,22 @@ export async function GET(request: Request) {
   }
 
   const user = sessionData.user;
+
+  /*
+    Password-recovery flow: the session is now established (cookies are
+    set on `response` above via exchangeCodeForSession()), but this is a
+    recovery session, not a normal login - skip the OAuth-only
+    profile/career_memory upsert and dashboard routing below, and let the
+    caller's own page handle showing the "new password" form.
+  */
+  if (next) {
+    response.headers.set(
+      "Location",
+      new URL(next, request.url).toString()
+    );
+
+    return response;
+  }
 
   /*
     Google, LinkedIn, Facebook 최초 로그인 사용자는

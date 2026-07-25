@@ -62,7 +62,7 @@ export default function Sidebar({
   active,
 }: SidebarProps) {
   return (
-    <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+    <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
 
       <div className="flex items-center justify-between">
 

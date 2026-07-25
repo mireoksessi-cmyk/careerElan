@@ -5,6 +5,7 @@ import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
+import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
 const DRAFT_KEY = "career-memory-draft";
 const steps = [
   {
@@ -140,52 +141,6 @@ const languageLevels = [
   "Native",
 ] as const;
 
-function formatMonth(value?: string) {
-  if (!value) return "";
-
-  const [year, month] = value.split("-");
-
-  if (!year || !month) {
-    return value;
-  }
-
-  return new Date(
-    Number(year),
-    Number(month) - 1,
-    1
-  ).toLocaleDateString("en-CA", {
-    year: "numeric",
-    month: "short",
-  });
-}
-
-function formatExperienceDates(item: {
-  startDate?: string;
-  endDate?: string;
-  isCurrent?: boolean;
-}) {
-  const start = formatMonth(item.startDate);
-
-  const end = item.isCurrent
-    ? "Present"
-    : formatMonth(item.endDate);
-
-  return [start, end]
-    .filter(Boolean)
-    .join(" – ");
-}
-
-function formatEducationDates(item: {
-  startDate?: string;
-  endDate?: string;
-}) {
-  return [
-    formatMonth(item.startDate),
-    formatMonth(item.endDate),
-  ]
-    .filter(Boolean)
-    .join(" – ");
-}
 const emptyWork: WorkItem = {
   company: "",
   jobTitle: "",
@@ -259,6 +214,20 @@ const [isResumeDragging, setIsResumeDragging] = useState(false);
   const [importStage, setImportStage] = useState<ImportStage>("idle");
   const [uploadedResumeUrl, setUploadedResumeUrl] = useState("");
   const [uploadedResumeKind, setUploadedResumeKind] = useState<UploadedResumeKind>("none");
+
+  /*
+    Revokes the previous object URL whenever a new file is uploaded (the
+    cleanup below runs before the effect re-fires) and on unmount - object
+    URLs are otherwise never released and leak for the life of the tab.
+  */
+  useEffect(() => {
+    return () => {
+      if (uploadedResumeUrl) {
+        URL.revokeObjectURL(uploadedResumeUrl);
+      }
+    };
+  }, [uploadedResumeUrl]);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const coverLetterInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadedCoverLetterUrl, setUploadedCoverLetterUrl] = useState("");
@@ -269,6 +238,9 @@ const [isResumeDragging, setIsResumeDragging] = useState(false);
   
   
   const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
   const [isUnlocked, setIsUnlocked] = useState(false);
  const [profileStrength, setProfileStrength] = useState(0);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
@@ -973,6 +945,15 @@ function continueUploadedDashboard() {
 }));
   }
 
+  async function computeFileContentHash(file: File): Promise<string> {
+    const buffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   async function processResumeFile(file: File) {
   setResumeUploadError("");
 
@@ -994,6 +975,11 @@ function continueUploadedDashboard() {
   }
 
   function resetResumeImport() {
+    if (uploadProgressTimerRef.current) {
+      clearInterval(uploadProgressTimerRef.current);
+      uploadProgressTimerRef.current = null;
+    }
+
     setImportStage("idle");
     setImportMessage("");
     setUploadProgress(0);
@@ -1014,15 +1000,34 @@ if (!user) {
 
   try {
     /*
-      1. 업로드 이력서 개수 확인
+      1. 파일 확인
     */
-    const { count, error: countError } =
+    setImportStage("parsing");
+    setImportMessage("Checking your file");
+    setUploadProgress(5);
+
+    const contentHash = await computeFileContentHash(file);
+
+    /*
+      2. 중복 및 3개 제한 확인
+
+      Duplicate detection is a client-side pre-check for fast, specific
+      feedback ("you've already uploaded this") - the actual guarantee
+      against a race (two uploads of the same file, or a 4th resume,
+      submitted at nearly the same time) is the DB-level unique index on
+      (user_id, content_hash) and the upload-limit trigger, both added in
+      supabase/migrations/20260724125129_resumes_content_hash_and_limits.sql.
+      The saveError handling below after the insert is what actually
+      enforces this under a race; this pre-check only avoids the wasted
+      storage upload in the common, non-racing case.
+    */
+    setImportMessage("Checking your resume limit");
+    setUploadProgress(15);
+
+    const { data: existingResumes, error: countError } =
       await supabase
         .from("resumes")
-        .select("*", {
-          count: "exact",
-          head: true,
-        })
+        .select("id, content_hash")
         .eq("user_id", user.id)
         .eq("source_type", "uploaded");
 
@@ -1039,7 +1044,24 @@ setResumeUploadError(
 return;
     }
 
-    if ((count ?? 0) >= 3) {
+    const duplicateResume = (existingResumes || []).find(
+      (resume: any) =>
+        resume.content_hash && resume.content_hash === contentHash
+    );
+
+    if (duplicateResume) {
+      resetResumeImport();
+
+      setResumeUploadError(
+        "You've already uploaded this resume. Delete it first if you want to re-upload it."
+      );
+
+      return;
+    }
+
+    const uploadedCount = (existingResumes || []).length;
+
+    if (uploadedCount >= 3) {
       resetResumeImport();
 
       setResumeUploadError(
@@ -1050,13 +1072,10 @@ return;
     }
 
     /*
-      2. 분석 화면 시작
+      3. Supabase Storage 업로드
     */
-    setImportStage("parsing");
-    setImportMessage(
-      "Career Élan is analyzing your resume"
-    );
-    setUploadProgress(12);
+    setImportMessage("Uploading to secure storage");
+    setUploadProgress(30);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -1064,9 +1083,6 @@ return;
     storagePath =
       `${user.id}/${Date.now()}-${file.name}`;
 
-    /*
-      3. Supabase Storage 업로드
-    */
     const { error: uploadError } =
       await supabase.storage
         .from("resumes")
@@ -1085,15 +1101,25 @@ return;
       return;
     }
 
-    await new Promise((resolve) =>
-      setTimeout(resolve, 250)
-    );
-
-    setUploadProgress(28);
-
     /*
-      4. AI 분석 API 호출
+      4-5. 텍스트 추출 + AI 분석 (analyze-resume 하나의 요청 안에서 순차 처리됨)
+
+      A single request handles both - there is no intermediate signal from
+      the server to split this into two independently-observable phases.
+      Leaving the bar frozen for however long the AI call takes was the
+      "stuck at 28%" symptom; instead, a bounded interval ticks it slowly
+      upward within this phase only (never past 65%, well short of the
+      next real checkpoint), and is always cleared the moment the request
+      actually resolves. The phase label, not the number, is the real
+      signal here.
     */
+    setImportMessage("Extracting text and analyzing with AI");
+    setUploadProgress(40);
+
+    uploadProgressTimerRef.current = setInterval(() => {
+      setUploadProgress((prev) => (prev < 65 ? prev + 2 : prev));
+    }, 1200);
+
     const response = await fetch(
       "/api/analyze-resume",
       {
@@ -1112,6 +1138,11 @@ return;
         jsonError
       );
 
+      if (uploadProgressTimerRef.current) {
+        clearInterval(uploadProgressTimerRef.current);
+        uploadProgressTimerRef.current = null;
+      }
+
       await supabase.storage
         .from("resumes")
         .remove([storagePath]);
@@ -1125,25 +1156,13 @@ return;
       return;
     }
 
-    console.log("RESULT =", result);
-    console.log(
-      "ORIGINAL =",
-      result.data?.originalText
-    );
-    console.log(
-      "TYPE =",
-      typeof result.data?.originalText
-    );
-
-    setUploadProgress(47);
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, 250)
-    );
+    if (uploadProgressTimerRef.current) {
+      clearInterval(uploadProgressTimerRef.current);
+      uploadProgressTimerRef.current = null;
+    }
 
     /*
-      5. 분석 실패 처리
-      여기서 회전 화면이 사라짐
+      분석 실패 처리
     */
     if (!response.ok || !result.success) {
       console.error(
@@ -1189,13 +1208,10 @@ return;
     }
 
     /*
-      6. 분석 성공 데이터 화면에 반영
+      데이터 구조화 및 화면 반영
     */
-    setUploadProgress(72);
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, 250)
-    );
+    setImportMessage("Structuring your data");
+    setUploadProgress(75);
 
     setMemoryData((prev) => ({
   ...prev,
@@ -1207,8 +1223,21 @@ return;
 }));
 
     /*
-      7. resumes 테이블에 새 이력서 추가
+      "Review your resume before saving" 원본 preview에 필요한
+      kind/URL 배선. 이전에는 uploadedResumeKind가 선언만 되고 어디서도
+      set되지 않아 renderUploadedOriginalPreview()가 항상 "Preview not
+      available" fallback으로 떨어졌다 - Dashboard 선택과는 무관하게, 지금
+      막 업로드한 이 파일 자체를 미리보기 위한 상태다.
     */
+    setUploadedResumeKind(guessFileKind(file));
+    setUploadedResumeUrl(URL.createObjectURL(file));
+
+    /*
+      6. resumes 테이블에 새 이력서 추가
+    */
+    setImportMessage("Saving to your account");
+    setUploadProgress(85);
+
     const {
       data: resumeData,
       error: saveError,
@@ -1222,19 +1251,11 @@ return;
         original_text:
           result.data.originalText || "",
         parsed_data: result.data,
-        is_default: count === 0,
+        content_hash: contentHash,
+        is_default: uploadedCount === 0,
         conversion_status: "pending",
       })
       .select();
-
-    console.log(
-      "RESUME DATA =",
-      resumeData
-    );
-    console.log(
-      "RESUME ERROR =",
-      saveError
-    );
 
     if (saveError) {
       console.error(
@@ -1248,14 +1269,37 @@ return;
 
       resetResumeImport();
 
-      setResumeUploadError(
-  `Your resume was analyzed, but could not be saved: ${saveError.message}`
-);
+      /*
+        RESUME_LIMIT_REACHED comes from the DB trigger
+        (enforce_resume_upload_limit) - the race-safe backstop for the
+        count check above. code 23505 on this table's insert can only be
+        the content_hash unique index (no other unique constraint exists
+        on resumes) - the race-safe backstop for the duplicate check
+        above.
+      */
+      const raceMessage = saveError.message?.includes(
+        "RESUME_LIMIT_REACHED"
+      )
+        ? "You can upload up to 3 resumes. Delete an existing resume before uploading another one."
+        : saveError.code === "23505"
+          ? "You've already uploaded this resume. Delete it first if you want to re-upload it."
+          : `Your resume was analyzed, but could not be saved: ${saveError.message}`;
+
+      setResumeUploadError(raceMessage);
       return;
     }
 
     /*
-      7.5. 원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음)
+      원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음)
+
+      keepalive: true - this fetch is intentionally not awaited (the
+      upload flow doesn't block on it), but without keepalive the browser
+      can cancel it mid-flight the moment this page unmounts (e.g. the
+      user clicks "Continue to Dashboard" right after upload). That left
+      later-uploaded resumes stuck at conversion_status "pending" forever
+      (the exact resume that had time to finish before navigation
+      "worked"; ones cut off by navigation silently didn't) - keepalive
+      lets the request survive the navigation instead of being aborted.
     */
     const newResumeId = resumeData?.[0]?.id;
 
@@ -1264,6 +1308,7 @@ return;
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resumeId: newResumeId }),
+        keepalive: true,
       }).catch((designError) => {
         console.error(
           "PROCESS RESUME DESIGN REQUEST ERROR =",
@@ -1273,14 +1318,8 @@ return;
     }
 
     /*
-      8. 완료 표시
+      7. 완료
     */
-    setUploadProgress(91);
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, 250)
-    );
-
     setUploadProgress(100);
     setImportStage("parsed");
     setImportMessage(
@@ -1291,6 +1330,11 @@ return;
       "RESUME UPLOAD ERROR =",
       error
     );
+
+    if (uploadProgressTimerRef.current) {
+      clearInterval(uploadProgressTimerRef.current);
+      uploadProgressTimerRef.current = null;
+    }
 
     if (storagePath) {
       const { error: cleanupError } =
@@ -1644,29 +1688,6 @@ setCoverLetterImportMessage(
   setImportStage("preview");
 }
 
-  function renderStyleSettings() {
-    return (
-      <div className="mt-8 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
-        <h3 className="text-xl font-extrabold">Document Style</h3>
-        <p className="mt-1 text-sm text-gray-500">Choose the default design for uploaded resumes, new resumes, and cover letters.</p>
-        <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <Select label="Resume Template" value={memoryData.resumeTemplate} onChange={(v) => updateMemory("resumeTemplate", v)} items={resumeTemplates} />
-          
-          <Select label="Theme Color" value={memoryData.themeColor} onChange={(v) => updateMemory("themeColor", v)} items={themeColors} />
-          <Select label="Font" value={memoryData.font} onChange={(v) => updateMemory("font", v)} items={fonts} />
-          <Select
-  label="Text Size"
-  value={memoryData.textSize}
-  onChange={(v) => updateMemory("textSize", v)}
-  items={textSizes}
-/>
-         
-        </div>
-        
-      </div>
-    );
-  }
-
   function renderResumePreview() {
     return (
       <div
@@ -1742,953 +1763,8 @@ setCoverLetterImportMessage(
 }
 
   function renderBuiltResumePreview() {
-  const template = memoryData.resumeTemplate;
-const accent =
-  memoryData.themeColor === "Blue"
-    ? "#2563eb"
-    : memoryData.themeColor === "Green"
-    ? "#16a34a"
-    : memoryData.themeColor === "Black"
-    ? "#111827"
-    : memoryData.themeColor === "Gray"
-    ? "#6b7280"
-    : "#1e3a8a"; // Navy
-const resumeScale =
-  memoryData.textSize === "Small"
-    ? 0.9
-    : memoryData.textSize === "Large"
-    ? 1.1
-    : 1;
-
-  if (template === "Professional") {
-  return (
-  <div
-    className="mx-auto max-w-[820px] bg-white shadow-xl"
-   style={{
-  fontFamily: memoryData.font,
-  zoom: resumeScale,
-}}
-  >
-      <div className="border-b-4 px-10 py-9"
-style={{
-  borderColor: accent,
-}}>
-        <h1 className="break-words text-4xl font-black leading-tight text-slate-950">
-          {memoryData.firstName || "First"}{" "}
-          {memoryData.lastName || "Last"}
-        </h1>
-
-        {memoryData.headline && (
-          <p className="mt-3 break-words text-lg font-semibold text-slate-600">
-            {memoryData.headline}
-          </p>
-        )}
-
-        <div className="mt-5 flex flex-wrap gap-x-3 gap-y-2 text-sm text-slate-500">
-          {memoryData.location && (
-            <span>{memoryData.location}</span>
-          )}
-
-          {memoryData.email && (
-            <>
-              {memoryData.location && <span>•</span>}
-              <span className="break-all">
-                {memoryData.email}
-              </span>
-            </>
-          )}
-
-          {memoryData.phone && (
-            <>
-              {(memoryData.location ||
-                memoryData.email) && <span>•</span>}
-              <span>{memoryData.phone}</span>
-            </>
-          )}
-
-          {memoryData.linkedin && (
-            <>
-              {(memoryData.location ||
-                memoryData.email ||
-                memoryData.phone) && <span>•</span>}
-              <span className="break-all">
-                {memoryData.linkedin}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-10 px-10 py-8">
-        <aside className="min-w-0 border-r pr-8"
-style={{
-  borderColor: accent,
-}}>
-          <ResumeSection title="Skills">
-            <div className="space-y-2">
-              {String(memoryData.skills || "")
-                .split(",")
-                .map((skill) => skill.trim())
-                .filter(Boolean)
-                .map((skill, index) => (
-                  <p
-                    key={index}
-                    className="break-words"
-                  >
-                    • {skill}
-                  </p>
-                ))}
-            </div>
-          </ResumeSection>
-
-          {memoryData.languages.some((item) =>
-            item.language.trim()
-          ) && (
-            <ResumeSection title="Languages">
-              {memoryData.languages
-                .filter((item) => item.language)
-                .map((item, index) => (
-                  <div
-                    key={index}
-                    className="mb-3"
-                  >
-                    <p className="break-words font-medium">
-                      {item.language}
-                    </p>
-
-                    <p className="text-sm text-slate-500">
-                      {item.level}
-                    </p>
-                  </div>
-                ))}
-            </ResumeSection>
-          )}
-
-          {memoryData.certifications.some((item) =>
-            item.name.trim()
-          ) && (
-            <ResumeSection title="Certifications">
-              {memoryData.certifications
-                .filter((item) => item.name)
-                .map((item, index) => (
-                  <div
-                    key={index}
-                    className="mb-4"
-                  >
-                    <h3 className="break-words font-bold">
-                      {item.name}
-                    </h3>
-
-                    {item.date && (
-                      <p className="text-sm text-slate-500">
-                        {item.date}
-                      </p>
-                    )}
-
-                    <p className="break-words text-slate-500">
-                      {item.issuer}
-                    </p>
-
-                    {item.description && (
-                      <p className="mt-2 break-words">
-                        {item.description}
-                      </p>
-                    )}
-                  </div>
-                ))}
-            </ResumeSection>
-          )}
-        </aside>
-
-        <div className="min-w-0">
-          <ResumeSection title="Professional Summary">
-            <p className="break-words">
-              {memoryData.summary}
-            </p>
-          </ResumeSection>
-
-          <ResumeSection title="Experience">
-            {memoryData.workExperience
-              .filter(
-                (item) =>
-                  item.company ||
-                  item.jobTitle
-              )
-              .map((item, index) => (
-                <div
-                  key={index}
-                  className="mb-6"
-                >
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                    <h3 className="break-words font-bold">
-                      {item.jobTitle}
-                    </h3>
-
-                    <span className="shrink-0 text-sm text-slate-500">
-                      {formatExperienceDates(item)}
-                    </span>
-                  </div>
-
-                  <p className="mb-2 break-words text-slate-500">
-                    {item.company}
-                    {item.location
-                      ? ` · ${item.location}`
-                      : ""}
-                  </p>
-
-                  <ul className="list-disc space-y-2 pl-6">
-                    {String(item.description)
-                      .split(/\r?\n|•/)
-                      .filter(Boolean)
-                      .map((line, lineIndex) => (
-                        <li
-                          key={lineIndex}
-                          className="break-words"
-                        >
-                          {line.trim()}
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              ))}
-
-            {memoryData.volunteerExperience.some(
-              (item) =>
-                item.organization ||
-                item.role ||
-                item.description
-            ) && (
-              <div className="mt-7">
-                <h3 className="mb-5 text-sm font-black uppercase tracking-[0.12em] text-slate-950">
-                  Volunteer / Internship
-                </h3>
-
-                {memoryData.volunteerExperience
-                  .filter(
-                    (item) =>
-                      item.organization ||
-                      item.role ||
-                      item.description
-                  )
-                  .map((item, index) => (
-                    <div
-                      key={index}
-                      className="mb-6"
-                    >
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                        <h3 className="break-words font-bold">
-                          {item.role}
-                        </h3>
-
-                        <span className="shrink-0 text-sm text-slate-500">
-                          {formatExperienceDates(item)}
-                        </span>
-                      </div>
-
-                      <p className="mb-2 break-words text-slate-500">
-                        {item.organization}
-                        {item.location
-                          ? ` · ${item.location}`
-                          : ""}
-                      </p>
-
-                      <ul className="list-disc space-y-2 pl-6">
-                        {String(item.description)
-                          .split(/\r?\n|•/)
-                          .filter(Boolean)
-                          .map((line, lineIndex) => (
-                            <li
-                              key={lineIndex}
-                              className="break-words"
-                            >
-                              {line.trim()}
-                            </li>
-                          ))}
-                      </ul>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </ResumeSection>
-
-          {memoryData.projects.some((item) =>
-            item.name.trim()
-          ) && (
-            <ResumeSection title="Projects">
-              {memoryData.projects
-                .filter((item) => item.name)
-                .map((item, index) => (
-                  <div
-                    key={index}
-                    className="mb-5"
-                  >
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                      <h3 className="break-words font-bold">
-                        {item.name}
-                      </h3>
-
-                      <span className="shrink-0 text-sm text-slate-500">
-                        {item.dates}
-                      </span>
-                    </div>
-
-                    <p className="break-words text-slate-500">
-                      {item.role}
-                    </p>
-
-                    <p className="mt-2 break-words">
-                      {item.description}
-                    </p>
-                  </div>
-                ))}
-            </ResumeSection>
-          )}
-
-          {memoryData.education.some(
-            (item) =>
-              item.school ||
-              item.program
-          ) && (
-            <ResumeSection title="Education">
-              {memoryData.education.map(
-                (item, index) => (
-                  <div
-                    key={index}
-                    className="mb-4"
-                  >
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                      <h3 className="break-words font-bold">
-                        {item.program}
-                      </h3>
-
-                      <span className="shrink-0 text-sm text-slate-500">
-                        {formatEducationDates(item)}
-                      </span>
-                    </div>
-
-                    <p className="break-words">
-                      {item.school}
-                    </p>
-
-                    {item.gpa && (
-                      <p className="mt-1 text-sm text-slate-500">
-                        GPA / Honours: {item.gpa}
-                      </p>
-                    )}
-
-                    {item.coursework && (
-                      <p className="mt-2 break-words text-sm">
-                        {item.coursework}
-                      </p>
-                    )}
-                  </div>
-                )
-              )}
-            </ResumeSection>
-          )}
-
-          {(memoryData.targetRoles ||
-            memoryData.targetIndustry ||
-            memoryData.targetLocation ||
-            memoryData.salaryExpectation ||
-            memoryData.careerGoalSummary) && (
-            <ResumeSection title="Career Objective">
-              {memoryData.targetRoles && (
-                <p className="mb-2 break-words">
-                  <strong>Target Role:</strong>{" "}
-                  {memoryData.targetRoles}
-                </p>
-              )}
-
-              {memoryData.targetIndustry && (
-                <p className="mb-2 break-words">
-                  <strong>Industry:</strong>{" "}
-                  {memoryData.targetIndustry}
-                </p>
-              )}
-
-              {memoryData.targetLocation && (
-                <p className="mb-2 break-words">
-                  <strong>Preferred Location:</strong>{" "}
-                  {memoryData.targetLocation}
-                </p>
-              )}
-
-              {memoryData.salaryExpectation && (
-                <p className="mb-2 break-words">
-                  <strong>Salary Expectation:</strong>{" "}
-                  {memoryData.salaryExpectation}
-                </p>
-              )}
-
-              {memoryData.careerGoalSummary && (
-                <p className="mt-3 break-words">
-                  {memoryData.careerGoalSummary}
-                </p>
-              )}
-            </ResumeSection>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-  if (template === "Creative") {
-   return (
-  <div
-    className="mx-auto max-w-[760px] bg-white shadow-xl"
-   style={{
-  fontFamily: memoryData.font,
-  zoom: resumeScale,
-}}
-  >
-        <div className="p-10 text-white"
-style={{
-  backgroundColor: accent,
-}}>
-          <h1 className="text-5xl font-black">
-            {memoryData.firstName}{" "}
-            {memoryData.lastName}
-          </h1>
-
-          <p className="mt-3">
-            {memoryData.location} •{" "}
-            {memoryData.email} •{" "}
-            {memoryData.phone}
-          </p>
-        </div>
-
-        <div className="p-10">
-          <ResumeSection title="Profile">
-            <p>{memoryData.summary}</p>
-          </ResumeSection>
-
-          <ResumeSection title="Skills">
-            <div className="mt-3 flex flex-wrap gap-2">
-              {String(memoryData.skills || "")
-                .split(",")
-                .map((skill) => skill.trim())
-                .filter(Boolean)
-                .map((skill, index) => (
-                  <span
-                    key={index}
-                    className="rounded-full px-3 py-1 text-sm font-medium"
-style={{
-  backgroundColor: `${accent}20`,
-  color: accent,
-}}
-                  >
-                    {skill}
-                  </span>
-                ))}
-            </div>
-          </ResumeSection>
-
-          <ResumeSection title="Experience">
-            {memoryData.workExperience
-              .filter(
-                (item) =>
-                  item.company || item.jobTitle
-              )
-              .map((item, index) => (
-                <div
-                  key={index}
-                  className="mb-8 border-l-4 pl-5"
-style={{
-  borderColor: accent,
-}}
-                >
-                  <div className="flex justify-between">
-                    <h3 className="text-lg font-bold">
-                      {item.jobTitle}
-                    </h3>
-
-                    {formatExperienceDates(item)}
-                  </div>
-
-                  <p className="mb-2 text-slate-500">
-                    {item.company}
-                  </p>
-
-                  <ul className="list-disc space-y-2 pl-6">
-                    {String(item.description)
-                      .split(/\r?\n|•/)
-                      .filter(Boolean)
-                      .map((line, lineIndex) => (
-                        <li key={lineIndex}>
-                          {line.trim()}
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              ))}
-          </ResumeSection>
-
-          {memoryData.projects.some((item) =>
-            item.name.trim()
-          ) && (
-            <ResumeSection title="Projects">
-              {memoryData.projects
-                .filter((item) => item.name)
-                .map((item, index) => (
-                  <div key={index} className="mb-5">
-                    <div className="flex justify-between">
-                      <h3 className="font-bold">
-                        {item.name}
-                      </h3>
-
-                      <span>{item.dates}</span>
-                    </div>
-
-                    <p className="text-slate-500">
-                      {item.role}
-                    </p>
-
-                    <p className="mt-2">
-                      {item.description}
-                    </p>
-                  </div>
-                ))}
-            </ResumeSection>
-          )}
-
-          {memoryData.education.some(
-            (item) => item.school || item.program
-          ) && (
-            <ResumeSection title="Education">
-              {memoryData.education.map(
-                (item, index) => (
-                  <div key={index} className="mb-4">
-                    <h3 className="font-bold">
-                      {item.program}
-                    </h3>
-
-                    <p>{item.school}</p>
-
-                    <p className="text-sm text-slate-500">
-                      {formatEducationDates(item)}
-                    </p>
-
-                    {item.gpa && (
-                      <p className="mt-1 text-sm text-slate-500">
-                        GPA / Honours: {item.gpa}
-                      </p>
-                    )}
-
-                    {item.coursework && (
-                      <p className="mt-2 text-sm">
-                        {item.coursework}
-                      </p>
-                    )}
-                  </div>
-                )
-              )}
-            </ResumeSection>
-          )}
-
-          {memoryData.languages.some((item) =>
-            item.language.trim()
-          ) && (
-            <ResumeSection title="Languages">
-              {memoryData.languages
-                .filter((item) => item.language)
-                .map((item, index) => (
-                  <div
-                    key={index}
-                    className="mb-2 flex justify-between"
-                  >
-                    <span className="font-medium">
-                      {item.language}
-                    </span>
-
-                    <span className="text-slate-500">
-                      {item.level}
-                    </span>
-                  </div>
-                ))}
-            </ResumeSection>
-          )}
-
-          {memoryData.certifications.some((item) =>
-            item.name.trim()
-          ) && (
-            <ResumeSection title="Certifications">
-              {memoryData.certifications
-                .filter((item) => item.name)
-                .map((item, index) => (
-                  <div key={index} className="mb-4">
-                    <div className="flex justify-between">
-                      <h3 className="font-bold">
-                        {item.name}
-                      </h3>
-
-                      <span>{item.date}</span>
-                    </div>
-
-                    <p className="text-slate-500">
-                      {item.issuer}
-                    </p>
-
-                    {item.description && (
-                      <p className="mt-2">
-                        {item.description}
-                      </p>
-                    )}
-                  </div>
-                ))}
-            </ResumeSection>
-          )}
-
-          {(memoryData.targetRoles ||
-            memoryData.targetIndustry ||
-            memoryData.targetLocation ||
-            memoryData.salaryExpectation ||
-            memoryData.careerGoalSummary) && (
-            <ResumeSection title="Career Objective">
-              <p className="mb-2">
-                <strong>Target Role:</strong>{" "}
-                {memoryData.targetRoles}
-              </p>
-
-              <p className="mb-2">
-                <strong>Industry:</strong>{" "}
-                {memoryData.targetIndustry}
-              </p>
-
-              <p className="mb-2">
-                <strong>Preferred Location:</strong>{" "}
-                {memoryData.targetLocation}
-              </p>
-
-              <p className="mb-2">
-                <strong>Salary Expectation:</strong>{" "}
-                {memoryData.salaryExpectation}
-              </p>
-
-              {memoryData.careerGoalSummary && (
-                <p className="mt-3">
-                  {memoryData.careerGoalSummary}
-                </p>
-              )}
-            </ResumeSection>
-          )}
-        </div>
-      </div>
-    );
+    return <CareerMemoryTemplatePreview data={memoryData} />;
   }
-
- return (
-  <div
-    className="mx-auto min-h-[960px] w-full max-w-[760px] bg-white p-8 shadow-xl sm:p-10"
-    style={{
-  fontFamily: memoryData.font,
-  zoom: resumeScale,
-}}
-  >
-      <div className="border-b-4 pb-5"
-style={{
-  borderColor: accent,
-}}>
-        <h1 className="break-words text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
-          {memoryData.firstName || "First"}{" "}
-          {memoryData.lastName || "Last"}
-        </h1>
-
-        <p className="mt-3 break-words text-sm text-slate-500">
-          {memoryData.location || "Location"} ·{" "}
-          {memoryData.email || "email@example.com"} ·{" "}
-          {memoryData.phone || "Phone"} ·{" "}
-          {memoryData.linkedin || "LinkedIn "}
-        </p>
-      </div>
-
-      <ResumeSection title="Professional Summary">
-        <p>
-          {memoryData.summary ||
-            "Your professional summary will appear here."}
-        </p>
-      </ResumeSection>
-
-      <ResumeSection title="Skills">
-        <div className="mt-3 flex flex-wrap gap-2">
-          {(Array.isArray(memoryData.skills)
-            ? memoryData.skills
-            : (memoryData.skills || "").split(",")
-          )
-            .map((skill) => String(skill).trim())
-            .filter(Boolean)
-            .map((skill, index) => (
-              <span
-                key={index}
-                className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium"
-              >
-                {skill}
-              </span>
-            ))}
-        </div>
-      </ResumeSection>
-
-      <ResumeSection title="Experience">
-        {memoryData.workExperience
-          .filter(
-            (item) =>
-              item.company ||
-              item.jobTitle ||
-              item.description
-          )
-          .map((item, index) => (
-            <div
-              key={`work-${index}`}
-              className="mb-5"
-            >
-              <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                <p className="font-black text-slate-950">
-                  {item.jobTitle || "Role Title"}
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {formatExperienceDates(item) ||
-                    "Dates"}
-                </p>
-              </div>
-
-              <p className="font-bold text-slate-700">
-                {item.company || "Company Name"}
-                {item.location
-                  ? ` · ${item.location}`
-                  : ""}
-              </p>
-
-              <ul className="mt-2 list-disc space-y-2 pl-6">
-                {(
-                  item.description ||
-                  "Experience details will appear here."
-                )
-                  .split(/\r?\n|•/)
-                  .filter((line) => line.trim())
-                  .map((line, lineIndex) => (
-                    <li key={lineIndex}>
-                      {line.trim()}
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ))}
-
-        {memoryData.volunteerExperience
-          .filter(
-            (item) =>
-              item.organization ||
-              item.role ||
-              item.description
-          )
-          .map((item, index) => (
-            <div
-              key={`vol-${index}`}
-              className="mb-5"
-            >
-              <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                <p className="font-black text-slate-950">
-                  {item.role ||
-                    "Volunteer / Internship "}
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {formatExperienceDates(item) ||
-                    "Dates"}
-                </p>
-              </div>
-
-              <p className="font-bold text-slate-700">
-                {item.organization ||
-                  "Organization"}
-              </p>
-
-              <ul className="mt-2 list-disc space-y-2 pl-6">
-                {(
-                  item.description ||
-                  "Experience details will appear here."
-                )
-                  .split(/\r?\n|•/)
-                  .filter((line) => line.trim())
-                  .map((line, lineIndex) => (
-                    <li key={lineIndex}>
-                      {line.trim()}
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ))}
-      </ResumeSection>
-
-      {memoryData.projects.some((item) =>
-        item.name.trim()
-      ) && (
-        <ResumeSection title="Projects">
-          {memoryData.projects
-            .filter((item) => item.name)
-            .map((item, index) => (
-              <div key={index} className="mb-5">
-                <div className="flex justify-between">
-                  <h3 className="font-bold">
-                    {item.name}
-                  </h3>
-
-                  <span>{item.dates}</span>
-                </div>
-
-                <p className="text-slate-500">
-                  {item.role}
-                </p>
-
-                <p className="mt-2">
-                  {item.description}
-                </p>
-              </div>
-            ))}
-        </ResumeSection>
-      )}
-
-      {memoryData.education.some(
-        (item) => item.school || item.program
-      ) && (
-        <ResumeSection title="Education">
-          {memoryData.education
-            .filter(
-              (item) =>
-                item.school || item.program
-            )
-            .map((item, index) => (
-              <div key={index} className="mb-3">
-                <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                  <p className="font-black text-slate-950">
-                    {item.program}
-                  </p>
-
-                  <p className="text-sm text-slate-500">
-                    {formatExperienceDates(item) ||
-                      "Dates"}
-                  </p>
-                </div>
-
-                <p className="font-bold text-slate-700">
-                  {item.school}
-                </p>
-
-                {item.gpa && (
-                  <p className="mt-1 text-sm text-slate-600">
-                    GPA / Honours: {item.gpa}
-                  </p>
-                )}
-
-                {item.coursework && (
-                  <p className="mt-1 text-slate-600">
-                    {item.coursework}
-                  </p>
-                )}
-              </div>
-            ))}
-        </ResumeSection>
-      )}
-
-      {memoryData.languages.some((item) =>
-        item.language.trim()
-      ) && (
-        <ResumeSection title="Languages">
-          {memoryData.languages
-            .filter((item) => item.language)
-            .map((item, index) => (
-              <div
-                key={index}
-                className="mb-2 flex justify-between"
-              >
-                <span className="font-medium">
-                  {item.language}
-                </span>
-
-                <span className="text-slate-500">
-                  {item.level}
-                </span>
-              </div>
-            ))}
-        </ResumeSection>
-      )}
-
-      {memoryData.certifications.some((item) =>
-        item.name.trim()
-      ) && (
-        <ResumeSection title="Certifications">
-          {memoryData.certifications
-            .filter((item) => item.name)
-            .map((item, index) => (
-              <div key={index} className="mb-4">
-                <div className="flex justify-between">
-                  <h3 className="font-bold">
-                    {item.name}
-                  </h3>
-
-                  <span>{item.date}</span>
-                </div>
-
-                <p className="text-slate-500">
-                  {item.issuer}
-                </p>
-
-                {item.description && (
-                  <p className="mt-2">
-                    {item.description}
-                  </p>
-                )}
-              </div>
-            ))}
-        </ResumeSection>
-      )}
-
-      {(memoryData.targetRoles ||
-        memoryData.targetIndustry ||
-        memoryData.targetLocation ||
-        memoryData.salaryExpectation ||
-        memoryData.careerGoalSummary) && (
-        <ResumeSection title="Career Objective">
-          {memoryData.targetRoles && (
-            <p className="mb-2">
-              <strong>Target Role:</strong>{" "}
-              {memoryData.targetRoles}
-            </p>
-          )}
-
-          {memoryData.targetIndustry && (
-            <p className="mb-2">
-              <strong>Industry:</strong>{" "}
-              {memoryData.targetIndustry}
-            </p>
-          )}
-
-          {memoryData.targetLocation && (
-            <p className="mb-2">
-              <strong>Preferred Location:</strong>{" "}
-              {memoryData.targetLocation}
-            </p>
-          )}
-
-          {memoryData.salaryExpectation && (
-            <p className="mb-2">
-              <strong>Salary:</strong>{" "}
-              {memoryData.salaryExpectation}
-            </p>
-          )}
-
-          {memoryData.careerGoalSummary && (
-            <p className="mt-3">
-              {memoryData.careerGoalSummary}
-            </p>
-          )}
-        </ResumeSection>
-      )}
-    </div>
-  );
-}
 
   function renderFullResumePreview() {
     const isUploadedResumePreview = memoryData.resumeSource === "uploaded" && (uploadedResumeUrl || memoryData.uploadedResumeText || uploadedResumeKind !== "none");
@@ -2698,19 +1774,32 @@ style={{
           <div><p className="text-sm font-black uppercase tracking-wide text-blue-600">Full Resume Preview</p><h2 className="mt-1 text-3xl font-black text-slate-950">Review your resume before saving</h2></div>
           <div className="flex gap-3"><button onClick={() => (mode === "import" ? setImportStage("parsed") : setCurrentStep(7))} className="rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600">Back</button><button onClick={() => { persistMemory(); continueToDashboard(); }} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Save & Continue</button></div>
         </div>
-        <div className="grid gap-6 2xl:grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-5 2xl:block 2xl:space-y-3">
-            <p className="text-sm font-black text-slate-900 sm:col-span-5 2xl:col-span-1">Template</p>
-            {resumeTemplates.map((template) => (
-              <button key={template} onClick={() => updateMemory("resumeTemplate", template)} className={`w-full rounded-xl px-4 py-3 text-left text-sm font-bold ${memoryData.resumeTemplate === template ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-blue-50"}`}>{template}</button>
-            ))}
-            <div className="pt-3 text-xs font-semibold leading-5 text-slate-500 sm:col-span-5 2xl:col-span-1">Style: {memoryData.themeColor} · {memoryData.font} · {memoryData.textSize}</div>
-            {isUploadedResumePreview && <div className="rounded-xl bg-blue-50 p-3 text-xs font-semibold leading-5 text-blue-700 sm:col-span-5 2xl:col-span-1">Showing your original uploaded resume. Template changes apply after backend parsing/conversion.</div>}
-          </aside>
+        {/*
+          Template/Font/Style selection only applies to a resume built from
+          Career Memory fields (renderBuiltResumePreview) - it has no effect
+          on an uploaded resume's own preview (renderUploadedOriginalPreview
+          always shows the original file/text as-is), so showing those
+          controls next to an uploaded-resume review was misleading. The
+          sidebar itself is skipped for that case rather than left empty.
+        */}
+        {isUploadedResumePreview ? (
           <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
-            {isUploadedResumePreview ? renderUploadedOriginalPreview() : renderBuiltResumePreview()}
+            {renderUploadedOriginalPreview()}
           </div>
-        </div>
+        ) : (
+          <div className="grid gap-6 2xl:grid-cols-[220px_minmax(0,1fr)]">
+            <aside className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-5 2xl:block 2xl:space-y-3">
+              <p className="text-sm font-black text-slate-900 sm:col-span-5 2xl:col-span-1">Template</p>
+              {resumeTemplates.map((template) => (
+                <button key={template} onClick={() => updateMemory("resumeTemplate", template)} className={`w-full rounded-xl px-4 py-3 text-left text-sm font-bold ${memoryData.resumeTemplate === template ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-blue-50"}`}>{template}</button>
+              ))}
+              <div className="pt-3 text-xs font-semibold leading-5 text-slate-500 sm:col-span-5 2xl:col-span-1">Style: {memoryData.themeColor} · {memoryData.font} · {memoryData.textSize}</div>
+            </aside>
+            <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
+              {renderBuiltResumePreview()}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -3248,7 +2337,7 @@ style={{
     if (currentStep === 6) return <ArraySection title="Certification" items={memoryData.certifications} section="certifications" emptyItem={emptyCertification} addLabel="+ Add Certification" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Certification / Award Name" value={item.name} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "name", v)} /><Input placeholder="Issuer / Organization" value={item.issuer} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "issuer", v)} /><Input placeholder="Date" value={item.date} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "date", v)} className="md:col-span-2" /><Textarea rows={4} placeholder="Description or details..." value={item.description} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "description", v)} className="md:col-span-2" /></div>} />;
     if (currentStep === 3) return <ArraySection title="Project" items={memoryData.projects} section="projects" emptyItem={emptyProject} addLabel="+ Add Project" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Project Name" value={item.name} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "name", v)} /><Input placeholder="Role / Your Contribution" value={item.role} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "role", v)} /><Input placeholder="Dates" value={item.dates} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "dates", v)} className="md:col-span-2" /><Textarea rows={5} placeholder="Describe the project, tools used, result, and impact..." value={item.description} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "description", v)} className="md:col-span-2" /></div>} />;
     if (currentStep === 7) return <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="Target Roles" value={memoryData.targetRoles} onChange={(v) => updateMemory("targetRoles", v)} /><Input placeholder="Target Industry" value={memoryData.targetIndustry} onChange={(v) => updateMemory("targetIndustry", v)} /><Input placeholder="Preferred Location" value={memoryData.targetLocation} onChange={(v) => updateMemory("targetLocation", v)} /><Input placeholder="Salary Expectation" value={memoryData.salaryExpectation} onChange={(v) => updateMemory("salaryExpectation", v)} /><Textarea rows={6} placeholder="Describe your short-term and long-term career goals..." value={memoryData.careerGoalSummary} onChange={(v) => updateMemory("careerGoalSummary", v)} className="md:col-span-2" /></div>;
-    return <div><div className="mt-6 rounded-2xl bg-blue-50 p-5"><h3 className="font-extrabold">Career Memory Review</h3><p className="mt-2 text-sm text-gray-600">Source: {memoryData.resumeSource === "uploaded" ? "Uploaded Resume" : "Built From Scratch"}</p>{memoryData.uploadedResumeName && <p className="mt-1 text-sm font-bold text-blue-700">Uploaded: {memoryData.uploadedResumeName}</p>}<p className="mt-3 text-sm font-semibold text-slate-600">Required sections: {requiredCount}/3 · Overall strength: {memoryStrength()}%</p></div>{renderStyleSettings()}{renderFullResumePreview()}</div>;
+    return <div><div className="mt-6 rounded-2xl bg-blue-50 p-5"><h3 className="font-extrabold">Career Memory Review</h3><p className="mt-2 text-sm text-gray-600">Source: {memoryData.resumeSource === "uploaded" ? "Uploaded Resume" : "Built From Scratch"}</p>{memoryData.uploadedResumeName && <p className="mt-1 text-sm font-bold text-blue-700">Uploaded: {memoryData.uploadedResumeName}</p>}<p className="mt-3 text-sm font-semibold text-slate-600">Required sections: {requiredCount}/3 · Overall strength: {memoryStrength()}%</p></div>{renderFullResumePreview()}</div>;
   }
 
   return (
@@ -3271,8 +2360,8 @@ style={{
 
   </div>
 )}
-      <div className="flex min-h-screen">
-  <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+      <div className="flex min-h-screen flex-col md:flex-row">
+  <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
   <div className="flex items-center justify-between">
     <a href="/dashboard">
       <Image
@@ -3339,7 +2428,7 @@ style={{
     </nav>
   </aside>
 
-        <section className="flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1 px-8 py-6">
           {mode === "start" ? (
             <StartScreen
   strength={profileStrength}
@@ -3493,8 +2582,6 @@ style={{
     </button>
   </div>
 )}
-
-        {renderStyleSettings()}
 
         <div className="mt-8 flex justify-end gap-3">
           <button
@@ -4071,7 +3158,6 @@ function ParsingStatus({
     </div>
   );
 }
-function ResumeSection({ title, children }: { title: string; children: ReactNode }) { return <section className="mt-7 text-sm leading-6 text-slate-700"><h2 className="mb-3 border-b border-slate-200 pb-2 text-sm font-black uppercase tracking-[0.16em] text-slate-950">{title}</h2>{children}</section>; }
 function RequiredStatus({ done, title }: { done: boolean; title: string }) { return <div className={`rounded-xl border px-4 py-3 text-sm font-bold ${done ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>{done ? "✓" : "○"} {title}</div>; }
 function RequiredLine({ done, text }: { done: boolean; text: string }) { return <p className={done ? "text-green-700" : "text-slate-500"}>{done ? "✓" : "○"} {text}</p>; }
 function FlowStep({ number, icon, title, body }: { number: string; icon: string; title: string; body: string }) { return <div className="relative rounded-2xl bg-white p-4"><div className="absolute -top-3 left-0 flex h-7 w-7 items-center justify-center rounded-full bg-green-600 text-xs font-black text-white">{number}</div><div className="flex gap-4"><div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-white text-3xl text-blue-600">{icon}</div><div><p className="font-black text-slate-950">{title}</p><p className="mt-2 text-xs leading-5 text-slate-500">{body}</p></div></div></div>; }

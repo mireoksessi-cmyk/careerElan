@@ -8,7 +8,28 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function GET() {
+/*
+  This route is meant to be hit by an external scheduler, not a logged-in
+  user - there's no Supabase session to check here. CRON_SECRET is a
+  shared secret only the scheduler knows, so this stays an auth gate, not
+  a new sending provider or cron job. No scheduler currently calls this
+  route with the header set (nothing in this repo invokes it on any
+  schedule - see the note in the docstring below), so until one is wired
+  up and configured with the same secret, this route will 401 for every
+  caller. That's intentional: it should not be reachable by anyone who
+  doesn't already know the secret.
+*/
+export async function GET(request: Request) {
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = request.headers.get("authorization");
+
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return Response.json(
+      { success: false, error: "Unauthorized." },
+      { status: 401 }
+    );
+  }
+
   try {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -37,6 +58,20 @@ export async function GET() {
       );
 
       if (!user?.email) continue;
+
+      /*
+        Respect the user's own Settings > Email Notifications toggle -
+        this route previously ignored it and sent regardless. Column
+        defaults to true, so only an explicit false (opted out) skips
+        sending; a missing profiles row is treated as not opted out.
+      */
+      const { data: recipientProfile } = await supabase
+        .from("profiles")
+        .select("email_notifications")
+        .eq("id", application.user_id)
+        .maybeSingle();
+
+      if (recipientProfile?.email_notifications === false) continue;
 
       // 하루에 한 번만 발송
       const today = new Date().toISOString().slice(0, 10);

@@ -84,14 +84,15 @@ const [filterStatus, setFilterStatus] =
   setLoading(false);
 }
  async function saveNotes() {
-  if (!selectedApplication) return;
+  if (!selectedApplication || !user) return;
 
   const { error } = await supabase
     .from("applications")
     .update({
       notes,
     })
-    .eq("id", selectedApplication.id);
+    .eq("id", selectedApplication.id)
+    .eq("user_id", user.id);
 
   if (error) {
     alert("Failed to save.");
@@ -199,14 +200,15 @@ async function saveInterviewDate() {
 }
 
 async function clearNotes() {
-  if (!selectedApplication) return;
+  if (!selectedApplication || !user) return;
 
   const { error } = await supabase
     .from("applications")
     .update({
       notes: "",
     })
-    .eq("id", selectedApplication.id);
+    .eq("id", selectedApplication.id)
+    .eq("user_id", user.id);
 
   if (error) {
     alert(error.message);
@@ -226,7 +228,7 @@ async function clearNotes() {
 }
 
 async function deleteApplication() {
-  if (!selectedApplication) return;
+  if (!selectedApplication || !user) return;
 
   if (
     !confirm(
@@ -238,7 +240,8 @@ async function deleteApplication() {
   const { error } = await supabase
     .from("applications")
     .delete()
-    .eq("id", selectedApplication.id);
+    .eq("id", selectedApplication.id)
+    .eq("user_id", user.id);
 
   if (error) {
     alert(error.message);
@@ -308,11 +311,11 @@ async function downloadPackage(type: "docx" | "pdf") {
 return (
   <main className="min-h-screen bg-[#f6fbff]">
 
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen flex-col md:flex-row">
 
       <Sidebar active="Job Tracker" />
 
-      <section className="flex-1 p-8">
+      <section className="min-w-0 flex-1 p-8">
 
     <Header
   title="Job Tracker"
@@ -339,9 +342,9 @@ return (
 
     ) : (
 
-      <div className="mt-6 grid grid-cols-12 gap-8">
+      <div className="mt-6 grid grid-cols-1 gap-8 xl:grid-cols-12">
 
-       <div className="col-span-4">
+       <div className="min-w-0 xl:col-span-4">
 
 <JobList
   applications={applications}
@@ -355,7 +358,7 @@ return (
 
 </div>
 
-        <div className="col-span-5">
+        <div className="min-w-0 xl:col-span-5">
 
 <JobDetail
   selectedApplication={selectedApplication}
@@ -382,7 +385,7 @@ return (
 />
 
 </div>
-<div className="col-span-3">
+<div className="min-w-0 xl:col-span-3">
  <CareerInsights
     application={selectedApplication}
   />
