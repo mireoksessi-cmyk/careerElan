@@ -334,6 +334,27 @@ export async function POST(req: Request) {
         });
       }
 
+      if (claim?.status === "storage_failed") {
+        /*
+          OpenAI already succeeded once for this exact resume content,
+          but the result could not be confirmed saved anywhere durable -
+          locked to prevent a duplicate paid call. Never auto-reclaimed;
+          only an operator running recover_storage_failed_recommended_
+          job_cache can release it. No internal details (hash, row id)
+          exposed to the client.
+        */
+        return NextResponse.json(
+          {
+            jobs: [],
+            error:
+              "Recommendations are temporarily unavailable while a previous result is being recovered.",
+          },
+          {
+            status: 503,
+          }
+        );
+      }
+
       return NextResponse.json(
         {
           jobs: [],
@@ -682,43 +703,96 @@ ${JSON.stringify(careerMemory)}
     }
 
     if (saveError) {
-      /*
-        Fail closed: the generation succeeded, but the result could not
-        be durably saved anywhere even after retrying - never report
-        success while that is unconfirmed. Mark the row explicitly
-        'failed' (best-effort) so a retry with the same key reclaims
-        cleanly instead of sitting as an unrecoverable 'generating' row
-        forever (this migration no longer auto-reclaims 'generating' by
-        elapsed time).
-      */
       console.error(
         "Recommended jobs result save error:",
         saveError
       );
 
+      /*
+        The write may have actually committed and only the response back
+        to this process was lost (network blip, timeout) - re-check
+        current state before assuming nothing was saved. If it truly did
+        land, serve it now: no re-generation, and this key is never
+        locked for a result that is actually fine.
+      */
+      const { data: recheck } = await supabaseAdmin
+        .from("recommended_job_cache")
+        .select("status, result")
+        .eq("user_id", user.id)
+        .eq("resume_id", resumeId)
+        .eq("resume_source", resumeSource)
+        .eq("resume_content_hash", resumeContentHash)
+        .maybeSingle();
+
+      if (
+        recheck?.status === "completed" ||
+        recheck?.status === "recovery_pending"
+      ) {
+        if (recheck.status === "recovery_pending") {
+          // Best-effort only - claim_recommended_job_cache() self-heals
+          // this on the next request either way.
+          await supabaseAdmin
+            .rpc("finalize_recommended_job_cache", {
+              p_user_id: user.id,
+              p_resume_id: resumeId,
+              p_resume_source: resumeSource,
+              p_resume_content_hash: resumeContentHash,
+            })
+            .then(
+              () => {},
+              () => {}
+            );
+        }
+
+        const recoveredResult = recheck.result as
+          | { jobs?: unknown }
+          | null;
+
+        return NextResponse.json({
+          jobs: Array.isArray(recoveredResult?.jobs)
+            ? recoveredResult.jobs
+            : jobs,
+          selectedResumeSource,
+          selectedResumeId,
+          cached: true,
+        });
+      }
+
+      /*
+        Anything else (still 'generating', unexpectedly 'failed'/
+        'storage_failed', or the row missing entirely) means this
+        successful OpenAI result cannot be confirmed saved anywhere -
+        lock the key down rather than ever leaving it in a state a
+        normal request could reclaim and re-bill. Deliberately does NOT
+        call fail_recommended_job_cache: 'failed' is reclaimable by any
+        normal request, which is exactly the re-billing path this closes.
+      */
       try {
         await supabaseAdmin.rpc(
-          "fail_recommended_job_cache",
+          "mark_recommended_job_cache_storage_failed",
           {
             p_user_id: user.id,
             p_resume_id: resumeId,
             p_resume_source: resumeSource,
             p_resume_content_hash: resumeContentHash,
-            p_error_code: "CACHE_SAVE_FAILED",
+            p_error_code: "CACHE_STORAGE_FAILED",
           }
         );
-      } catch {
-        // best-effort only
+      } catch (markError) {
+        console.error(
+          "Recommended jobs storage-failed mark error:",
+          markError
+        );
       }
 
       return NextResponse.json(
         {
           jobs: [],
           error:
-            "Recommendations were generated, but could not be saved. Please try again.",
+            "Recommendations were generated, but could not be stored. This request has been locked to prevent duplicate AI charges. Please try again later.",
         },
         {
-          status: 500,
+          status: 503,
         }
       );
     }
