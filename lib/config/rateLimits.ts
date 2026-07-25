@@ -11,9 +11,21 @@
   these keys via the Record<> annotation, rather than the other way
   around. Nothing outside this module ever passes an arbitrary string as
   an endpoint value.
+
+  "career-insight" and "search-jobs" reuse the exact analyze-job/
+  analyze-job-url policy (10/30 per RATE_LIMIT_WINDOW_SECONDS) - both are
+  auth-only routes (no guest access), so their guest bucket is never
+  actually reachable, but a value is still required by the Record<> shape
+  above. The user tier mirrors analyze-job's because both are the same
+  cost shape: one OpenAI call (career-insight) or one paid external API
+  call (search-jobs, JSearch/RapidAPI) per invocation.
 */
 
-export type RateLimitedEndpoint = "analyze-job" | "analyze-job-url";
+export type RateLimitedEndpoint =
+  | "analyze-job"
+  | "analyze-job-url"
+  | "career-insight"
+  | "search-jobs";
 
 export const RATE_LIMIT_WINDOW_SECONDS = 600; // 10 minutes
 
@@ -23,4 +35,6 @@ export const RATE_LIMITS: Record<
 > = {
   "analyze-job": { guest: 10, user: 30 },
   "analyze-job-url": { guest: 10, user: 30 },
+  "career-insight": { guest: 10, user: 30 },
+  "search-jobs": { guest: 10, user: 30 },
 };
