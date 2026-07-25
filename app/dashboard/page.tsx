@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { supabase } from "@/lib/supabase";
@@ -1002,6 +1003,9 @@ const [
   const [recommendedJobs, setRecommendedJobs] =
   useState<JobItem[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [recommendedJobsProgress, setRecommendedJobsProgress] = useState(0);
+  const recommendedJobsTimerRef =
+    useRef<ReturnType<typeof setInterval> | null>(null);
  const [insightItems, setInsightItems] = useState<InsightItem[]>([]);
  const selectedResumeLabel =
   selectedResume === "career_memory"
@@ -1405,6 +1409,13 @@ async function resetCareerMemoryResume() {
   }
 }
 
+function getRecommendedJobsPhaseLabel(progress: number) {
+  if (progress >= 90) return "Preparing your recommendations";
+  if (progress >= 50) return "Identifying suitable job roles";
+  if (progress >= 25) return "Reviewing your skills and experience";
+  return "Analyzing your selected resume";
+}
+
 async function loadDashboard() {
 
   
@@ -1466,6 +1477,33 @@ if (!selectedPayload) {
 
   setLoadingJobs(true);
 
+  if (recommendedJobsTimerRef.current) {
+    clearInterval(recommendedJobsTimerRef.current);
+  }
+
+  const jobsFetchStartedAt = Date.now();
+
+  setRecommendedJobsProgress(5);
+
+  /*
+    실제 API의 세부 진행 상황은 전달받을 수 없으므로
+    경과 시간 기준의 예상 진행률만 표시한다.
+    응답이 도착하기 전에는 90%를 넘지 않는다.
+  */
+  recommendedJobsTimerRef.current = setInterval(() => {
+    const elapsed = Date.now() - jobsFetchStartedAt;
+
+    if (elapsed >= 14000) {
+      setRecommendedJobsProgress(90);
+    } else if (elapsed >= 9000) {
+      setRecommendedJobsProgress(75);
+    } else if (elapsed >= 5000) {
+      setRecommendedJobsProgress(50);
+    } else if (elapsed >= 2000) {
+      setRecommendedJobsProgress(25);
+    }
+  }, 1000);
+
   fetch("/api/recommend-jobs", {
   method: "POST",
 
@@ -1490,7 +1528,17 @@ if (!selectedPayload) {
   .then(async (res) => {
     const data = await res.json();
 
-    if (!data.jobs?.length) return;
+    if (!data.jobs?.length) {
+      if (recommendedJobsTimerRef.current) {
+        clearInterval(recommendedJobsTimerRef.current);
+        recommendedJobsTimerRef.current = null;
+      }
+
+      setRecommendedJobsProgress(0);
+      setLoadingJobs(false);
+
+      return;
+    }
 
     const realJobs = (
       await Promise.all(
@@ -1543,7 +1591,18 @@ if (!selectedPayload) {
       )
     ).filter(Boolean);
 
+    if (recommendedJobsTimerRef.current) {
+      clearInterval(recommendedJobsTimerRef.current);
+      recommendedJobsTimerRef.current = null;
+    }
+
+    setRecommendedJobsProgress(100);
     setRecommendedJobs(realJobs);
+
+    /*
+      100%가 잠깐 보이도록 한 뒤 실제 추천 결과를 표시한다.
+    */
+    await new Promise((resolve) => setTimeout(resolve, 400));
 
     setLoadingJobs(false);
 
@@ -1559,11 +1618,27 @@ sessionStorage.setItem(
   })
   .catch((err) => {
   console.error(err);
+
+  if (recommendedJobsTimerRef.current) {
+    clearInterval(recommendedJobsTimerRef.current);
+    recommendedJobsTimerRef.current = null;
+  }
+
   setLoadingJobs(false);
 });
 }
 
-
+/*
+  unmount 시 진행률 타이머 누수 방지
+*/
+useEffect(() => {
+  return () => {
+    if (recommendedJobsTimerRef.current) {
+      clearInterval(recommendedJobsTimerRef.current);
+      recommendedJobsTimerRef.current = null;
+    }
+  };
+}, []);
 
 
 /*
@@ -2888,6 +2963,25 @@ Generate automatically
 
                 <div className="grid gap-5 md:grid-cols-3">
                   {loadingJobs ? (
+                    <>
+                      <div className="col-span-full rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                        <p className="text-sm font-bold text-blue-800">
+                          Finding jobs that fit your resume
+                        </p>
+                        <p className="mt-1 text-xs text-blue-700">
+                          Analyzing {selectedResumeLabel} · {getRecommendedJobsPhaseLabel(recommendedJobsProgress)}
+                        </p>
+                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-blue-100">
+                          <div
+                            className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                            style={{ width: `${recommendedJobsProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-[10px] font-semibold text-blue-400">
+                          Estimated progress · {recommendedJobsProgress}%
+                        </p>
+                      </div>
+                      {
 
 Array.from({ length: 6 }).map((_, index) => (
   // Array.from({ length: 6 }).map((_, index) => (
@@ -2908,8 +3002,8 @@ Array.from({ length: 6 }).map((_, index) => (
     <div className="mt-5 h-10 rounded-xl bg-gray-200"></div>
   </div>
 ))
-
-
+                      }
+                    </>
 ) : (
 
 recommendedJobs.slice(0, visibleJobs).map((job) => (
