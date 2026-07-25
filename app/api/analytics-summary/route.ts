@@ -288,16 +288,20 @@ Instructions
     const summary = response.output_text;
 
     /*
-      A few quick, cheap DB-only retries (no OpenAI cost) before giving
-      up - the same fail-closed pattern used for Generate Package and
-      Recommended Jobs, so a save failure here can never let the same
-      unchanged data be re-billed on every future request.
+      Step 1: durably save the raw result FIRST, before anything else -
+      this is the one write that must not silently fail while still
+      reporting success. A few quick, cheap DB-only retries (no OpenAI
+      cost) before giving up. Once this succeeds, the result can never be
+      lost even if the process crashes immediately afterward - the next
+      claim_analytics_cache() call for this exact hash finds
+      'recovery_pending' and serves this same summary with zero further
+      OpenAI calls (see the durable-recovery migration).
     */
-    let completeError = null;
+    let saveError = null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const { error } = await supabaseAdmin.rpc(
-        "complete_analytics_cache",
+        "save_analytics_result",
         {
           p_user_id: user.id,
           p_input_hash: inputHash,
@@ -305,9 +309,9 @@ Instructions
         }
       );
 
-      completeError = error;
+      saveError = error;
 
-      if (!completeError) {
+      if (!saveError) {
         break;
       }
 
@@ -318,11 +322,27 @@ Instructions
       }
     }
 
-    if (completeError) {
+    if (saveError) {
+      /*
+        Fail closed: mark the row explicitly 'failed' (best-effort) so a
+        retry with the same hash reclaims cleanly instead of sitting as
+        an unrecoverable 'generating' row forever (this migration no
+        longer auto-reclaims 'generating' by elapsed time).
+      */
       console.error(
-        "Analytics cache completion error:",
-        completeError
+        "Analytics result save error:",
+        saveError
       );
+
+      try {
+        await supabaseAdmin.rpc("fail_analytics_cache", {
+          p_user_id: user.id,
+          p_input_hash: inputHash,
+          p_error_code: "CACHE_SAVE_FAILED",
+        });
+      } catch {
+        // best-effort only
+      }
 
       return NextResponse.json(
         {
@@ -330,6 +350,27 @@ Instructions
             "Your analytics summary was generated, but could not be saved. Please try again.",
         },
         { status: 500 }
+      );
+    }
+
+    /*
+      Step 2: best-effort, low-risk status flip - not retried hard, since
+      the result is already durably safe regardless of whether this
+      succeeds. If it never runs, the next claim for this hash finalizes
+      it opportunistically with the identical summary.
+    */
+    const { error: finalizeError } = await supabaseAdmin.rpc(
+      "finalize_analytics_cache",
+      {
+        p_user_id: user.id,
+        p_input_hash: inputHash,
+      }
+    );
+
+    if (finalizeError) {
+      console.error(
+        "Analytics cache finalize error (non-fatal):",
+        finalizeError
       );
     }
 

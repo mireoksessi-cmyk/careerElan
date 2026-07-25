@@ -107,10 +107,19 @@ export async function POST(req: Request) {
         ? body.selectedResumeId.trim()
         : null;
 
-    const selectedKeyword =
-      typeof body.selectedKeyword === "string"
-        ? body.selectedKeyword.trim()
-        : "";
+    /*
+      selectedKeyword is intentionally never read from the request body.
+      Investigation confirmed no caller in this codebase (only
+      app/dashboard/page.tsx calls this route) ever sends this field -
+      it was already always empty in practice. Trusting a client-supplied
+      value here would let a caller bypass the permanent cache entirely
+      by varying it on every request, forcing a fresh (paid) OpenAI call
+      for the same resume every time. The prompt below still references
+      "selected keyword" for structural compatibility, but it is now
+      always the empty/"No keyword selected" case - identical to today's
+      real-world behavior, since no real caller ever populated it.
+    */
+    const selectedKeyword = "";
 
     let careerMemory: Record<
       string,
@@ -174,7 +183,6 @@ export async function POST(req: Request) {
       resumeSource = "career_memory";
       resumeContentHash = hashContent({
         profile: careerMemoryContentFields(data),
-        selectedKeyword,
       });
     }
 
@@ -252,7 +260,6 @@ export async function POST(req: Request) {
         resumeText: normalizeText(
           data.original_text || ""
         ),
-        selectedKeyword,
       });
     }
 
@@ -638,16 +645,20 @@ ${JSON.stringify(careerMemory)}
       }));
 
     /*
-      A few quick, cheap DB-only retries (no OpenAI cost) before giving
-      up - this is the one call that must not silently fail while still
-      reporting success, or the same resume content would be re-billed
-      on every future request.
+      Step 1: durably save the raw result FIRST, before anything else -
+      this is the one write that must not silently fail while still
+      reporting success. A few quick, cheap DB-only retries (no OpenAI
+      cost) before giving up. Once this succeeds, the result can never be
+      lost even if the process crashes immediately afterward - the next
+      claim_recommended_job_cache() call for this exact key finds
+      'recovery_pending' and serves this same result with zero further
+      OpenAI calls (see the durable-recovery migration).
     */
-    let completeError = null;
+    let saveError = null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const { error } = await supabaseAdmin.rpc(
-        "complete_recommended_job_cache",
+        "save_recommended_job_result",
         {
           p_user_id: user.id,
           p_resume_id: resumeId,
@@ -657,9 +668,9 @@ ${JSON.stringify(careerMemory)}
         }
       );
 
-      completeError = error;
+      saveError = error;
 
-      if (!completeError) {
+      if (!saveError) {
         break;
       }
 
@@ -670,20 +681,35 @@ ${JSON.stringify(careerMemory)}
       }
     }
 
-    if (completeError) {
+    if (saveError) {
       /*
-        Fail closed: the generation itself succeeded, but it could not be
-        confirmed as cached even after retrying - never report success
-        while that is unconfirmed, since a later request for the same
-        resume content would otherwise find no completed cache row and
-        pay for another OpenAI call. The client's existing retry (re-open
-        the resume / reload Dashboard) lands on the same cache key and
-        reclaims it normally.
+        Fail closed: the generation succeeded, but the result could not
+        be durably saved anywhere even after retrying - never report
+        success while that is unconfirmed. Mark the row explicitly
+        'failed' (best-effort) so a retry with the same key reclaims
+        cleanly instead of sitting as an unrecoverable 'generating' row
+        forever (this migration no longer auto-reclaims 'generating' by
+        elapsed time).
       */
       console.error(
-        "Recommended jobs cache completion error:",
-        completeError
+        "Recommended jobs result save error:",
+        saveError
       );
+
+      try {
+        await supabaseAdmin.rpc(
+          "fail_recommended_job_cache",
+          {
+            p_user_id: user.id,
+            p_resume_id: resumeId,
+            p_resume_source: resumeSource,
+            p_resume_content_hash: resumeContentHash,
+            p_error_code: "CACHE_SAVE_FAILED",
+          }
+        );
+      } catch {
+        // best-effort only
+      }
 
       return NextResponse.json(
         {
@@ -694,6 +720,29 @@ ${JSON.stringify(careerMemory)}
         {
           status: 500,
         }
+      );
+    }
+
+    /*
+      Step 2: best-effort, low-risk status flip - not retried hard, since
+      the result is already durably safe regardless of whether this
+      succeeds. If it never runs, the next claim for this key finalizes
+      it opportunistically with the identical result.
+    */
+    const { error: finalizeError } = await supabaseAdmin.rpc(
+      "finalize_recommended_job_cache",
+      {
+        p_user_id: user.id,
+        p_resume_id: resumeId,
+        p_resume_source: resumeSource,
+        p_resume_content_hash: resumeContentHash,
+      }
+    );
+
+    if (finalizeError) {
+      console.error(
+        "Recommended jobs cache finalize error (non-fatal):",
+        finalizeError
       );
     }
 
