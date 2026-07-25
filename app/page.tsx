@@ -931,7 +931,7 @@ async function handleUpdatePassword() {
           <SmallFeature icon="💡" title="Explain WHY" body="See exactly why AI added or changed each section." />
           <SmallFeature icon="♙" title="AI Recruiter Simulation" body="Get AI feedback like a real recruiter before you apply." />
           <SmallFeature icon="🧠" title="Career Memory" body="AI learns from your applications and improves results." />
-          <SmallFeature icon="🌐" title="Multi-Country Support" body="Tailored formats for Canada, US, UK, Australia & more." />
+          <SmallFeature icon="🌐" title="Built for Canada" body="Tailored for the Canadian job market with ATS-friendly resumes, local formatting, and employer expectations." />
           <SmallFeature icon="🛡️" title="Human Score" body="We ensure your documents sound 100% natural." />
           <SmallFeature icon="🚀" title="Auto Apply (Coming Soon)" body="Apply to jobs automatically with one click." />
         </div>

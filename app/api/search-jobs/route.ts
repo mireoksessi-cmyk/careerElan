@@ -44,7 +44,6 @@ function normalizeJob(job: JSearchJob) {
         : "Not listed",
     source: job.job_publisher || "JSearch",
     logo: job.employer_logo || "",
-    match: Math.floor(Math.random() * 16) + 80,
   };
 }
 

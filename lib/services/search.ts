@@ -11,7 +11,7 @@ export type SearchJob = {
   salary: string;
   source: string;
   logo: string;
-  match: number;
+  match?: number;
 };
 
 export type SearchJobsResponse = {
