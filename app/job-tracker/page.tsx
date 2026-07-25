@@ -64,10 +64,28 @@ const [filterStatus, setFilterStatus] =
     return;
   }
 
+  /*
+    An AI package generation attempt gets its applications row the moment
+    it's claimed (generation_status "pending"), before OpenAI has run -
+    exclude "pending" and "failed" attempts here so an incomplete/failed
+    generation never appears as a tracked application. generation_status
+    is null for both "succeeded" rows (already excluded from this filter
+    by matching neither pending nor failed) and the non-AI "Apply with
+    Saved Resume" path, which never sets generation_status at all.
+  */
   const { data, error } = await supabase
     .from("applications")
     .select("*")
     .eq("user_id", user.id)
+    /*
+      Explicit "is null OR succeeded" rather than a negated .in() -
+      generation_status IS NULL fails a plain `NOT (col IN (...))` under
+      standard SQL three-valued logic, which would have silently hidden
+      every legacy row and every "Apply with Saved Resume" row (neither
+      ever sets generation_status) instead of just excluding
+      pending/failed AI attempts.
+    */
+    .or("generation_status.is.null,generation_status.eq.succeeded")
     .order("created_at", { ascending: false });
 
   console.log("DATA =", data);

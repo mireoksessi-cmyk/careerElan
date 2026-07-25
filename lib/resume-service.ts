@@ -22,10 +22,23 @@ export class ResumeResolutionError extends Error {
     | "EMPTY_GENERATION_TEXT"
     | "FETCH_FAILED";
 
-  constructor(code: ResumeResolutionError["code"], message: string) {
+  /*
+    Only set for EMPTY_GENERATION_TEXT, where the two branches below need
+    different user-facing wording (a PDF-specific hint for "uploaded" vs a
+    Career Memory hint) even though they share one error code - the caller
+    can't otherwise tell which branch threw once caught.
+  */
+  source?: ResumeSource;
+
+  constructor(
+    code: ResumeResolutionError["code"],
+    message: string,
+    source?: ResumeSource
+  ) {
     super(message);
     this.name = "ResumeResolutionError";
     this.code = code;
+    this.source = source;
   }
 }
 
@@ -142,7 +155,8 @@ export async function resolveSelectedResume(
     if (!generationText.trim()) {
       throw new ResumeResolutionError(
         "EMPTY_GENERATION_TEXT",
-        "The selected resume has no usable text."
+        "The selected resume has no usable text.",
+        "uploaded"
       );
     }
 
@@ -163,7 +177,8 @@ export async function resolveSelectedResume(
   if (includeGenerationText && !generationText.trim()) {
     throw new ResumeResolutionError(
       "EMPTY_GENERATION_TEXT",
-      "Career Memory did not produce usable resume text."
+      "Career Memory did not produce usable resume text.",
+      "career_memory"
     );
   }
 

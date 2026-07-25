@@ -4,6 +4,7 @@ import { toSafeResponse } from "@/lib/errors/publicError";
 import { JOB_ANALYSIS_MODEL } from "@/lib/config/aiModels";
 import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimiter";
+import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -301,7 +302,25 @@ json.keywords =
 json.keywordCount =
   json.keywords.length;
 
-return NextResponse.json(json);
+const postingValidation = validateSpecificJobPosting({
+  title: json.title,
+  company: json.company,
+  requirements: json.requirements,
+});
+
+if (!postingValidation.valid) {
+  return NextResponse.json(
+    {
+      success: false,
+      supported: false,
+      code: postingValidation.code,
+      error: postingValidation.error,
+    },
+    { status: 422 }
+  );
+}
+
+return NextResponse.json({ ...json, success: true });
   } catch (error) {
     return toSafeResponse(error, {
       requestId,

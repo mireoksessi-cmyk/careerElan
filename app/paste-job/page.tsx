@@ -1297,15 +1297,25 @@ packageAnalysis: null,
     } catch (error: any) {
       console.error(error);
 
-      alert(
+      const failureMessage =
         error?.message ||
-          "This website couldn't be analyzed automatically. Please paste the job description or upload a PDF, DOCX, or screenshot."
-      );
+        "This website couldn't be analyzed automatically. Please paste the job description or upload a PDF, DOCX, or screenshot.";
 
-      setMessage(
-        error?.message ||
-          "This website couldn't be analyzed automatically. Please paste the job description or upload a PDF, DOCX, or screenshot."
-      );
+      alert(failureMessage);
+
+      /*
+        A failed/invalid analysis (e.g. NOT_A_SPECIFIC_JOB_POSTING) must
+        never leave a prior successful analysis's title/company/metrics on
+        screen next to this new failure message - clear the whole
+        "currently analyzed job" identity, matching the reset already done
+        at the start of a fresh, successful analyzeJob() call above.
+      */
+      setAnalysis(emptyAnalysis);
+      setAnalyzed(false);
+      setGenerated(false);
+      setApplicationId(null);
+      setGenerationRequestId(null);
+      setMessage(failureMessage);
     } finally {
       setIsAnalyzing(false);
     }

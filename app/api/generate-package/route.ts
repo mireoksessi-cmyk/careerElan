@@ -3427,13 +3427,30 @@ export async function POST(
       );
     } catch (error) {
       if (error instanceof ResumeResolutionError) {
+        const isResumeTextUnavailable =
+          error.code === "EMPTY_GENERATION_TEXT";
+
         const status =
           error.code === "NO_CAREER_MEMORY" ||
           error.code === "RESUME_NOT_FOUND"
             ? 404
             : error.code === "FETCH_FAILED"
               ? 500
-              : 400;
+              : isResumeTextUnavailable
+                ? 422
+                : 400;
+
+        /*
+          RESUME_TEXT_UNAVAILABLE covers both an uploaded PDF with no
+          extractable text and Career Memory producing no usable text -
+          same underlying failure category (nothing to generate from), but
+          the uploaded/PDF case gets the more specific, actionable wording
+          the resolver already knows to attach via error.source.
+        */
+        const errorMessage =
+          isResumeTextUnavailable && error.source === "uploaded"
+            ? "We couldn't read text from this PDF. Please upload a text-based PDF or paste your resume into Career Memory."
+            : safeResumeResolutionMessage(error.code);
 
         await releaseQuotaReservation(
           quotaReserved,
@@ -3444,7 +3461,13 @@ export async function POST(
 
         return NextResponse.json(
           {
-            error: safeResumeResolutionMessage(error.code),
+            error: errorMessage,
+
+            ...(isResumeTextUnavailable
+              ? { code: "RESUME_TEXT_UNAVAILABLE" }
+              : error.code === "RESUME_NOT_FOUND"
+                ? { code: "RESUME_NOT_FOUND" }
+                : {}),
 
             ...fallbackPackage(
               title,
@@ -3537,7 +3560,14 @@ export async function POST(
               ? resolvedResume.resumeId
               : null,
           applied_date: appliedDate,
-          status: "package_generated",
+          /*
+            status intentionally left unset (null) here - it is the
+            user-facing Job Tracker lifecycle field, and must only become
+            "package_generated" once generation actually succeeds (see the
+            success update below). Setting it here, before OpenAI has even
+            run, is what previously let a failed/still-pending attempt show
+            up in Job Tracker as a completed package.
+          */
         })
         .select("id")
         .single();
@@ -4377,6 +4407,7 @@ ${jobText}
       .from("applications")
       .update({
         generation_status: "succeeded",
+        status: "package_generated",
         resume_text: resume,
         cover_letter_text: coverLetter,
         email_draft: emailDraft,
