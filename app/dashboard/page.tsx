@@ -4,13 +4,15 @@ import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
-  ReactNode,
   useEffect,
   useState,
 } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
+import CareerMemoryTemplatePreview, {
+  mapCareerMemoryRowToPreviewData,
+} from "@/components/resume/CareerMemoryTemplatePreview";
 
 const FREE_PACKAGE_LIMIT = 5;
 const menuItems = [
@@ -2043,452 +2045,13 @@ if (nextInterview) {
 function renderPreviewContent() {
   if (!previewAsset) return null;
 
-  function formatMonth(value?: string) {
-  if (!value) return "";
-
-  const [year, month] = value.split("-");
-
-  if (!year || !month) {
-    return value;
+  if (previewAsset.type === "career-memory-resume") {
+    return (
+      <CareerMemoryTemplatePreview
+        data={mapCareerMemoryRowToPreviewData(careerMemory)}
+      />
+    );
   }
-
-  return new Date(
-    Number(year),
-    Number(month) - 1,
-    1
-  ).toLocaleDateString("en-CA", {
-    year: "numeric",
-    month: "short",
-  });
-}
-
-function formatExperienceDates(item: {
-  startDate?: string;
-  start_date?: string;
-  endDate?: string;
-  end_date?: string;
-  isCurrent?: boolean;
-  is_current?: boolean;
-}) {
-  const start = formatMonth(
-    item.startDate || item.start_date
-  );
-
-  const isCurrent =
-    item.isCurrent ?? item.is_current ?? false;
-
-  const end = isCurrent
-    ? "Present"
-    : formatMonth(item.endDate || item.end_date);
-
-  return [start, end]
-    .filter(Boolean)
-    .join(" – ");
-}
-
-function formatEducationDates(item: {
-  startDate?: string;
-  start_date?: string;
-  endDate?: string;
-  end_date?: string;
-}) {
-  return [
-    formatMonth(item.startDate || item.start_date),
-    formatMonth(item.endDate || item.end_date),
-  ]
-    .filter(Boolean)
-    .join(" – ");
-}
-
-  /*
-    Career Memory에서 직접 작성한 Resume
-  */
-if (previewAsset.type === "career-memory-resume") {
-  return (
-    <div className="mx-auto max-w-[800px] bg-white p-8 text-slate-800">
-      <div className="border-b border-slate-300 pb-5">
-        <h1 className="text-3xl font-black text-slate-950">
-          {careerMemory?.first_name || ""}{" "}
-          {careerMemory?.last_name || ""}
-        </h1>
-
-        {careerMemory?.headline && (
-          <p className="mt-2 font-bold text-blue-600">
-            {careerMemory.headline}
-          </p>
-        )}
-
-        <p className="mt-3 text-sm text-slate-500">
-          {[
-            careerMemory?.email,
-            careerMemory?.phone,
-            careerMemory?.location,
-            careerMemory?.linkedin,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      </div>
-
-     <PreviewSection title="Professional Summary">
-  {careerMemory?.summary && (
-    <p className="whitespace-pre-wrap">
-      {careerMemory.summary}
-    </p>
-  )}
-</PreviewSection>
-
-<PreviewSection title="Skills">
-  <div className="flex flex-wrap gap-2">
-    {(Array.isArray(careerMemory?.skills)
-      ? careerMemory.skills
-      : String(careerMemory?.skills || "").split(",")
-    )
-      .map((skill: string) => String(skill).trim())
-      .filter(Boolean)
-      .map((skill: string, index: number) => (
-        <span
-          key={`${skill}-${index}`}
-          className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700"
-        >
-          {skill}
-        </span>
-      ))}
-  </div>
-</PreviewSection>
-
-<PreviewSection title="Experience">
-  {Array.isArray(careerMemory?.experience) &&
-    careerMemory.experience
-      .filter(
-        (experience: any) =>
-          experience.company?.trim?.() ||
-          experience.jobTitle?.trim?.() ||
-          experience.job_title?.trim?.() ||
-          experience.description?.trim?.()
-      )
-      .map((experience: any, index: number) => (
-        <div
-          key={`work-${index}`}
-          className="mb-6"
-        >
-          <div className="flex justify-between gap-4">
-            <p className="font-bold text-slate-950">
-              {experience.jobTitle ||
-                experience.job_title ||
-                ""}
-            </p>
-
-            <p className="text-sm text-slate-500">
-              {formatExperienceDates(experience)}
-            </p>
-          </div>
-
-          <p className="font-semibold text-slate-600">
-            {experience.company || ""}
-            {experience.location
-              ? ` · ${experience.location}`
-              : ""}
-          </p>
-
-          {experience.description && (
-            <ul className="mt-2 list-disc space-y-2 pl-6">
-              {String(experience.description)
-                .split(/\r?\n|•/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .map((line, lineIndex) => (
-                  <li key={lineIndex}>
-                    {line}
-                  </li>
-                ))}
-            </ul>
-          )}
-        </div>
-      ))}
-
-  {Array.isArray(careerMemory?.volunteer_experience) &&
-    careerMemory.volunteer_experience.some(
-      (experience: any) =>
-        experience.organization?.trim?.() ||
-        experience.role?.trim?.() ||
-        experience.location?.trim?.() ||
-        experience.startDate ||
-        experience.start_date ||
-        experience.endDate ||
-        experience.end_date ||
-        experience.description?.trim?.()
-    ) && (
-      <div className="mt-7">
-        <h3 className="mb-5 text-sm font-black uppercase tracking-[0.12em] text-slate-950">
-          Volunteer / Internship
-        </h3>
-
-        {careerMemory.volunteer_experience
-          .filter(
-            (experience: any) =>
-              experience.organization?.trim?.() ||
-              experience.role?.trim?.() ||
-              experience.location?.trim?.() ||
-              experience.startDate ||
-              experience.start_date ||
-              experience.endDate ||
-              experience.end_date ||
-              experience.description?.trim?.()
-          )
-          .map((experience: any, index: number) => (
-            <div
-              key={`volunteer-${index}`}
-              className="mb-6"
-            >
-              <div className="flex justify-between gap-4">
-                <p className="font-bold text-slate-950">
-                  {experience.role || ""}
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {formatExperienceDates(experience)}
-                </p>
-              </div>
-
-              <p className="font-semibold text-slate-600">
-                {experience.organization || ""}
-                {experience.location
-                  ? ` · ${experience.location}`
-                  : ""}
-              </p>
-
-              {experience.description && (
-                <ul className="mt-2 list-disc space-y-2 pl-6">
-                  {String(experience.description)
-                    .split(/\r?\n|•/)
-                    .map((line) => line.trim())
-                    .filter(Boolean)
-                    .map((line, lineIndex) => (
-                      <li key={lineIndex}>
-                        {line}
-                      </li>
-                    ))}
-                </ul>
-              )}
-            </div>
-          ))}
-      </div>
-    )}
-</PreviewSection>
-
-{Array.isArray(careerMemory?.projects) &&
-  careerMemory.projects.some(
-    (project: any) => project.name?.trim()
-  ) && (
-    <PreviewSection title="Projects">
-      {careerMemory.projects
-        .filter(
-          (project: any) => project.name?.trim()
-        )
-        .map((project: any, index: number) => (
-          <div
-            key={index}
-            className="mb-5"
-          >
-            <div className="flex justify-between gap-4">
-              <p className="font-bold text-slate-950">
-                {project.name}
-              </p>
-
-              <p className="text-sm text-slate-500">
-                {project.dates}
-              </p>
-            </div>
-
-            {project.role && (
-              <p className="font-semibold text-slate-600">
-                {project.role}
-              </p>
-            )}
-
-            {project.description && (
-              <p className="mt-2 whitespace-pre-wrap">
-                {project.description}
-              </p>
-            )}
-          </div>
-        ))}
-    </PreviewSection>
-)}
-
-{Array.isArray(careerMemory?.education) &&
-  careerMemory.education.some(
-    (education: any) =>
-      education.school?.trim?.() ||
-      education.program?.trim?.() ||
-      education.degree?.trim?.() ||
-      education.startDate ||
-      education.start_date ||
-      education.endDate ||
-      education.end_date ||
-      education.gpa?.trim?.() ||
-      education.coursework?.trim?.()
-  ) && (
-    <PreviewSection title="Education">
-      {careerMemory.education
-        .filter(
-          (education: any) =>
-            education.school?.trim?.() ||
-            education.program?.trim?.() ||
-            education.degree?.trim?.() ||
-            education.startDate ||
-            education.start_date ||
-            education.endDate ||
-            education.end_date ||
-            education.gpa?.trim?.() ||
-            education.coursework?.trim?.()
-        )
-        .map((education: any, index: number) => (
-          <div
-            key={index}
-            className="mb-5"
-          >
-            <div className="flex justify-between gap-4">
-              <p className="font-bold text-slate-950">
-                {education.program ||
-                  education.degree ||
-                  ""}
-              </p>
-
-              <p className="text-sm text-slate-500">
-                {formatEducationDates(education)}
-              </p>
-            </div>
-
-            <p className="font-semibold text-slate-600">
-              {education.school || ""}
-            </p>
-
-            {education.gpa && (
-              <p className="text-sm text-slate-500">
-                GPA: {education.gpa}
-              </p>
-            )}
-
-            {education.coursework && (
-              <p className="mt-2 whitespace-pre-wrap">
-                {education.coursework}
-              </p>
-            )}
-          </div>
-        ))}
-    </PreviewSection>
-)}
-
-{Array.isArray(careerMemory?.languages) &&
-  careerMemory.languages.some(
-    (language: any) => language.language?.trim()
-  ) && (
-    <PreviewSection title="Languages">
-      {careerMemory.languages
-        .filter(
-          (language: any) => language.language?.trim()
-        )
-        .map((language: any, index: number) => (
-          <p key={index}>
-            <span className="font-semibold">
-              {language.language}
-            </span>
-
-            {language.level || language.proficiency
-              ? ` — ${
-                  language.level ||
-                  language.proficiency
-                }`
-              : ""}
-          </p>
-        ))}
-    </PreviewSection>
-)}
-
-{Array.isArray(careerMemory?.certifications) &&
-  careerMemory.certifications.some(
-    (cert: any) => cert.name?.trim()
-  ) && (
-    <PreviewSection title="Certifications">
-      {careerMemory.certifications
-        .filter(
-          (cert: any) => cert.name?.trim()
-        )
-        .map((cert: any, index: number) => (
-          <div
-            key={index}
-            className="mb-5"
-          >
-            <div className="flex justify-between gap-4">
-              <p className="font-bold text-slate-950">
-                {cert.name}
-              </p>
-
-              <p className="text-sm text-slate-500">
-                {cert.date}
-              </p>
-            </div>
-
-            <p className="font-semibold text-slate-600">
-              {cert.issuer}
-            </p>
-
-            {cert.description && (
-              <p className="mt-2 whitespace-pre-wrap">
-                {cert.description}
-              </p>
-            )}
-          </div>
-        ))}
-    </PreviewSection>
-)}
-
-{(careerMemory?.target_roles?.length > 0 ||
-  careerMemory?.target_industry ||
-  careerMemory?.target_location ||
-  careerMemory?.salary_expectation ||
-  careerMemory?.career_goal_summary) && (
-  <PreviewSection title="Career Objective">
-    {careerMemory?.target_roles?.length > 0 && (
-      <p className="mb-2">
-        <strong>Target Role:</strong>{" "}
-        {careerMemory.target_roles.join(", ")}
-      </p>
-    )}
-
-    {careerMemory?.target_industry && (
-      <p className="mb-2">
-        <strong>Industry:</strong>{" "}
-        {careerMemory.target_industry}
-      </p>
-    )}
-
-    {careerMemory?.target_location && (
-      <p className="mb-2">
-        <strong>Preferred Location:</strong>{" "}
-        {careerMemory.target_location}
-      </p>
-    )}
-
-    {careerMemory?.salary_expectation && (
-      <p className="mb-2">
-        <strong>Salary Expectation:</strong>{" "}
-        {careerMemory.salary_expectation}
-      </p>
-    )}
-
-    {careerMemory?.career_goal_summary && (
-      <p className="mt-3 whitespace-pre-wrap">
-        {careerMemory.career_goal_summary}
-      </p>
-    )}
-  </PreviewSection>
-)}
-    </div>
-  );
-}
 
   /*
     업로드한 Resume
@@ -2718,8 +2281,8 @@ if (previewAsset.type === "career-memory-resume") {
         </div>
       )}
 
-      <div className="flex min-h-screen">
-        <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+      <div className="flex min-h-screen flex-col md:flex-row">
+        <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
@@ -2754,8 +2317,8 @@ if (previewAsset.type === "career-memory-resume") {
           </div>
         </aside>
 
-        <section className="flex-1">
-          <header className="flex items-center justify-between px-8 py-6">
+        <section className="min-w-0 flex-1">
+          <header className="flex flex-wrap items-center justify-between gap-4 px-8 py-6">
             <div>
              <h1 className="text-2xl font-extrabold">
   Good morning, {profile?.full_name || "Guest"}! 👋
@@ -2993,7 +2556,7 @@ Choose which resume and cover letter will be used when generating your applicati
 
   {careerMemory && (
     <div
-      className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
+      className={`mb-3 flex flex-wrap items-center gap-3 rounded-xl border p-3 transition ${
         selectedResume === "career_memory"
           ? "border-blue-500 bg-blue-50/40"
           : "border-slate-200 bg-white"
@@ -3067,7 +2630,7 @@ Choose which resume and cover letter will be used when generating your applicati
   {resumes.map((resume: any) => (
     <div
       key={resume.id}
-      className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
+      className={`mb-3 flex flex-wrap items-center gap-3 rounded-xl border p-3 transition ${
         selectedResume === resume.id
           ? "border-blue-500 bg-blue-50/40"
           : "border-slate-200 bg-white"
@@ -3192,7 +2755,7 @@ Generate automatically
 {coverLetters.map((cover: any) => (
   <div
     key={cover.id}
-    className={`mb-3 flex items-center gap-3 rounded-xl border p-3 transition ${
+    className={`mb-3 flex flex-wrap items-center gap-3 rounded-xl border p-3 transition ${
       selectedCoverLetter === cover.id
         ? "border-blue-500 bg-blue-50/40"
         : "border-slate-200 bg-white"
@@ -3512,7 +3075,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       </button>
     </div>
 
-    <div className="mb-6 flex items-center gap-3">
+    <div className="mb-6 flex flex-wrap items-center gap-3">
       <span className="text-xl">📍</span>
 
       <input
@@ -3521,7 +3084,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
         readOnly
         disabled
         placeholder="Toronto, ON"
-        className="w-80 cursor-not-allowed rounded-xl border border-gray-300 bg-slate-50 px-4 py-2 text-slate-400 outline-none"
+        className="min-w-0 flex-1 cursor-not-allowed rounded-xl border border-gray-300 bg-slate-50 px-4 py-2 text-slate-400 outline-none"
       />
 
       <button
@@ -3887,22 +3450,5 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       </div>
     </main>
   
-  );
-}
-function PreviewSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="mt-7 text-sm leading-7 text-slate-700">
-      <h2 className="mb-4 border-b border-slate-200 pb-2 text-sm font-black uppercase tracking-[0.14em] text-slate-950">
-        {title}
-      </h2>
-
-      {children}
-    </section>
   );
 }

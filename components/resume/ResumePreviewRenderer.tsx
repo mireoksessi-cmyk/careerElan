@@ -9,15 +9,39 @@ import PdfResumePreview from "./PdfResumePreview";
 /*
   Single shared entry point for previewing an uploaded resume, used by both
   the Dashboard preview modal and the Paste Job URL "Saved Application
-  Preview". Picks a sub-renderer from the resume row's stored
-  conversion_status/preview_mode - never from the file extension - so a
-  pending/failed/unsupported row (including every pre-existing row, where
-  these columns are simply NULL) falls back to the exact same plain-text/
-  structured template preview the app already rendered before this feature
-  existed.
+  Preview".
+
+  PDF routing is deliberately independent of conversion_status/preview_mode:
+  the raw original file (via a signed Storage URL, see PdfResumePreview) is
+  always displayable the moment a PDF has been uploaded, regardless of
+  whether the separate best-effort layout-reconstruction pipeline
+  (process-resume-design) has run, is still pending, or failed for that
+  row. Gating the original PDF display on conversion_status - as this used
+  to do - meant only whichever PDF happened to already have a *succeeded*
+  reconstruction showed its real file; every other PDF (pending/processing/
+  failed, including simply not-yet-processed rows) silently fell back to
+  the plain-text template, which looked like "only the first uploaded PDF
+  has a preview" whenever reconstruction hadn't caught up for the others.
+  PdfResumePreview itself already degrades gracefully when there's no
+  reconstructed layout (canReconstruct is false) by just always showing the
+  original iframe - it never needed conversion_status to be "succeeded" in
+  the first place.
+
+  DOCX previewing is unaffected: browsers can't render .docx natively the
+  way an <iframe> can render a PDF, so DocxResumePreview genuinely does
+  need the HTML produced by the conversion step and stays gated on
+  conversion_status/preview_mode as before.
 */
 
 const RETRYABLE_STATUSES = ["pending", "failed"];
+
+function isPdfResume(resume: any): boolean {
+  if (!resume) return false;
+  if (resume.original_file_type === "pdf") return true;
+
+  const name = String(resume.file_name || "").toLowerCase();
+  return name.endsWith(".pdf");
+}
 
 function RetryProcessingBanner({ resume }: { resume: any }) {
   const { refresh } = useLogin();
@@ -98,6 +122,30 @@ export default function ResumePreviewRenderer({
   resume?: any;
   fallbackText?: string;
 }) {
+  /*
+    PDF: always try the original file first, independent of
+    conversion_status - see the module doc comment above for why. Only
+    requirement is that a Storage file was actually uploaded for this row;
+    PdfResumePreview itself falls back to the plain-text template (via
+    onOriginalUnavailable) if the signed-URL request genuinely fails.
+  */
+  if (resume && isPdfResume(resume) && resume.storage_path) {
+    return (
+      <>
+        <RetryProcessingBanner resume={resume} />
+        <PdfResumePreview
+          resume={resume}
+          onOriginalUnavailable={() => (
+            <CareerElanTemplatePreview
+              resume={resume}
+              fallbackText={fallbackText}
+            />
+          )}
+        />
+      </>
+    );
+  }
+
   const isUsable =
     resume && resume.conversion_status === "succeeded" && resume.preview_mode;
 
@@ -113,10 +161,6 @@ export default function ResumePreviewRenderer({
   switch (resume.preview_mode) {
     case "docx_html":
       return <DocxResumePreview resume={resume} />;
-
-    case "pdf_original":
-    case "pdf_reconstructed":
-      return <PdfResumePreview resume={resume} />;
 
     default:
       return (

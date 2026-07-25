@@ -195,10 +195,10 @@ export default function AnalyticsPage() {
   return (
    
       <main className="min-h-screen bg-[#f6fbff] text-gray-900">
-        <div className="flex min-h-screen">
+        <div className="flex min-h-screen flex-col md:flex-row">
           <Sidebar active="Analytics" />
 
-          <section className="flex-1 p-8">
+          <section className="min-w-0 flex-1 p-8">
             <Header
               title="Analytics"
               subtitle="Track your job search performance."

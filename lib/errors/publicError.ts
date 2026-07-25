@@ -39,6 +39,34 @@ export type ErrorLogContext = {
   Logs a short structured summary server-side - never the full prompt,
   resume text, career_memory row, or raw AI response.
 */
+/*
+  Supabase's PostgrestError (returned by every `.insert()`/`.select()`/etc.
+  call, including the applications-claim insert in generate-package) is a
+  plain {message, details, hint, code} object - it does NOT extend Error.
+  `error instanceof Error` alone was silently dropping every Postgrest
+  failure down to `String(error)` = "[object Object]", losing the actual
+  database error message (e.g. an undefined-column error from a missing
+  migration) from server logs entirely. This still only ever reads
+  `.message` - never `.details`/`.hint`/a stack - so the "never log raw
+  internals" guarantee is unchanged.
+*/
+function extractSafeMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return String(error);
+}
+
 export function logSafeError(
   error: unknown,
   context: ErrorLogContext
@@ -49,7 +77,7 @@ export function logSafeError(
       route: context.route,
       userId: context.userId ?? null,
       generationRequestId: context.generationRequestId ?? null,
-      message: error instanceof Error ? error.message : String(error),
+      message: extractSafeMessage(error),
     })
   );
 }

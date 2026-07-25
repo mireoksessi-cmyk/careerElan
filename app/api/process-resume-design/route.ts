@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import mammoth from "mammoth";
-import DOMPurify from "isomorphic-dompurify";
 
 /*
   Called by the client right after a resumes row is inserted
@@ -18,12 +16,55 @@ import DOMPurify from "isomorphic-dompurify";
   resume id no-op instead of reprocessing or duplicating uploaded assets.
   No automatic retries happen here - retrying is always a distinct,
   user-initiated call.
+
+  mammoth and isomorphic-dompurify (which pulls in jsdom) are deliberately
+  NOT imported at module top-level. This route was crashing on every
+  single request in Production - including unauthenticated ones and
+  undefined HTTP methods, which only run before any of this file's own
+  logic - proving the crash happened at module load, not inside POST().
+  Loading these two packages only inside processDocx(), after auth and
+  the processing claim have already succeeded, keeps the route module
+  itself always loadable (auth/validation errors return clean JSON) and
+  confines whatever is breaking to the one code path that actually needs
+  it, where it's already caught and turned into a safe conversion_error
+  instead of a raw platform crash page.
 */
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_ASSET_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_PAGES = 5;
 const MIN_RECONSTRUCTED_BLOCKS = 5;
+
+// Comfortably under Netlify's fixed (non-configurable) 60s synchronous
+// function limit - the same reasoning as OPENAI_CALL_TIMEOUT_MS in
+// generate-package/route.ts. A hang here (module load, mammoth, or
+// pdfjs-dist) must resolve to a recorded "failed" row before the platform
+// would otherwise kill the function with no trace.
+const PROCESSING_TIMEOUT_MS = 45_000;
+
+class ProcessingTimeoutError extends Error {
+  constructor() {
+    super("Processing timed out.");
+    this.name = "ProcessingTimeoutError";
+  }
+}
+
+// Marks errors this file threw on purpose with an already-safe, hand
+// written message - never a message copied from a caught library/module
+// error, which could contain internal paths or raw failure details.
+class SafeProcessingError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ProcessingTimeoutError()), ms);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
 
 const ALLOWED_HTML_TAGS = [
   "p", "br", "strong", "em", "u", "s", "sup", "sub",
@@ -72,6 +113,11 @@ async function processDocx(
   userId: string,
   buffer: Buffer
 ) {
+  const [{ default: mammoth }, { default: DOMPurify }] = await Promise.all([
+    import("mammoth"),
+    import("isomorphic-dompurify"),
+  ]);
+
   const assets: Array<{ id: string; storagePath: string; mimeType: string }> = [];
 
   let assetCounter = 0;
@@ -136,12 +182,32 @@ async function processPdf(
   resumeId: string,
   buffer: Buffer
 ) {
+  /*
+    pdf-parse-new (used by analyze-resume/analyze-cover-letter for text
+    extraction, in the same long-lived Node process) vendors its own
+    internal pdf.js v4.5.136 build. When that runs first, its "fake worker"
+    fallback stamps itself onto the process-wide globalThis.pdfjsWorker
+    singleton - the exact mechanism pdfjs-dist's own PDFWorker checks
+    before loading its own worker script (legacy/build/pdf.mjs,
+    PDFWorker#_setupFakeWorkerGlobal). Once that check finds a value
+    already there, it reuses it instead of ever loading our installed
+    pdfjs-dist version's own worker, producing a permanent (for the
+    process's lifetime) "API version does not match Worker version" error
+    on every PDF here. Clearing it immediately before our own getDocument
+    call forces pdfjs-dist to set up its own (matching-version) fake
+    worker instead - confirmed via direct reproduction.
+  */
+  delete (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker;
+
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
   let doc;
 
   try {
-    doc = await getDocument({ data: new Uint8Array(buffer) }).promise;
+    doc = await withTimeout(
+      getDocument({ data: new Uint8Array(buffer) }).promise,
+      PROCESSING_TIMEOUT_MS
+    );
   } catch (error) {
     console.error("PDF OPEN ERROR =", error);
 
@@ -175,37 +241,44 @@ async function processPdf(
     .eq("id", resumeId);
 
   try {
-    const pages: Array<{
-      width: number;
-      height: number;
-      blocks: Array<{ text: string; x: number; y: number; fontSize: number }>;
-    }> = [];
+    const pages = await withTimeout(
+      (async () => {
+        const extractedPages: Array<{
+          width: number;
+          height: number;
+          blocks: Array<{ text: string; x: number; y: number; fontSize: number }>;
+        }> = [];
 
-    const pageCount = Math.min(doc.numPages, MAX_PDF_PAGES);
+        const pageCount = Math.min(doc.numPages, MAX_PDF_PAGES);
 
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
-      const page = await doc.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1 });
-      const textContent = await page.getTextContent();
+        for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+          const page = await doc.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1 });
+          const textContent = await page.getTextContent();
 
-      const blocks = textContent.items
-        .filter(
-          (item: any) =>
-            typeof item.str === "string" && item.str.trim().length > 0
-        )
-        .map((item: any) => ({
-          text: item.str,
-          x: item.transform[4],
-          y: viewport.height - item.transform[5],
-          fontSize: Math.abs(item.transform[3]) || 10,
-        }));
+          const blocks = textContent.items
+            .filter(
+              (item: any) =>
+                typeof item.str === "string" && item.str.trim().length > 0
+            )
+            .map((item: any) => ({
+              text: item.str,
+              x: item.transform[4],
+              y: viewport.height - item.transform[5],
+              fontSize: Math.abs(item.transform[3]) || 10,
+            }));
 
-      pages.push({
-        width: viewport.width,
-        height: viewport.height,
-        blocks,
-      });
-    }
+          extractedPages.push({
+            width: viewport.width,
+            height: viewport.height,
+            blocks,
+          });
+        }
+
+        return extractedPages;
+      })(),
+      PROCESSING_TIMEOUT_MS
+    );
 
     const totalBlocks = pages.reduce((sum, page) => sum + page.blocks.length, 0);
 
@@ -246,9 +319,9 @@ async function processPdf(
       .from("resumes")
       .update({
         conversion_error:
-          error instanceof Error
-            ? `Layout reconstruction failed: ${error.message}`
-            : "Layout reconstruction failed.",
+          error instanceof ProcessingTimeoutError
+            ? "Layout reconstruction took too long and was skipped; showing the original PDF instead."
+            : "Layout reconstruction failed; showing the original PDF instead.",
       })
       .eq("id", resumeId);
   }
@@ -334,21 +407,28 @@ export async function POST(request: Request) {
       .download(resume.storage_path);
 
     if (downloadError || !fileBlob) {
-      throw new Error(
-        downloadError?.message || "Failed to download the original file."
-      );
+      // downloadError?.message is a raw Supabase Storage error and never
+      // surfaced directly - only this fixed, hand-written message is.
+      if (downloadError) {
+        console.error("RESUME DOWNLOAD ERROR =", downloadError);
+      }
+
+      throw new SafeProcessingError("Failed to download the original file.");
     }
 
     const buffer = Buffer.from(await fileBlob.arrayBuffer());
 
     if (buffer.length > MAX_FILE_BYTES) {
-      throw new Error("File is too large to process.");
+      throw new SafeProcessingError("File is too large to process.");
     }
 
     const detectedType = detectFileType(buffer, resume.file_name || "");
 
     if (detectedType === "docx") {
-      await processDocx(supabase, resumeId, user.id, buffer);
+      await withTimeout(
+        processDocx(supabase, resumeId, user.id, buffer),
+        PROCESSING_TIMEOUT_MS
+      );
     } else if (detectedType === "pdf") {
       await processPdf(supabase, resumeId, buffer);
     } else {
@@ -361,16 +441,25 @@ export async function POST(request: Request) {
         })
         .eq("id", resumeId);
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
+    // Only ever log the real error server-side - never forward its message
+    // to the client or the DB unless it's one of our own SafeProcessingError
+    // instances, whose message is always a fixed string we wrote ourselves.
     console.error("PROCESS RESUME DESIGN ERROR =", error);
+
+    const safeMessage =
+      error instanceof SafeProcessingError
+        ? error.message
+        : error instanceof ProcessingTimeoutError
+          ? "Processing took too long and was stopped."
+          : "The original design could not be processed. Please try again.";
 
     await supabase
       .from("resumes")
       .update({
         conversion_status: "failed",
         preview_mode: null,
-        conversion_error:
-          error instanceof Error ? error.message : "Unknown error",
+        conversion_error: safeMessage,
       })
       .eq("id", resumeId);
   }
