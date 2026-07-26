@@ -4,9 +4,15 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-export async function buildResumeFromCareerMemory(memory: any) {
-  try {
-    const draft = `
+/*
+  Shared by buildResumeFromCareerMemory (AI-polished) and
+  buildCareerMemoryDraftText (deterministic, no AI call) below - both need
+  the exact same field-by-field plain-text rendering of a career_memory
+  row, just fed to different next steps. Never invents or drops a field;
+  purely a formatting pass over what's already in `memory`.
+*/
+function buildCareerMemoryDraft(memory: any): string {
+  return `
 Name:
 ${memory.first_name || ""} ${memory.last_name || ""}
 
@@ -116,6 +122,28 @@ ${(memory.languages || [])
   )
   .join("\n")}
 `;
+}
+
+/*
+  Deterministic, non-AI counterpart to buildResumeFromCareerMemory below -
+  used exclusively by the synchronous /api/generate-package claim route to
+  produce the generation_input_resume_text snapshot for career_memory
+  sources, so that route never makes an OpenAI call itself (its whole
+  point is a sub-second response). Same field set, same values, no
+  wording "polish" pass - the actual AI-tailored resume the user sees is
+  still produced from scratch by the single large prompt in
+  lib/generatePackage/generateCore.ts, which also receives the full
+  structured SourceManifest independent of this text's formatting; this
+  function only supplies the "PRIMARY RESUME" input text that call reads
+  its facts from, not the final output.
+*/
+export function buildCareerMemoryDraftText(memory: any): string {
+  return buildCareerMemoryDraft(memory).trim();
+}
+
+export async function buildResumeFromCareerMemory(memory: any) {
+  try {
+    const draft = buildCareerMemoryDraft(memory);
 
     const prompt = `
 You are one of the world's best Canadian ATS resume writers.

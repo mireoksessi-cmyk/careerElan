@@ -1,0 +1,9 @@
+# Only addition beyond Netlify's existing zero-config Next.js Runtime
+# detection: point it at netlify/functions/ so
+# generate-package-background.ts (a hand-written Background Function, not
+# a Next.js App Router route) gets deployed. Deliberately does NOT declare
+# [[plugins]] package = "@netlify/plugin-nextjs" - Netlify auto-detects and
+# auto-installs that plugin on its own even with this file present, and
+# pinning it here would stop it from getting automatic version updates.
+[build]
+  functions = "netlify/functions"
