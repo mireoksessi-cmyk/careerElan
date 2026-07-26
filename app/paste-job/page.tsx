@@ -3552,8 +3552,8 @@ async function downloadDocx() {
 
                 <p className="text-xs font-semibold text-gray-400">
                   {selectedPreview === key
-                    ? "Viewing now"
-                    : "Click to preview"}
+                    ? "Viewing and editing now"
+                    : "Click to preview and edit"}
                 </p>
               </div>
             </button>

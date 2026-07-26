@@ -19,6 +19,7 @@ import {
   getFirstText,
   fallbackPackage,
   safeResumeResolutionMessage,
+  stripCoverLetterContactBlock,
 } from "@/lib/generatePackage/shared";
 
 /*
@@ -562,7 +563,9 @@ export async function POST(req: Request) {
             success: true,
             status: "succeeded",
             resume: existing.resume_text,
-            coverLetter: existing.cover_letter_text,
+            coverLetter: existing.cover_letter_text
+              ? stripCoverLetterContactBlock(existing.cover_letter_text)
+              : existing.cover_letter_text,
             emailDraft: existing.email_draft,
             packageAnalysis: existing.ai_insight,
             selectedResume: {

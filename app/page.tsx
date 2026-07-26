@@ -991,8 +991,8 @@ async function handleUpdatePassword() {
       </footer>
 
       {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-6 backdrop-blur-md">
-          <div className="w-full max-w-md rounded-[2rem] border border-slate-200 bg-white p-8 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/30 px-6 py-6 backdrop-blur-md">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-[2rem] border border-slate-200 bg-white p-8 shadow-2xl">
             <div className="mb-6 flex items-start justify-between">
               <div>
                 <h2 className="text-2xl font-black text-slate-950">
@@ -1135,6 +1135,18 @@ async function handleUpdatePassword() {
     >
       Resend Verification Email
     </button>
+
+    <button
+      type="button"
+      onClick={() => {
+        setAuthMode("login");
+        setMessage("");
+      }}
+      disabled={loading}
+      className="w-full rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50"
+    >
+      ← Back to Login
+    </button>
   </form>
 ) : authMode === "forgot-password" ? (
   <form className="space-y-4">
@@ -1164,9 +1176,9 @@ async function handleUpdatePassword() {
         setMessage("");
       }}
       disabled={loading}
-      className="w-full rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+      className="w-full rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50"
     >
-      Back to Login
+      ← Back to Login
     </button>
   </form>
 ) : authMode === "new-password" ? (
@@ -1267,7 +1279,8 @@ async function handleUpdatePassword() {
           );
           setMessage("");
         }}
-        className="font-black text-blue-600"
+        disabled={loading}
+        className="rounded font-black text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50"
       >
         {authMode === "login"
           ? "Sign up"

@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
+import {
+  MAX_UPLOADED_RESUMES,
+  MAX_CREATED_RESUMES,
+  MAX_COVER_LETTERS,
+} from "@/lib/config/careerMemoryLimits";
 const DRAFT_KEY = "career-memory-draft";
 const steps = [
   {
@@ -1064,11 +1069,11 @@ return;
 
     const uploadedCount = (existingResumes || []).length;
 
-    if (uploadedCount >= 3) {
+    if (uploadedCount >= MAX_UPLOADED_RESUMES) {
       resetResumeImport();
 
       setResumeUploadError(
-  "You can upload up to 3 resumes. Delete an existing resume before uploading another one."
+  `You can upload up to ${MAX_UPLOADED_RESUMES} resumes. Delete an existing resume before uploading another one.`
 );
 
       return;
@@ -1283,7 +1288,7 @@ return;
       const raceMessage = saveError.message?.includes(
         "RESUME_LIMIT_REACHED"
       )
-        ? "You can upload up to 3 resumes. Delete an existing resume before uploading another one."
+        ? `You can upload up to ${MAX_UPLOADED_RESUMES} resumes. Delete an existing resume before uploading another one.`
         : saveError.code === "23505"
           ? "You've already uploaded this resume. Delete it first if you want to re-upload it."
           : `Your resume was analyzed, but could not be saved: ${saveError.message}`;
@@ -1505,11 +1510,11 @@ setCoverLetterUploadError(
 return;
     }
 
-    if ((count ?? 0) >= 3) {
+    if ((count ?? 0) >= MAX_COVER_LETTERS) {
       resetCoverLetterImport();
 
       setCoverLetterUploadError(
-  "You can upload up to 3 cover letters. Delete an existing cover letter before uploading another one."
+  `You can upload up to ${MAX_COVER_LETTERS} cover letters. Delete an existing cover letter before uploading another one.`
 );
 
       return;
@@ -3028,9 +3033,15 @@ canUseService: boolean;
         </div>
 
         <div>
-          <h2 className="text-2xl font-black">
-              Import Your Resume ✨
-          </h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-black">
+                Import Your Resume ✨
+            </h2>
+
+            <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
+              Upload up to {MAX_UPLOADED_RESUMES} resumes
+            </span>
+          </div>
 
           <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100">
             Save time by uploading your existing resume. Career Élan instantly converts it into your complete Career Memory.
@@ -3079,6 +3090,10 @@ canUseService: boolean;
             <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-bold text-purple-700">
               Optional
             </span>
+
+            <span className="rounded-full bg-purple-600 px-3 py-1 text-xs font-bold text-white">
+              Upload up to {MAX_COVER_LETTERS} cover letters
+            </span>
           </div>
 
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
@@ -3112,9 +3127,15 @@ canUseService: boolean;
         </div>
 
         <div>
-          <h2 className="text-2xl font-black">
-            Create Resume
-          </h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-black">
+              Create Resume
+            </h2>
+
+            <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-bold text-violet-700">
+              Create up to {MAX_CREATED_RESUMES} resume
+            </span>
+          </div>
 
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
             Create a professional resume in minutes. Career Élan generate personalized application packages instantly.
@@ -3134,6 +3155,44 @@ canUseService: boolean;
     </div>
   </button>
 </div>
+
+      {/*
+        Minimum-requirements info card - explains why Generate Package
+        needs a Resume before it can be used, without changing any actual
+        eligibility/gating logic (that lives elsewhere, e.g. canUseService()
+        and the Generate Package flow itself). Deliberately styled like the
+        neutral informational cards below (blue border, white background,
+        checkmark icon) rather than the red/alarming style used for actual
+        error states elsewhere on this page, since having zero resumes yet
+        is the normal starting state, not a problem.
+      */}
+      <div className="mt-8 rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
+            ✅
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-slate-950">
+              Ready to create tailored packages?
+            </h3>
+
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+              To create tailored resumes, cover letters, and email drafts,
+              add at least one resume by uploading an existing resume or
+              creating one. Uploading a cover letter is optional—Career
+              Élan can generate one automatically for each job.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-slate-600">
+              <p>✓ Resume required (upload or create)</p>
+              <p>✉️ Cover Letter optional</p>
+              <p>🚫 No resume yet = Generate Package unavailable</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="mt-8 rounded-3xl border border-blue-100 bg-white p-6 shadow-sm"><h3 className="text-center text-lg font-black text-slate-950">What happens after this?</h3><div className="mt-6 grid gap-5 md:grid-cols-4"><FlowStep number="1" icon="⇧" title="Add Required Info" body="Personal information, experience, and skills." /><FlowStep number="2" icon="🧠" title="Career Memory Learns You" body="AI organizes your career information." /><FlowStep number="3" icon="🔗" title="Find or Paste Any Job URL" body="Search jobs inside Career Élan or Paste any job URL you want to apply to" /><FlowStep number="4" icon="📄 ✉️" title="Get Your Tailored Package" body="Resume, cover letter, and email ready in seconds." /></div></div><div className="mt-6 grid gap-4 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm md:grid-cols-4"><TrustItem icon="🛡️" title="Trusted by job seekers" body="worldwide" /><TrustItem icon="🔒" title="Your privacy" body="is our priority" /><TrustItem icon="👥" title="Join professionals" body="getting more interviews" /><TrustItem icon="☆" title="AI-Powered" body="Human-Focused. Results-Driven." /></div>
     </div>
   );

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import { resolveGenerationProgress } from "@/lib/generatePackage/shared";
+import {
+  resolveGenerationProgress,
+  stripCoverLetterContactBlock,
+} from "@/lib/generatePackage/shared";
 
 /*
   Lightweight polling endpoint for the async Generate Package flow -
@@ -99,7 +102,9 @@ export async function GET(
       status: "succeeded",
       applicationId: row.id,
       resume: row.resume_text,
-      coverLetter: row.cover_letter_text,
+      coverLetter: row.cover_letter_text
+        ? stripCoverLetterContactBlock(row.cover_letter_text)
+        : row.cover_letter_text,
       emailDraft: row.email_draft,
       packageAnalysis: row.ai_insight,
       selectedResume: {

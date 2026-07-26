@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import A4Preview from "./A4Preview";
 import { useLogin } from "@/lib/auth/LoginManager";
+import { stripCoverLetterContactBlock } from "@/lib/generatePackage/textCleanup";
 
 export default function JobTrackerPage() {
     
@@ -98,7 +99,26 @@ const [filterStatus, setFilterStatus] =
     return;
   }
 
-  setApplications(data ?? []);
+  /*
+    Apply the same deterministic contact-stripping used at generation-save
+    time here too, at read-time - this is the single point all of
+    JobDetail, Copy, and downloadPackage() read cover_letter_text through
+    (selectedApplication is always sourced from this applications array),
+    so a legacy pre-fix package displays cleanly here without ever
+    rewriting the stored DB row.
+  */
+  const cleaned = (data ?? []).map((application) =>
+    application.cover_letter_text
+      ? {
+          ...application,
+          cover_letter_text: stripCoverLetterContactBlock(
+            application.cover_letter_text
+          ),
+        }
+      : application
+  );
+
+  setApplications(cleaned);
   setLoading(false);
 }
  async function saveNotes() {
