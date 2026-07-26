@@ -1,10 +1,30 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  isNetlifyRuntime,
+  detectNetlifyRuntimeSource,
+} from "@/lib/generatePackage/backgroundTarget";
+
+/*
+  Diagnostics-only (see the "OAuth redirect diagnostics" investigation) -
+  a defensive, length-capped normalization so a caught auth error's own
+  .message can never dump something unexpectedly large or structured into
+  the logs. Never includes the raw error object, a code/token value, or
+  any query string.
+*/
+function safeAuthErrorMessage(error: unknown): string {
+  if (error instanceof Error && typeof error.message === "string") {
+    return error.message.slice(0, 200);
+  }
+
+  return "Unknown error";
+}
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
+  const errorParam = requestUrl.searchParams.get("error");
 
   /*
     Only ever a same-origin relative path (e.g. "/?resetPassword=true"
@@ -17,6 +37,40 @@ export async function GET(request: Request) {
     nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
       ? nextParam
       : null;
+
+  /*
+    Diagnostics-only (see the "OAuth redirect diagnostics" investigation)
+    - the very first thing this route does, so a real Production OAuth
+    attempt can be traced from the exact origin/protocol/path it actually
+    arrived on. Never logs the code value, an access/refresh token, the
+    full query string, or the user's email - only booleans, hostnames,
+    and the same runtime-detection snapshot used by the Generate Package
+    worker-routing diagnostics.
+  */
+  console.log(
+    JSON.stringify({
+      event: "oauth_callback_received",
+      requestHostname: requestUrl.hostname,
+      requestProtocol: requestUrl.protocol,
+      pathname: requestUrl.pathname,
+      hasCode: Boolean(code),
+      hasError: Boolean(errorParam),
+      nextPath: next,
+      urlEnvHostname: process.env.URL
+        ? (() => {
+            try {
+              return new URL(process.env.URL as string).hostname;
+            } catch {
+              return null;
+            }
+          })()
+        : null,
+      siteIdPresent: Boolean(process.env.SITE_ID),
+      netlifyRuntimeDetected: isNetlifyRuntime(),
+      runtimeDetectedBy: detectNetlifyRuntimeSource(),
+      timestamp: new Date().toISOString(),
+    })
+  );
 
   /*
     Supabase가 로그인 쿠키를 이 response에 저장해야 하므로
@@ -91,6 +145,15 @@ export async function GET(request: Request) {
       exchangeError
     );
 
+    console.log(
+      JSON.stringify({
+        event: "oauth_callback_exchange_failed",
+        requestHostname: requestUrl.hostname,
+        errorName: exchangeError instanceof Error ? exchangeError.name : "Unknown",
+        errorMessage: safeAuthErrorMessage(exchangeError),
+      })
+    );
+
     response.headers.set(
       "Location",
       new URL(
@@ -112,9 +175,24 @@ export async function GET(request: Request) {
     caller's own page handle showing the "new password" form.
   */
   if (next) {
+    const recoveryRedirectUrl = new URL(next, request.url);
+
+    console.log(
+      JSON.stringify({
+        event: "oauth_callback_session_exchanged",
+        requestHostname: requestUrl.hostname,
+        redirectHostname: recoveryRedirectUrl.hostname,
+        redirectPath: recoveryRedirectUrl.pathname,
+        provider:
+          typeof user.app_metadata?.provider === "string"
+            ? user.app_metadata.provider
+            : null,
+      })
+    );
+
     response.headers.set(
       "Location",
-      new URL(next, request.url).toString()
+      recoveryRedirectUrl.toString()
     );
 
     return response;
@@ -185,12 +263,24 @@ export async function GET(request: Request) {
       ? "/dashboard"
       : "/career-memory";
 
+  const finalRedirectUrl = new URL(redirectPath, request.url);
+
+  console.log(
+    JSON.stringify({
+      event: "oauth_callback_session_exchanged",
+      requestHostname: requestUrl.hostname,
+      redirectHostname: finalRedirectUrl.hostname,
+      redirectPath: finalRedirectUrl.pathname,
+      provider:
+        typeof user.app_metadata?.provider === "string"
+          ? user.app_metadata.provider
+          : null,
+    })
+  );
+
   response.headers.set(
     "Location",
-    new URL(
-      redirectPath,
-      request.url
-    ).toString()
+    finalRedirectUrl.toString()
   );
 
   return response;

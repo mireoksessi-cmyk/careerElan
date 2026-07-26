@@ -120,15 +120,39 @@ useEffect(() => {
     setLoading(true);
     setMessage("");
 
+    const redirectTo = `${window.location.origin}/auth/callback`;
+
     const options =
       provider === "facebook"
         ? {
-            redirectTo: `${window.location.origin}/auth/callback`,
+            redirectTo,
             scopes: "public_profile",
           }
         : {
-            redirectTo: `${window.location.origin}/auth/callback`,
+            redirectTo,
           };
+
+    /*
+      Diagnostics-only (see the "OAuth redirect diagnostics" investigation)
+      - records exactly what origin this click computed redirectTo from,
+      so a real Google/Facebook login attempt can be correlated against
+      whatever Supabase/provider-console redirect allow-lists are actually
+      configured. Never logs an access/refresh token, authorization code,
+      user email, or provider secret - only the browser's own origin/
+      hostname, which is not sensitive.
+    */
+    console.log(
+      JSON.stringify({
+        event: "oauth_sign_in_started",
+        provider,
+        browserOrigin: window.location.origin,
+        redirectPath: "/auth/callback",
+        redirectHostname: window.location.hostname,
+        isSecureProtocol: window.location.protocol === "https:",
+        currentHostname: window.location.hostname,
+        timestamp: new Date().toISOString(),
+      })
+    );
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -136,6 +160,19 @@ useEffect(() => {
     });
 
     if (error) {
+      console.log(
+        JSON.stringify({
+          event: "oauth_sign_in_request_failed",
+          provider,
+          errorName: error.name || "Unknown",
+          errorMessage:
+            typeof error.message === "string"
+              ? error.message.slice(0, 200)
+              : "Unknown error",
+          browserOrigin: window.location.origin,
+        })
+      );
+
       setMessage(error.message);
       setLoading(false);
     }

@@ -6,13 +6,24 @@
   itself, which needs to accept the exact same secret this module hands
   the caller).
 
-  Environment split is by process.env.NETLIFY, not NODE_ENV: `next start`
-  sets NODE_ENV=production even when run purely locally, so NODE_ENV can't
-  distinguish "really deployed on Netlify" from "local production-mode
-  test server." NETLIFY is set by Netlify's own build/runtime environment
-  and nowhere else - the same signal already used by
-  lib/config/packageQuota.ts's isNetlifyProductionRuntime() for the
-  Production-only quota gate.
+  Environment split is by isNetlifyRuntime() below, not NODE_ENV: `next
+  start` sets NODE_ENV=production even when run purely locally, so
+  NODE_ENV can't distinguish "really deployed on Netlify" from "local
+  production-mode test server."
+
+  isNetlifyRuntime() checks process.env.URL / SITE_ID / NETLIFY (in that
+  priority order) rather than process.env.NETLIFY alone: per the
+  "package worker runtime diagnostics" investigation, Netlify's official
+  docs confirm URL/SITE_NAME/SITE_ID are available to a serverless
+  function's runtime, while NETLIFY/CONTEXT are documented only as
+  build-time variables - a Next.js Route Handler on Netlify runs as a
+  serverless function, so relying on NETLIFY alone risked silently
+  evaluating false in real Production and routing requests to the
+  local-dev-only stand-in route instead of the real Background Function.
+  Deliberately a function, not a module-level constant snapshot: it must
+  reflect the actual runtime environment at the moment each request is
+  handled, not whatever process.env looked like when this module was
+  first imported.
 
   Deliberately no "@/..." imports anywhere in this file - it's imported
   by app/api/generate-package/route.ts (a normal Next.js route, alias
@@ -22,12 +33,31 @@
   that alias the same way.
 */
 
-export const IS_NETLIFY_RUNTIME = !!process.env.NETLIFY;
+export type NetlifyRuntimeDetectedBy = "URL" | "SITE_ID" | "NETLIFY" | "none";
 
 /*
-  Only ever read when IS_NETLIFY_RUNTIME is false. The one route this
+  Priority order matches the official runtime-availability split: URL and
+  SITE_ID are confirmed available to a serverless function's runtime,
+  while a plain NETLIFY=="true" check is kept last as a narrower backstop
+  (it's the one build-time-documented signal that also happens to often
+  be readable at runtime in practice, per this codebase's earlier
+  diagnostics) rather than the sole signal.
+*/
+export function detectNetlifyRuntimeSource(): NetlifyRuntimeDetectedBy {
+  if (process.env.URL) return "URL";
+  if (process.env.SITE_ID) return "SITE_ID";
+  if (process.env.NETLIFY === "true") return "NETLIFY";
+  return "none";
+}
+
+export function isNetlifyRuntime(): boolean {
+  return detectNetlifyRuntimeSource() !== "none";
+}
+
+/*
+  Only ever read when isNetlifyRuntime() is false. The one route this
   secret gates (app/api/internal/generate-package-worker) 404s
-  unconditionally whenever IS_NETLIFY_RUNTIME is true (see that route's
+  unconditionally whenever isNetlifyRuntime() is true (see that route's
   own guard), so this constant being visible in source is not a real
   secret exposure in any deployed environment - it only ever matters on a
   developer's own machine.
@@ -44,7 +74,7 @@ const LOCAL_DEV_FALLBACK_SECRET =
   if a developer wants to.
 */
 export function resolveBackgroundFunctionSecret(): string | null {
-  if (IS_NETLIFY_RUNTIME) {
+  if (isNetlifyRuntime()) {
     return process.env.BACKGROUND_FUNCTION_SECRET || null;
   }
 
@@ -54,18 +84,78 @@ export function resolveBackgroundFunctionSecret(): string | null {
   );
 }
 
+export type BackgroundFunctionOriginSource = "URL" | "request_origin";
+
+export type BackgroundFunctionUrlResolution = {
+  url: string;
+  originSource: BackgroundFunctionOriginSource;
+};
+
 /*
-  Derived from the current request's own origin rather than a configured
-  BACKGROUND_FUNCTION_URL env var - avoids needing to know a Netlify
-  Deploy Preview's own URL in advance, and avoids requiring an env var
-  just for Generate Package to work locally.
+  Reduces a raw env var value to a bare "protocol//host" origin - no
+  path, query, hash, or trailing slash - or null if it isn't a usable
+  http(s) URL at all. Used for process.env.URL specifically: it's a
+  Netlify-controlled value, not user input, but normalizing it the same
+  defensive way avoids ever concatenating something malformed (or a
+  future accidental path/query suffix) into the Background Function URL.
+*/
+function normalizeToOrigin(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return null;
+  }
+}
+
+/*
+  On Netlify, prefers process.env.URL over the current request's own
+  origin - this is what actually closes the "IS_NETLIFY_RUNTIME false in
+  Production" failure mode: even if a future runtime-detection signal
+  regresses, resolving the target origin from Netlify's own advertised
+  URL (when available) rather than solely trusting isNetlifyRuntime()'s
+  branch keeps the enqueue call pointed at the real Background Function
+  endpoint. Falls back to requestOrigin when process.env.URL is absent or
+  fails to parse as an http(s) URL.
+
+  Known residual risk (not solved by this change - flagged, not guessed
+  around): official Netlify docs describe URL as the site's main/
+  production URL, which may not vary by deploy context the way a Deploy
+  Preview's own subdomain would. If Deploy Preview logins ever need to
+  reach that preview's own Background Function build (not Production's),
+  this preference could misroute. requestOrigin remains the fallback for
+  exactly that reason; DEPLOY_PRIME_URL/DEPLOY_URL were not adopted here
+  because Netlify's official docs document them as build-time-only, not
+  confirmed available to a serverless function's runtime.
 */
 export function resolveBackgroundFunctionUrl(
   requestOrigin: string
-): string {
-  return IS_NETLIFY_RUNTIME
-    ? `${requestOrigin}/.netlify/functions/generate-package-background`
-    : `${requestOrigin}/api/internal/generate-package-worker`;
+): BackgroundFunctionUrlResolution {
+  if (isNetlifyRuntime()) {
+    const netlifyOrigin = process.env.URL
+      ? normalizeToOrigin(process.env.URL)
+      : null;
+
+    return netlifyOrigin
+      ? {
+          url: `${netlifyOrigin}/.netlify/functions/generate-package-background`,
+          originSource: "URL",
+        }
+      : {
+          url: `${requestOrigin}/.netlify/functions/generate-package-background`,
+          originSource: "request_origin",
+        };
+  }
+
+  return {
+    url: `${requestOrigin}/api/internal/generate-package-worker`,
+    originSource: "request_origin",
+  };
 }
 
 /*

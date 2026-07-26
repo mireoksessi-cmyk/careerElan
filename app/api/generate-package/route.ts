@@ -14,7 +14,8 @@ import {
 import {
   resolveBackgroundFunctionSecret,
   resolveBackgroundFunctionUrl,
-  IS_NETLIFY_RUNTIME,
+  isNetlifyRuntime,
+  detectNetlifyRuntimeSource,
   getRuntimeDiagnosticsSnapshot,
 } from "@/lib/generatePackage/backgroundTarget";
 import {
@@ -65,6 +66,16 @@ const WORKER_STALE_THRESHOLD_MS = 5 * 60 * 1000;
   waiting forever with nothing left to try.
 */
 const GIVE_UP_THRESHOLD_MS = WORKER_STALE_THRESHOLD_MS + 90 * 1000;
+
+/*
+  Bounds only the wait for the enqueue call's 202 acknowledgement, never
+  the generation itself (which keeps running after this resolves - see
+  enqueueBackgroundWorker's own doc comment). Without this, a network-
+  level hang on the fetch() to the Background Function/internal route
+  could leave this request awaiting indefinitely instead of failing fast
+  into the existing "mark failed, refund quota" path below.
+*/
+const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
 
 /*
   Immediately refunds a quota reservation on any early-return failure path
@@ -140,20 +151,25 @@ async function enqueueBackgroundWorker(params: {
     throw new Error("Background generation is not configured.");
   }
 
-  const backgroundUrl = resolveBackgroundFunctionUrl(requestOrigin);
-  const selectedTargetType = IS_NETLIFY_RUNTIME
+  const { url: backgroundUrl, originSource: selectedOriginSource } =
+    resolveBackgroundFunctionUrl(requestOrigin);
+  const selectedTargetType = isNetlifyRuntime()
     ? "netlify_background_function"
     : "internal_worker_route";
-  const selectedTargetPath = new URL(backgroundUrl).pathname;
+  const selectedTargetUrl = new URL(backgroundUrl);
+  const selectedTargetHostname = selectedTargetUrl.hostname;
+  const selectedTargetPath = selectedTargetUrl.pathname;
 
   /*
     Diagnostics-only (see the "package worker runtime diagnostics"
-    investigation) - never affects which target is actually chosen
-    (that decision already happened above, via the same
-    resolveBackgroundFunctionUrl()/IS_NETLIFY_RUNTIME this route already
+    investigation) - never affects which target is actually chosen (that
+    decision already happened above, via the same
+    resolveBackgroundFunctionUrl()/isNetlifyRuntime() this route already
     used before this diagnostic logging existed) - only records what was
     chosen and why, so a real Production request can be traced end to
-    end. Never logs the secret itself, the Authorization header, or any
+    end. Only hostname/pathname are logged, never the full URL (which
+    could otherwise carry a query string in some future change) - and
+    never the secret itself, the Authorization header, or any
     request/response body content.
   */
   console.log(
@@ -162,8 +178,11 @@ async function enqueueBackgroundWorker(params: {
       applicationId,
       generationRequestId,
       ...getRuntimeDiagnosticsSnapshot(),
+      runtimeDetectedBy: detectNetlifyRuntimeSource(),
       selectedTargetType,
+      selectedTargetHostname,
       selectedTargetPath,
+      selectedOriginSource,
       requestHostname,
       requestProtocol,
     })
@@ -177,11 +196,32 @@ async function enqueueBackgroundWorker(params: {
       applicationId,
       generationRequestId,
       selectedTargetType,
+      selectedTargetHostname,
       selectedTargetPath,
       startedAt: new Date(enqueueStartedAt).toISOString(),
       elapsedFromRequestStartMs: enqueueStartedAt - requestStartedAt,
     })
   );
+
+  /*
+    Bounds only the wait for the 202 acknowledgement itself - see
+    ENQUEUE_FETCH_TIMEOUT_MS's own doc comment. AbortSignal.timeout is
+    available in every Node runtime this app targets, but a defensive
+    AbortController fallback is kept in case a future runtime downgrade
+    ever lacks it, so a timeout can never silently stop being enforced.
+  */
+  const enqueueTimeoutSignal =
+    typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(ENQUEUE_FETCH_TIMEOUT_MS)
+      : (() => {
+          const controller = new AbortController();
+          setTimeout(
+            () => controller.abort(new Error("Enqueue fetch timed out.")),
+            ENQUEUE_FETCH_TIMEOUT_MS
+          );
+          return controller.signal;
+        })();
 
   let enqueueRes: Response;
 
@@ -193,6 +233,7 @@ async function enqueueBackgroundWorker(params: {
         authorization: `Bearer ${secret}`,
       },
       body: JSON.stringify({ applicationId, generationRequestId }),
+      signal: enqueueTimeoutSignal,
     });
   } catch (fetchError) {
     console.log(
@@ -201,8 +242,11 @@ async function enqueueBackgroundWorker(params: {
         applicationId,
         generationRequestId,
         selectedTargetType,
+        selectedTargetHostname,
         selectedTargetPath,
         durationMs: Date.now() - enqueueStartedAt,
+        timedOut:
+          fetchError instanceof Error && fetchError.name === "TimeoutError",
         errorName:
           fetchError instanceof Error ? fetchError.name : "Unknown",
         errorMessage:
@@ -221,6 +265,7 @@ async function enqueueBackgroundWorker(params: {
       applicationId,
       generationRequestId,
       selectedTargetType,
+      selectedTargetHostname,
       selectedTargetPath,
       responseStatus: enqueueRes.status,
       responseOk: enqueueRes.ok,

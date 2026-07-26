@@ -3,6 +3,7 @@ import { runPackageGeneration } from "@/lib/generatePackage/generateCore";
 import {
   resolveBackgroundFunctionSecret,
   getRuntimeDiagnosticsSnapshot,
+  isNetlifyRuntime,
 } from "@/lib/generatePackage/backgroundTarget";
 
 /*
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
     applicationId/generationRequestId the caller sent, without consuming
     the real `req` body stream the existing logic below still parses
     itself, unchanged. If this event ever appears in Production logs, it
-    is strong evidence that IS_NETLIFY_RUNTIME evaluated false there and
+    is strong evidence that isNetlifyRuntime() evaluated false there and
     this local-dev stand-in was reached instead of the real Netlify
     Background Function - see resolveBackgroundFunctionUrl(). Never logs
     the secret, the Authorization header, or any resume/job content.
@@ -71,12 +72,24 @@ export async function POST(req: Request) {
   /*
     Never reachable on an actual Netlify deployment (Production or Deploy
     Preview alike) - only on `next dev`/`next start` run directly, where
-    process.env.NETLIFY is never set. NODE_ENV alone can't distinguish
-    this: `next start` sets NODE_ENV=production even when run purely
-    locally. NETLIFY is set only by Netlify's own build/runtime
-    environment - see lib/generatePackage/backgroundTarget.ts.
+    isNetlifyRuntime() is false. NODE_ENV alone can't distinguish this:
+    `next start` sets NODE_ENV=production even when run purely locally.
+    isNetlifyRuntime() (URL / SITE_ID / NETLIFY=="true", in that priority
+    order - see lib/generatePackage/backgroundTarget.ts) is the same
+    runtime-detection helper resolveBackgroundFunctionUrl() uses to pick
+    this route in the first place, so this guard and that routing
+    decision can never disagree with each other.
   */
-  if (process.env.NETLIFY) {
+  if (isNetlifyRuntime()) {
+    console.log(
+      JSON.stringify({
+        event: "internal_worker_route_blocked_in_netlify_runtime",
+        applicationId: diagnosticApplicationId,
+        generationRequestId: diagnosticGenerationRequestId,
+        ...getRuntimeDiagnosticsSnapshot(),
+      })
+    );
+
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
