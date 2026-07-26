@@ -450,6 +450,8 @@ export async function POST(req: Request) {
         user_id: user.id,
         generation_request_id: generationRequestId,
         generation_status: "pending",
+        generation_stage: "queued",
+        generation_stage_updated_at: new Date().toISOString(),
         generation_started_at: new Date().toISOString(),
         company,
         job_title: title,
@@ -615,6 +617,8 @@ export async function POST(req: Request) {
           .from("applications")
           .update({
             generation_status: "pending",
+            generation_stage: "queued",
+            generation_stage_updated_at: new Date().toISOString(),
             generation_started_at: new Date().toISOString(),
             generation_worker_claimed_at: null,
             updated_at: new Date().toISOString(),

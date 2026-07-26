@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { resolveGenerationProgress } from "@/lib/generatePackage/shared";
 
 /*
   Lightweight polling endpoint for the async Generate Package flow -
@@ -35,7 +36,7 @@ export async function GET(
   const { data: row, error } = await supabase
     .from("applications")
     .select(
-      "id, generation_status, generation_error_code, generation_error_summary, resume_text, cover_letter_text, email_draft, ai_insight, resume_source, resume_id, generation_input_resume_name, company, job_title, location, job_type, job_url, job_analysis"
+      "id, generation_status, generation_stage, generation_stage_updated_at, generation_started_at, generation_error_code, generation_error_summary, resume_text, cover_letter_text, email_draft, ai_insight, resume_source, resume_id, generation_input_resume_name, company, job_title, location, job_type, job_url, job_analysis"
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -47,6 +48,33 @@ export async function GET(
       { status: 404 }
     );
   }
+
+  /*
+    Real, worker-reported progress only - never a time-based guess. See
+    resolveGenerationProgress()'s own doc comment for why this mapping
+    lives in exactly one place (here) rather than being duplicated on the
+    frontend. stageUpdatedAt/startedAt/elapsedSeconds are included
+    alongside so the client can show "how long in this stage" without
+    computing its own clock skew against the server.
+  */
+  const progressInfo = {
+    stage: row.generation_stage,
+    progress: resolveGenerationProgress(
+      row.generation_status,
+      row.generation_stage
+    ),
+    stageUpdatedAt: row.generation_stage_updated_at,
+    startedAt: row.generation_started_at,
+    elapsedSeconds: row.generation_started_at
+      ? Math.max(
+          0,
+          Math.round(
+            (Date.now() - new Date(row.generation_started_at).getTime()) /
+              1000
+          )
+        )
+      : null,
+  };
 
   /*
     Job posting identity/analysis fields - never PII (no applicant name,
@@ -80,6 +108,7 @@ export async function GET(
         selectedName: row.generation_input_resume_name,
       },
       ...jobContext,
+      ...progressInfo,
     });
   }
 
@@ -90,6 +119,7 @@ export async function GET(
       code: row.generation_error_code,
       error: row.generation_error_summary,
       ...jobContext,
+      ...progressInfo,
     });
   }
 
@@ -97,5 +127,6 @@ export async function GET(
     status: row.generation_status || "pending",
     applicationId: row.id,
     ...jobContext,
+    ...progressInfo,
   });
 }

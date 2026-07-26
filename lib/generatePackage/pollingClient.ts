@@ -285,8 +285,34 @@ function parseJobContext(data: Record<string, unknown>): JobContext {
   };
 }
 
+/*
+  Real, worker-reported progress - stage/progress are computed server-side
+  by resolveGenerationProgress() (lib/generatePackage/shared.ts), the one
+  place that mapping lives. This client only ever displays what the server
+  sent; it never derives its own percentage from elapsed time.
+*/
+export type ProgressInfo = {
+  stage: string | null;
+  progress: number;
+  stageUpdatedAt: string | null;
+  startedAt: string | null;
+  elapsedSeconds: number | null;
+};
+
+function parseProgressInfo(data: Record<string, unknown>): ProgressInfo {
+  return {
+    stage: typeof data.stage === "string" ? data.stage : null,
+    progress: typeof data.progress === "number" ? data.progress : 0,
+    stageUpdatedAt:
+      typeof data.stageUpdatedAt === "string" ? data.stageUpdatedAt : null,
+    startedAt: typeof data.startedAt === "string" ? data.startedAt : null,
+    elapsedSeconds:
+      typeof data.elapsedSeconds === "number" ? data.elapsedSeconds : null,
+  };
+}
+
 export type StatusResult =
-  | ({ kind: "pending"; applicationId: string } & JobContext)
+  | ({ kind: "pending"; applicationId: string } & JobContext & ProgressInfo)
   | ({
       kind: "succeeded";
       applicationId: string;
@@ -356,6 +382,7 @@ export function parseStatusResponse(
       applicationId:
         typeof data.applicationId === "string" ? data.applicationId : "",
       ...jobContext,
+      ...parseProgressInfo(data),
     };
   }
 

@@ -279,6 +279,30 @@ type GenerationErrorInfo = {
   message: string;
 };
 
+/*
+  Presentational labels only, one per real worker-reported stage
+  (lib/generatePackage/shared.ts's GENERATION_STAGE_PROGRESS is the actual
+  stage -> percentage source of truth; this map never invents a stage or a
+  percentage of its own). Falls back to "queued" wording for a stage value
+  the client doesn't recognize (e.g. an older/newer stage this build
+  hasn't been updated for) rather than showing nothing.
+*/
+const STAGE_LABELS: Record<string, string> = {
+  queued: "Your request has been received.",
+  claimed: "The generation server has started your request.",
+  loading_inputs: "Loading your resume and application details.",
+  building_prompt: "Preparing your tailored writing plan.",
+  generating: "AI is writing your resume and cover letter.",
+  validating: "Validating the generated documents.",
+  saving: "Saving your results.",
+};
+
+function formatElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
   { label: "Career Memory", href: "/career-memory", icon: "🧠" },
@@ -958,27 +982,18 @@ const [
   const [generationErrorInfo, setGenerationErrorInfo] =
     useState<GenerationErrorInfo | null>(null);
   /*
-    Set once by the poller's onSlow callback (default: after 5 minutes of
-    still-pending polling) - a UX cue only. generationPhase deliberately
-    stays "pending" when this fires (polling keeps running, the button
-    stays disabled) - unlike the old poll_timeout behavior, this never
-    stops checking for the real result.
+    Real, worker-reported progress only - set from the status endpoint's
+    stage/progress/elapsedSeconds fields (server-computed by
+    resolveGenerationProgress(), the single place that stage->percentage
+    mapping lives - see lib/generatePackage/shared.ts). Never advanced by a
+    client-side timer: a stage/percentage here only ever changes because
+    the worker actually reported reaching that stage.
   */
-  const [isSlowPending, setIsSlowPending] = useState(false);
-  /*
-    Purely cosmetic stage label cycled on a client-side timer while
-    generationPhase === "pending" - there is no real backend progress
-    signal (see pollingClient.ts), so this never claims a percentage or
-    otherwise implies a specific completion amount, only a generic sense
-    of "still actively working."
-  */
-  const pendingStages = [
-    "Preparing your request...",
-    "AI is writing your documents...",
-    "Saving your package...",
-    "Finalizing...",
-  ];
-  const [pendingStageIndex, setPendingStageIndex] = useState(0);
+  const [progressInfo, setProgressInfo] = useState<{
+    stage: string | null;
+    progress: number;
+    elapsedSeconds: number | null;
+  } | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<PreviewType>("resume");
   const [showDefaultApplication, setShowDefaultApplication] = useState(false);
 
@@ -1076,6 +1091,7 @@ const [
     setApplicationId(result.applicationId || null);
     setGenerationPhase("succeeded");
     setGenerationErrorInfo(null);
+    setProgressInfo(null);
     setMessage("Your package is ready.");
     if (result.jobAnalysis !== undefined) {
       applyJobContext(result as JobContext);
@@ -1091,6 +1107,7 @@ const [
       code: result.code || undefined,
       message: result.message,
     });
+    setProgressInfo(null);
     setMessage(result.message);
     if (result.jobAnalysis !== undefined) {
       applyJobContext(result as JobContext);
@@ -1128,17 +1145,18 @@ const [
     }
 
     setGenerationPhase("pending");
-    setIsSlowPending(false);
-    setPendingStageIndex(0);
+    setProgressInfo({ stage: "queued", progress: 10, elapsedSeconds: 0 });
 
     pollerRef.current = createPoller({
       applicationId,
       immediate: options.immediate,
       onPending: (result) => {
         applyJobContext(result);
-      },
-      onSlow: () => {
-        setIsSlowPending(true);
+        setProgressInfo({
+          stage: result.stage,
+          progress: result.progress,
+          elapsedSeconds: result.elapsedSeconds,
+        });
       },
       onSucceeded: (result) => {
         pollerRef.current = null;
@@ -1152,6 +1170,7 @@ const [
         pollerRef.current = null;
         clearActiveGeneration(window.sessionStorage);
         setGenerationPhase("idle");
+        setProgressInfo(null);
       },
       onUnauthorized: () => {
         pollerRef.current = null;
@@ -1333,22 +1352,6 @@ useEffect(() => {
     stopPolling();
   };
 }, []);
-
-/*
-  Cycles the cosmetic pending-stage label every 12s while generationPhase
-  is "pending" - purely presentational (see pendingStages above), and
-  resets to the first stage whenever a new pending phase begins (handled
-  in beginPolling itself, not here).
-*/
-useEffect(() => {
-  if (generationPhase !== "pending") return;
-
-  const interval = setInterval(() => {
-    setPendingStageIndex((prev) => (prev + 1) % pendingStages.length);
-  }, 12_000);
-
-  return () => clearInterval(interval);
-}, [generationPhase]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2944,7 +2947,7 @@ async function downloadDocx() {
         </h3>
 
         <span className="rounded-full bg-white/20 px-3 py-1 text-[11px] font-bold text-white">
-          Recommended
+          {generationPhase === "succeeded" ? "100%" : "Recommended"}
         </span>
       </div>
 
@@ -2977,51 +2980,91 @@ async function downloadDocx() {
 
       {isGenerating || generationPhase === "poll_timeout" ? (
         <div className="mt-4">
-          <div className="flex items-center justify-between gap-4 text-xs font-bold text-white">
-            <span>
-              {generationPhase === "submitting"
+          {(() => {
+            const elapsed = progressInfo?.elapsedSeconds ?? 0;
+            const isTakingLonger =
+              generationPhase === "pending" && elapsed >= 90;
+            const isVeryLong =
+              generationPhase === "pending" && elapsed >= 120;
+            const percent =
+              generationPhase === "submitting"
+                ? 5
+                : (progressInfo?.progress ?? 10);
+            const stageLabel =
+              generationPhase === "submitting"
                 ? "Submitting your request..."
                 : generationPhase === "poll_timeout"
                   ? "Still processing on our servers..."
-                  : pendingStages[pendingStageIndex]}
-            </span>
-          </div>
+                  : STAGE_LABELS[progressInfo?.stage ?? "queued"];
 
-          {/*
-            Indeterminate, not percentage-based: the server has no real
-            progress signal to report (see lib/generatePackage/
-            pollingClient.ts), so a numeric percentage would only ever be
-            fabricated. A continuously animated bar honestly communicates
-            "still working" without claiming a specific completion amount.
-          */}
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
-            <div className="h-full w-full animate-pulse rounded-full bg-white" />
-          </div>
+            return (
+              <>
+                <div className="flex items-center justify-between gap-4 text-xs font-bold text-white">
+                  <span>{stageLabel}</span>
+                  <span>
+                    {generationPhase === "poll_timeout"
+                      ? ""
+                      : `${percent}%`}
+                  </span>
+                </div>
 
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-white/75">
-            <span>
-              {generationPhase === "submitting"
-                ? "Preparing selected resume"
-                : generationPhase === "poll_timeout"
-                  ? "This is taking longer than usual"
-                  : isSlowPending
-                    ? "This is taking longer than usual, but still working"
-                    : "Generating on our servers"}
-            </span>
+                {/*
+                  Real, worker-reported percentage width - never advanced by
+                  a client-side timer (see progressInfo's own comment
+                  above). The "generating" stage is the one long-running
+                  step (the actual OpenAI call), so it additionally gets an
+                  animated shimmer overlay layered on top of its real
+                  55% width - otherwise the bar would look frozen for
+                  however long that step actually takes, which is honest
+                  about the percentage but not about "is this still
+                  working."
+                */}
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
+                  <div
+                    className={`h-full rounded-full bg-white transition-[width] duration-500 ${
+                      progressInfo?.stage === "generating"
+                        ? "animate-pulse"
+                        : ""
+                    }`}
+                    style={{
+                      width:
+                        generationPhase === "poll_timeout"
+                          ? "100%"
+                          : `${percent}%`,
+                    }}
+                  />
+                </div>
 
-            <span className="whitespace-nowrap">
-              {generationPhase === "poll_timeout"
-                ? "You can check back shortly"
-                : "Usually takes 1–3 minutes"}
-            </span>
-          </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-white/75">
+                  <span>
+                    {generationPhase === "poll_timeout"
+                      ? "This is taking longer than usual"
+                      : isVeryLong
+                        ? "This is taking longer than usual. The server is still working."
+                        : isTakingLonger
+                          ? "This is taking a bit longer than expected."
+                          : "Real-time stage from our servers"}
+                  </span>
 
-          {generationPhase === "pending" ? (
-            <p className="mt-2 text-[11px] font-semibold text-white/75">
-              You can safely close this tab - generation continues on our
-              servers and your result will be here when you come back.
-            </p>
-          ) : null}
+                  <span className="whitespace-nowrap">
+                    {generationPhase === "poll_timeout"
+                      ? "You can check back shortly"
+                      : generationPhase === "pending"
+                        ? `Elapsed: ${formatElapsed(elapsed)}`
+                        : "Usually takes 1–3 minutes"}
+                  </span>
+                </div>
+
+                {generationPhase === "pending" ? (
+                  <p className="mt-2 text-[11px] font-semibold text-white/75">
+                    You can safely close this tab - generation continues on
+                    our servers and your result will be here when you come
+                    back.
+                  </p>
+                ) : null}
+              </>
+            );
+          })()}
         </div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">

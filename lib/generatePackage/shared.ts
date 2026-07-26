@@ -2066,6 +2066,96 @@ export function cleanDocumentText(
     .trim();
 }
 
+/* =========================================================
+   Email Draft signature contact stripping
+
+   The AI is not instructed one way or the other on whether to include a
+   phone number/email under the closing signature, and does so
+   inconsistently. Product decision: the final closing block should be
+   "Sincerely, <name>" only - phone/email belong on the resume and cover
+   letter, not repeated in every email draft. This only ever touches the
+   trailing signature block (the contiguous run of lines immediately after
+   the detected closing+name, at the very end of the document) - a phone
+   number or email mentioned earlier in the body (e.g. "you can reach my
+   reference at ...") is never touched, since the scan never looks there.
+========================================================= */
+
+const EMAIL_SIGNATURE_CLOSING_RE =
+  /^(sincerely|best regards|kind regards|warm regards|regards|respectfully|thank you)[,.]?\s*$/i;
+
+function isPhoneOnlySegment(segment: string): boolean {
+  const stripped = segment.replace(/^(phone|tel|mobile|cell)\s*:?\s*/i, "");
+  if (!stripped) return false;
+  if (!/^[\d+\-.() \t]+$/.test(stripped)) return false;
+  const digitCount = stripped.replace(/[^\d]/g, "").length;
+  return digitCount >= 7 && digitCount <= 15;
+}
+
+function isEmailOnlySegment(segment: string): boolean {
+  const stripped = segment.replace(/^e-?mail\s*:?\s*/i, "");
+  return /^[\w.+-]+@[\w-]+\.[\w.-]{2,}$/i.test(stripped);
+}
+
+function isContactOnlyLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+
+  const segments = trimmed
+    .split(/[|·]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  return (
+    segments.length > 0 &&
+    segments.every(
+      (segment) =>
+        isPhoneOnlySegment(segment) || isEmailOnlySegment(segment)
+    )
+  );
+}
+
+export function stripEmailSignatureContact(emailDraft: string): string {
+  const lines = emailDraft.split("\n");
+
+  let closingIdx = -1;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (EMAIL_SIGNATURE_CLOSING_RE.test(lines[i].trim())) {
+      closingIdx = i;
+      break;
+    }
+  }
+
+  // No recognizable closing found - nothing safe to strip. Never guesses.
+  if (closingIdx === -1) return emailDraft;
+
+  let nameIdx = -1;
+
+  for (let i = closingIdx + 1; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      nameIdx = i;
+      break;
+    }
+  }
+
+  // Closing with nothing after it (no name line) - leave as-is.
+  if (nameIdx === -1) return emailDraft;
+
+  let cutoff = lines.length;
+
+  for (let i = lines.length - 1; i > nameIdx; i--) {
+    const trimmed = lines[i].trim();
+
+    if (trimmed && !isContactOnlyLine(trimmed)) {
+      break;
+    }
+
+    cutoff = i;
+  }
+
+  return lines.slice(0, cutoff).join("\n").trimEnd();
+}
+
 export function validateDocumentQuality(
   name: string,
   text: string
@@ -3094,6 +3184,83 @@ export function classifyGenerationError(error: unknown): {
   };
 
   return { code, summary: summaries[code] };
+}
+
+/* =========================================================
+   Generation stage tracking - real, worker-reported progress
+========================================================= */
+
+/*
+  The single source of truth for stage -> percentage. Used by both
+  app/api/applications/[id]/status/route.ts (server) - never duplicated on
+  the frontend, per the instruction that stage->progress mapping must live
+  in exactly one place. "succeeded"/"failed" are not stored in
+  generation_stage itself (that column only moves while generation_status
+  stays 'pending' - see the migration's own comment) but are included here
+  so the status route can compute a progress number for every
+  generation_status without a second switch statement elsewhere.
+*/
+export const GENERATION_STAGE_PROGRESS: Record<string, number> = {
+  queued: 10,
+  claimed: 20,
+  loading_inputs: 30,
+  building_prompt: 40,
+  generating: 55,
+  validating: 80,
+  saving: 90,
+};
+
+export function resolveGenerationProgress(
+  generationStatus: string | null,
+  generationStage: string | null
+): number {
+  if (generationStatus === "succeeded") return 100;
+  if (generationStatus === "failed") return 0;
+
+  if (generationStage && generationStage in GENERATION_STAGE_PROGRESS) {
+    return GENERATION_STAGE_PROGRESS[generationStage];
+  }
+
+  // pending with no stage recorded yet (e.g. a row claimed by the sync
+  // route a moment before the worker's own first stage write lands, or an
+  // older row from before this column existed) - queued is the honest
+  // floor, never 0 (0 is reserved for "failed").
+  return GENERATION_STAGE_PROGRESS.queued;
+}
+
+/*
+  Structured, PII-free timing log for one generation-pipeline stage -
+  console.log only (stdout, captured by Netlify Function Logs/local dev
+  console), never written to the database. Deliberately accepts only
+  primitive, pre-approved fields (never a free-form `details` object) so a
+  future call site cannot accidentally log resume/cover-letter/job-
+  description text or applicant PII by passing it through here.
+*/
+export function logGenerationStage(fields: {
+  applicationId: string;
+  stage: string;
+  durationMs: number;
+  attempt?: number;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  status?: string;
+}): void {
+  console.log(
+    JSON.stringify({
+      event: "generate_package_stage",
+      applicationId: fields.applicationId,
+      stage: fields.stage,
+      durationMs: fields.durationMs,
+      attempt: fields.attempt,
+      model: fields.model,
+      inputTokens: fields.inputTokens,
+      outputTokens: fields.outputTokens,
+      cachedTokens: fields.cachedTokens,
+      status: fields.status,
+    })
+  );
 }
 
 export function fallbackPackage(

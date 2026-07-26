@@ -10,6 +10,7 @@ import {
   buildUploadedResumeManifest,
   extractJson,
   cleanDocumentText,
+  stripEmailSignatureContact,
   validateDocumentQuality,
   normalizePackageAnalysis,
   validateSourceIntegrity,
@@ -19,6 +20,7 @@ import {
   validateAnalysisLogic,
   warnCardDifferences,
   classifyGenerationError,
+  logGenerationStage,
 } from "./shared";
 
 /*
@@ -52,6 +54,54 @@ const client = new OpenAI({
 */
 const OPENAI_CALL_TIMEOUT_MS = 120_000;
 
+type GenerationStage =
+  | "claimed"
+  | "loading_inputs"
+  | "building_prompt"
+  | "generating"
+  | "validating"
+  | "saving";
+
+/*
+  Best-effort, never throws: a stage-tracking write failing must never take
+  down the actual generation. Via RPC - see update_generate_package_stage's
+  migration comment for why service_role cannot write applications
+  directly. Guarded server-side to only ever touch a still-pending row, so
+  a stage update from a duplicate/retried invocation that lost the atomic
+  claim can never resurrect stage text on an already-resolved row.
+*/
+async function setStage(
+  applicationId: string,
+  userId: string,
+  stage: GenerationStage,
+  workerRequestId: string
+): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.rpc(
+      "update_generate_package_stage",
+      {
+        p_application_id: applicationId,
+        p_user_id: userId,
+        p_stage: stage,
+      }
+    );
+
+    if (error) {
+      logSafeError(error, {
+        requestId: workerRequestId,
+        route: "generatePackage/generateCore#stage",
+        userId,
+      });
+    }
+  } catch (error) {
+    logSafeError(error, {
+      requestId: workerRequestId,
+      route: "generatePackage/generateCore#stage",
+      userId,
+    });
+  }
+}
+
 /*
   Runs the actual AI generation for one already-claimed applications row.
   Performs its own atomic worker-claim first (UPDATE ... WHERE
@@ -79,10 +129,13 @@ export async function runPackageGeneration(
   applicationId: string
 ): Promise<void> {
   const workerRequestId = crypto.randomUUID();
+  const workerReceivedAt = Date.now();
 
   console.log(
     `GP WORKER CLAIM START workerRequestId=${workerRequestId} applicationId=${applicationId}`
   );
+
+  const claimStartedAt = Date.now();
 
   /*
     Via RPC, not a direct .from("applications").update(...) - service_role
@@ -99,6 +152,13 @@ export async function runPackageGeneration(
     "claim_generate_package_worker",
     { p_application_id: applicationId }
   );
+
+  logGenerationStage({
+    applicationId,
+    stage: "claim",
+    durationMs: Date.now() - claimStartedAt,
+    status: claimError ? "error" : claimedRows?.[0] ? "ok" : "miss",
+  });
 
   if (claimError) {
     logSafeError(claimError, {
@@ -132,7 +192,12 @@ export async function runPackageGeneration(
   const userId: string = row.user_id;
   const generationRequestId: string | null = row.generation_request_id;
 
+  await setStage(applicationId, userId, "claimed", workerRequestId);
+
   try {
+    const loadInputsStartedAt = Date.now();
+    await setStage(applicationId, userId, "loading_inputs", workerRequestId);
+
     const resumeText: string = row.generation_input_resume_text || "";
     const jobText: string = row.job_description || "";
 
@@ -168,15 +233,19 @@ export async function runPackageGeneration(
             row.generation_input_manifest_source
           );
 
-    console.log(
-      `GP WORKER OPENAI START workerRequestId=${workerRequestId} applicationId=${applicationId}`
-    );
-    const aiResponse = await client.responses.create(
-      {
-        model:
-          process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL,
+    logGenerationStage({
+      applicationId,
+      stage: "loading_inputs",
+      durationMs: Date.now() - loadInputsStartedAt,
+    });
 
-        input: `
+    const buildPromptStartedAt = Date.now();
+    await setStage(applicationId, userId, "building_prompt", workerRequestId);
+
+    const resolvedModel =
+      process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL;
+
+    const promptText = `
 You are Career Élan's Canadian resume strategist, ATS specialist, recruiter, and application writer.
 
 You must first analyze the complete job posting. Only after the job analysis is complete may you write the resume, cover letter, and application email.
@@ -676,13 +745,45 @@ COMPLETE JOB DESCRIPTION
 ==================================================
 
 ${jobText}
-`,
+`;
+
+    logGenerationStage({
+      applicationId,
+      stage: "building_prompt",
+      durationMs: Date.now() - buildPromptStartedAt,
+    });
+
+    console.log(
+      `GP WORKER OPENAI START workerRequestId=${workerRequestId} applicationId=${applicationId}`
+    );
+    const openaiStartedAt = Date.now();
+    await setStage(applicationId, userId, "generating", workerRequestId);
+
+    const aiResponse = await client.responses.create(
+      {
+        model: resolvedModel,
+        input: promptText,
       },
       { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
     );
     console.log(
       `GP WORKER OPENAI END workerRequestId=${workerRequestId} applicationId=${applicationId}`
     );
+
+    logGenerationStage({
+      applicationId,
+      stage: "openai",
+      durationMs: Date.now() - openaiStartedAt,
+      model: resolvedModel,
+      inputTokens: aiResponse.usage?.input_tokens,
+      outputTokens: aiResponse.usage?.output_tokens,
+      cachedTokens:
+        aiResponse.usage?.input_tokens_details?.cached_tokens,
+      status: "ok",
+    });
+
+    const validateStartedAt = Date.now();
+    await setStage(applicationId, userId, "validating", workerRequestId);
 
     const rawPackage = extractJson(aiResponse.output_text);
 
@@ -698,7 +799,15 @@ ${jobText}
 
     const resume = cleanDocumentText(rawPackage.resume);
     const coverLetter = cleanDocumentText(rawPackage.coverLetter);
-    const emailDraft = cleanDocumentText(rawPackage.emailDraft);
+    /*
+      Resume/cover letter contact info is untouched (out of scope) -
+      stripEmailSignatureContact only ever removes a trailing phone/email
+      line directly under the closing signature block, never anything
+      mentioned earlier in the email body.
+    */
+    const emailDraft = stripEmailSignatureContact(
+      cleanDocumentText(rawPackage.emailDraft)
+    );
 
     validateDocumentQuality("Resume", resume);
     validateDocumentQuality("Cover Letter", coverLetter);
@@ -722,9 +831,18 @@ ${jobText}
     validateAnalysisLogic(packageAnalysis);
     warnCardDifferences(packageAnalysis);
 
+    logGenerationStage({
+      applicationId,
+      stage: "validating",
+      durationMs: Date.now() - validateStartedAt,
+    });
+
     console.log(
       `GP WORKER DB UPDATE START workerRequestId=${workerRequestId} applicationId=${applicationId}`
     );
+    const saveStartedAt = Date.now();
+    await setStage(applicationId, userId, "saving", workerRequestId);
+
     // Via RPC - see claim_generate_package_worker's migration comment for
     // why service_role cannot write applications directly.
     const { error: completeWriteError } = await supabaseAdmin.rpc(
@@ -736,8 +854,7 @@ ${jobText}
         p_cover_letter_text: coverLetter,
         p_email_draft: emailDraft,
         p_ai_insight: packageAnalysis,
-        p_generation_model:
-          process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL,
+        p_generation_model: resolvedModel,
         p_prompt_version: PACKAGE_PROMPT_VERSION,
       }
     );
@@ -748,6 +865,12 @@ ${jobText}
     console.log(
       `GP WORKER DB UPDATE END workerRequestId=${workerRequestId} applicationId=${applicationId}`
     );
+
+    logGenerationStage({
+      applicationId,
+      stage: "saving",
+      durationMs: Date.now() - saveStartedAt,
+    });
 
     /*
       Best-effort, retried, but deliberately NOT "fail closed" the way the
@@ -807,6 +930,13 @@ ${jobText}
         );
       }
     }
+
+    logGenerationStage({
+      applicationId,
+      stage: "worker_total",
+      durationMs: Date.now() - workerReceivedAt,
+      status: "succeeded",
+    });
   } catch (error) {
     const caughtErrorName =
       error instanceof Error ? error.name : typeof error;
@@ -859,6 +989,13 @@ ${jobText}
       route: "generatePackage/generateCore#generate",
       userId,
       generationRequestId: generationRequestId ?? undefined,
+    });
+
+    logGenerationStage({
+      applicationId,
+      stage: "worker_total",
+      durationMs: Date.now() - workerReceivedAt,
+      status: `failed:${code}`,
     });
   }
 }
