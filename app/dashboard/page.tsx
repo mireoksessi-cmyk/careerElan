@@ -997,6 +997,24 @@ const [
   upcomingInterview,
   setUpcomingInterview,
 ] = useState<UpcomingInterview | null>(null);
+  /*
+    Server-authoritative Generate Package quota (same read-only endpoint
+    already used by app/paste-job/page.tsx) - GENERATE_PACKAGE_LIFETIME_LIMIT
+    is a lifetime, Production-only cap tracked in its own
+    generate_package_usage ledger, completely separate from
+    stats.packagesThisMonth below (a client-computed count of ALL
+    applications rows created this calendar month, including failed/pending
+    generation attempts, never enforced by the server). The AI Usage card
+    must show this real value whenever it's available so "N remaining"/
+    "limit reached" always matches what an actual Generate Package click
+    would do - not just this month's raw attempt count.
+  */
+  const [generatePackageQuota, setGeneratePackageQuota] = useState<{
+    enforced: boolean;
+    limit: number;
+    used: number | null;
+    remaining: number | null;
+  } | null>(null);
   const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
   const [showTour, setShowTour] = useState(false);
   const [visibleJobs, setVisibleJobs] = useState(6);
@@ -1018,8 +1036,27 @@ const [
     : selectedResume
       ? "Imported Resume"
       : "No Resume Selected";       
-   const aiUsageUsed = stats.packagesThisMonth;
-const aiUsageLimit = FREE_PACKAGE_LIMIT;
+   /*
+     When the server-authoritative quota is available and enforced
+     (Production only), it always wins over the client-computed monthly
+     application count - that count includes failed/timed-out generation
+     attempts the real quota already excludes (see the state comment
+     above), which is exactly what previously let this card show a used
+     count higher than the real lifetime limit while the account was
+     nowhere near actually exhausted. Outside Production (enforced:false,
+     used/remaining null), nothing is actually capped server-side, so the
+     existing monthly-count display is kept as a soft, informal stat.
+   */
+   const aiUsageUsed =
+     generatePackageQuota?.enforced &&
+     typeof generatePackageQuota.used === "number"
+       ? generatePackageQuota.used
+       : stats.packagesThisMonth;
+
+const aiUsageLimit =
+  generatePackageQuota?.enforced
+    ? generatePackageQuota.limit
+    : FREE_PACKAGE_LIMIT;
 
 const aiUsagePercent = Math.min(
   100,
@@ -1028,10 +1065,11 @@ const aiUsagePercent = Math.min(
   )
 );
 
-const aiUsageRemaining = Math.max(
-  0,
-  aiUsageLimit - aiUsageUsed
-);
+const aiUsageRemaining =
+  generatePackageQuota?.enforced &&
+  typeof generatePackageQuota.remaining === "number"
+    ? generatePackageQuota.remaining
+    : Math.max(0, aiUsageLimit - aiUsageUsed);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
 
@@ -2105,8 +2143,43 @@ if (nextInterview) {
 
   loadStats();
 }, [loading, user]);
-  
-  
+
+useEffect(() => {
+  if (loading) return;
+  if (!user) return;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const res = await fetch("/api/generate-package/usage");
+
+      if (!res.ok) return;
+
+      const data = await res.json();
+
+      if (!cancelled) {
+        setGeneratePackageQuota({
+          enforced: Boolean(data.enforced),
+          limit: data.limit,
+          used: data.used ?? null,
+          remaining: data.remaining ?? null,
+        });
+      }
+    } catch (error) {
+      console.error(
+        "GENERATE PACKAGE USAGE ERROR =",
+        error
+      );
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [loading, user]);
+
+
 
   function closeTour() {
     localStorage.setItem("careerElanTourSeen", "true");
@@ -3389,7 +3462,9 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       </h2>
 
       <p className="mt-2 text-sm text-gray-500">
-        Monthly package generation usage.
+        {generatePackageQuota?.enforced
+          ? "Lifetime package generation usage."
+          : "Monthly package generation usage."}
       </p>
     </div>
 
@@ -3432,7 +3507,9 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 
     <div className="mt-3 flex items-center justify-between gap-3">
       <p className="text-xs font-semibold text-gray-400">
-        Resets at the beginning of each month
+        {generatePackageQuota?.enforced
+          ? "One-time limit per account"
+          : "Resets at the beginning of each month"}
       </p>
 
       <p className="whitespace-nowrap text-xs font-bold text-gray-500">
@@ -3444,7 +3521,9 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
   {aiUsageUsed >= aiUsageLimit && (
     <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
       <p className="text-xs font-bold text-red-600">
-        You have reached your monthly package limit.
+        {generatePackageQuota?.enforced
+          ? "You have reached your account's package generation limit."
+          : "You have reached your monthly package limit."}
       </p>
     </div>
   )}
