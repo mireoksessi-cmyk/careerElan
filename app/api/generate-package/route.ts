@@ -14,6 +14,8 @@ import {
 import {
   resolveBackgroundFunctionSecret,
   resolveBackgroundFunctionUrl,
+  IS_NETLIFY_RUNTIME,
+  getRuntimeDiagnosticsSnapshot,
 } from "@/lib/generatePackage/backgroundTarget";
 import {
   getFirstText,
@@ -115,11 +117,23 @@ async function releaseQuotaReservation(
   than a clean 202, so the caller can mark the row failed and refund quota
   rather than leaving it stuck at "pending" forever.
 */
-async function enqueueBackgroundWorker(
-  requestOrigin: string,
-  applicationId: string,
-  generationRequestId: string
-) {
+async function enqueueBackgroundWorker(params: {
+  requestOrigin: string;
+  applicationId: string;
+  generationRequestId: string;
+  requestStartedAt: number;
+  requestHostname: string;
+  requestProtocol: string;
+}) {
+  const {
+    requestOrigin,
+    applicationId,
+    generationRequestId,
+    requestStartedAt,
+    requestHostname,
+    requestProtocol,
+  } = params;
+
   const secret = resolveBackgroundFunctionSecret();
 
   if (!secret) {
@@ -127,15 +141,99 @@ async function enqueueBackgroundWorker(
   }
 
   const backgroundUrl = resolveBackgroundFunctionUrl(requestOrigin);
+  const selectedTargetType = IS_NETLIFY_RUNTIME
+    ? "netlify_background_function"
+    : "internal_worker_route";
+  const selectedTargetPath = new URL(backgroundUrl).pathname;
 
-  const enqueueRes = await fetch(backgroundUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${secret}`,
-    },
-    body: JSON.stringify({ applicationId, generationRequestId }),
-  });
+  /*
+    Diagnostics-only (see the "package worker runtime diagnostics"
+    investigation) - never affects which target is actually chosen
+    (that decision already happened above, via the same
+    resolveBackgroundFunctionUrl()/IS_NETLIFY_RUNTIME this route already
+    used before this diagnostic logging existed) - only records what was
+    chosen and why, so a real Production request can be traced end to
+    end. Never logs the secret itself, the Authorization header, or any
+    request/response body content.
+  */
+  console.log(
+    JSON.stringify({
+      event: "package_worker_target_resolved",
+      applicationId,
+      generationRequestId,
+      ...getRuntimeDiagnosticsSnapshot(),
+      selectedTargetType,
+      selectedTargetPath,
+      requestHostname,
+      requestProtocol,
+    })
+  );
+
+  const enqueueStartedAt = Date.now();
+
+  console.log(
+    JSON.stringify({
+      event: "package_worker_enqueue_started",
+      applicationId,
+      generationRequestId,
+      selectedTargetType,
+      selectedTargetPath,
+      startedAt: new Date(enqueueStartedAt).toISOString(),
+      elapsedFromRequestStartMs: enqueueStartedAt - requestStartedAt,
+    })
+  );
+
+  let enqueueRes: Response;
+
+  try {
+    enqueueRes = await fetch(backgroundUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${secret}`,
+      },
+      body: JSON.stringify({ applicationId, generationRequestId }),
+    });
+  } catch (fetchError) {
+    console.log(
+      JSON.stringify({
+        event: "package_worker_enqueue_failed",
+        applicationId,
+        generationRequestId,
+        selectedTargetType,
+        selectedTargetPath,
+        durationMs: Date.now() - enqueueStartedAt,
+        errorName:
+          fetchError instanceof Error ? fetchError.name : "Unknown",
+        errorMessage:
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Unknown error",
+      })
+    );
+
+    throw fetchError;
+  }
+
+  console.log(
+    JSON.stringify({
+      event: "package_worker_enqueue_finished",
+      applicationId,
+      generationRequestId,
+      selectedTargetType,
+      selectedTargetPath,
+      responseStatus: enqueueRes.status,
+      responseOk: enqueueRes.ok,
+      durationMs: Date.now() - enqueueStartedAt,
+      redirectOccurred: enqueueRes.redirected,
+      responseHostname: enqueueRes.url
+        ? new URL(enqueueRes.url).hostname
+        : null,
+      responsePathname: enqueueRes.url
+        ? new URL(enqueueRes.url).pathname
+        : null,
+    })
+  );
 
   if (enqueueRes.status !== 202) {
     throw new Error(
@@ -146,6 +244,8 @@ async function enqueueBackgroundWorker(
 
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
+  // Diagnostics-only anchor for elapsedFromRequestStartMs below.
+  const requestStartedAt = Date.now();
 
   let applicationId: string | null = null;
   let userId: string | null = null;
@@ -805,13 +905,17 @@ export async function POST(req: Request) {
     );
 
     try {
-      const requestOrigin = new URL(req.url).origin;
+      const requestUrl = new URL(req.url);
+      const requestOrigin = requestUrl.origin;
 
-      await enqueueBackgroundWorker(
+      await enqueueBackgroundWorker({
         requestOrigin,
-        claimedApplicationId,
-        generationRequestId
-      );
+        applicationId: claimedApplicationId,
+        generationRequestId,
+        requestStartedAt,
+        requestHostname: requestUrl.hostname,
+        requestProtocol: requestUrl.protocol,
+      });
 
       console.log(
         JSON.stringify({

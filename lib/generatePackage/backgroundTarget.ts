@@ -67,3 +67,46 @@ export function resolveBackgroundFunctionUrl(
     ? `${requestOrigin}/.netlify/functions/generate-package-background`
     : `${requestOrigin}/api/internal/generate-package-worker`;
 }
+
+/*
+  Diagnostics-only (see the "package worker runtime diagnostics"
+  investigation) - never used for any control-flow decision, only for
+  structured logging so a real Production request can be traced across
+  the Next.js route, the Netlify Background Function, and the local-dev
+  stand-in route without duplicating this env-var-shape logic three
+  times. Deliberately reports presence/shape only, never a secret value -
+  CONTEXT is the one non-secret enum Netlify itself defines, safe to log
+  verbatim once normalized to its known set of values.
+*/
+export type NetlifyContextValue =
+  | "production"
+  | "deploy-preview"
+  | "branch-deploy"
+  | "dev"
+  | "missing";
+
+function normalizeNetlifyContext(
+  value: string | undefined
+): NetlifyContextValue {
+  if (
+    value === "production" ||
+    value === "deploy-preview" ||
+    value === "branch-deploy" ||
+    value === "dev"
+  ) {
+    return value;
+  }
+
+  return "missing";
+}
+
+export function getRuntimeDiagnosticsSnapshot() {
+  return {
+    netlifyEnvPresent: typeof process.env.NETLIFY === "string",
+    netlifyEnvIsTrue: process.env.NETLIFY === "true",
+    contextPresent: typeof process.env.CONTEXT === "string",
+    contextValue: normalizeNetlifyContext(process.env.CONTEXT),
+    urlEnvPresent: Boolean(process.env.URL),
+    siteIdPresent: Boolean(process.env.SITE_ID),
+  };
+}
