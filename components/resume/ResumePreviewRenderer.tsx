@@ -115,6 +115,34 @@ function RetryProcessingBanner({ resume }: { resume: any }) {
   );
 }
 
+function PdfResumePreviewWithBanner({
+  resume,
+  fallbackText,
+}: {
+  resume: any;
+  fallbackText?: string;
+}) {
+  const [originalPdfFailed, setOriginalPdfFailed] = useState(false);
+
+  return (
+    <>
+      {originalPdfFailed && <RetryProcessingBanner resume={resume} />}
+      <PdfResumePreview
+        resume={resume}
+        onOriginalUnavailable={() => {
+          setOriginalPdfFailed(true);
+          return (
+            <CareerElanTemplatePreview
+              resume={resume}
+              fallbackText={fallbackText}
+            />
+          );
+        }}
+      />
+    </>
+  );
+}
+
 export default function ResumePreviewRenderer({
   resume,
   fallbackText,
@@ -128,22 +156,18 @@ export default function ResumePreviewRenderer({
     requirement is that a Storage file was actually uploaded for this row;
     PdfResumePreview itself falls back to the plain-text template (via
     onOriginalUnavailable) if the signed-URL request genuinely fails.
+
+    conversion_status tracks a separate, best-effort layout-reconstruction
+    pipeline - it has no bearing on whether the original PDF itself is
+    displayable. Showing the "couldn't process the original design" banner
+    whenever conversion_status was pending/failed - even though the real
+    PDF renders fine below via PdfResumePreview - was misleading users
+    into thinking their preview was broken when it wasn't. The banner is
+    only warranted when the original PDF actually fails to load
+    (originalPdfFailed, set via onOriginalUnavailable below).
   */
   if (resume && isPdfResume(resume) && resume.storage_path) {
-    return (
-      <>
-        <RetryProcessingBanner resume={resume} />
-        <PdfResumePreview
-          resume={resume}
-          onOriginalUnavailable={() => (
-            <CareerElanTemplatePreview
-              resume={resume}
-              fallbackText={fallbackText}
-            />
-          )}
-        />
-      </>
-    );
+    return <PdfResumePreviewWithBanner resume={resume} fallbackText={fallbackText} />;
   }
 
   const isUsable =

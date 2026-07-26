@@ -375,6 +375,12 @@ export interface PollerCallbacks {
   onInvalid?: () => void;
   onUnauthorized?: () => void;
   onTransientError?: () => void;
+  /*
+    Fired once, when polling has been running longer than `slowAfterMs` -
+    a UX cue only ("this is taking longer than usual"). Polling keeps
+    running after this fires; it is never a substitute for onTimeout.
+  */
+  onSlow?: () => void;
   onTimeout: () => void;
 }
 
@@ -382,7 +388,17 @@ export interface PollerOptions extends PollerCallbacks {
   applicationId: string;
   /* Default 2500ms - within the requested 2-3s range. */
   intervalMs?: number;
-  /* Default 5 minutes - client-only ceiling; never cancels the server job. */
+  /*
+    Default 5 minutes - UX-only threshold for onSlow. Does not stop
+    polling by itself.
+  */
+  slowAfterMs?: number;
+  /*
+    Default 16 minutes - a true hard stop. Netlify Background Functions
+    (the worker that actually performs the generation) cannot run past
+    ~15 minutes, so nothing server-side could still be in flight beyond
+    this point; only here is it correct for the client to give up.
+  */
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
   /* true for refresh-recovery (check now, we don't know how stale the
@@ -401,13 +417,15 @@ export function createPoller(options: PollerOptions): PollerHandle {
   const {
     applicationId,
     intervalMs = 2500,
-    timeoutMs = 5 * 60 * 1000,
+    slowAfterMs = 5 * 60 * 1000,
+    timeoutMs = 16 * 60 * 1000,
     fetchImpl = fetch,
     immediate = false,
     now = Date.now,
   } = options;
 
   let stopped = false;
+  let slowNotified = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let controller: AbortController | null = null;
   const startedAt = now();
@@ -439,6 +457,11 @@ export function createPoller(options: PollerOptions): PollerHandle {
       stop();
       options.onTimeout();
       return;
+    }
+
+    if (!slowNotified && now() - startedAt >= slowAfterMs) {
+      slowNotified = true;
+      options.onSlow?.();
     }
 
     controller = new AbortController();

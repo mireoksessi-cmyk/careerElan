@@ -957,6 +957,28 @@ const [
   const isGenerating = isGenerationActive(generationPhase);
   const [generationErrorInfo, setGenerationErrorInfo] =
     useState<GenerationErrorInfo | null>(null);
+  /*
+    Set once by the poller's onSlow callback (default: after 5 minutes of
+    still-pending polling) - a UX cue only. generationPhase deliberately
+    stays "pending" when this fires (polling keeps running, the button
+    stays disabled) - unlike the old poll_timeout behavior, this never
+    stops checking for the real result.
+  */
+  const [isSlowPending, setIsSlowPending] = useState(false);
+  /*
+    Purely cosmetic stage label cycled on a client-side timer while
+    generationPhase === "pending" - there is no real backend progress
+    signal (see pollingClient.ts), so this never claims a percentage or
+    otherwise implies a specific completion amount, only a generic sense
+    of "still actively working."
+  */
+  const pendingStages = [
+    "Preparing your request...",
+    "AI is writing your documents...",
+    "Saving your package...",
+    "Finalizing...",
+  ];
+  const [pendingStageIndex, setPendingStageIndex] = useState(0);
   const [selectedPreview, setSelectedPreview] = useState<PreviewType>("resume");
   const [showDefaultApplication, setShowDefaultApplication] = useState(false);
 
@@ -1106,12 +1128,17 @@ const [
     }
 
     setGenerationPhase("pending");
+    setIsSlowPending(false);
+    setPendingStageIndex(0);
 
     pollerRef.current = createPoller({
       applicationId,
       immediate: options.immediate,
       onPending: (result) => {
         applyJobContext(result);
+      },
+      onSlow: () => {
+        setIsSlowPending(true);
       },
       onSucceeded: (result) => {
         pollerRef.current = null;
@@ -1306,6 +1333,22 @@ useEffect(() => {
     stopPolling();
   };
 }, []);
+
+/*
+  Cycles the cosmetic pending-stage label every 12s while generationPhase
+  is "pending" - purely presentational (see pendingStages above), and
+  resets to the first stage whenever a new pending phase begins (handled
+  in beginPolling itself, not here).
+*/
+useEffect(() => {
+  if (generationPhase !== "pending") return;
+
+  const interval = setInterval(() => {
+    setPendingStageIndex((prev) => (prev + 1) % pendingStages.length);
+  }, 12_000);
+
+  return () => clearInterval(interval);
+}, [generationPhase]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2940,7 +2983,7 @@ async function downloadDocx() {
                 ? "Submitting your request..."
                 : generationPhase === "poll_timeout"
                   ? "Still processing on our servers..."
-                  : "Creating your application package..."}
+                  : pendingStages[pendingStageIndex]}
             </span>
           </div>
 
@@ -2961,7 +3004,9 @@ async function downloadDocx() {
                 ? "Preparing selected resume"
                 : generationPhase === "poll_timeout"
                   ? "This is taking longer than usual"
-                  : "Generating on our servers"}
+                  : isSlowPending
+                    ? "This is taking longer than usual, but still working"
+                    : "Generating on our servers"}
             </span>
 
             <span className="whitespace-nowrap">
