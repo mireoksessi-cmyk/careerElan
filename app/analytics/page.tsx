@@ -30,6 +30,51 @@ export default function AnalyticsPage() {
     void loadApplications(user.id);
   }, [loading, user]);
 
+  /*
+    This page only fetches applications once, on mount - if a package is
+    deleted from Job Tracker while this Analytics tab is already open (a
+    different tab, or this same tab left open in the background), that
+    initial fetch never re-runs on its own and the totals/skills would
+    stay stale until a manual reload. Two listeners, both re-running the
+    same loadApplications() (never a separate code path, so there is only
+    ever one place Analytics computes "current" data from):
+    - "storage": fires in OTHER tabs the instant Job Tracker's delete
+      writes the "careerelan:applications-changed" signal (see its own
+      comment) - covers the cross-tab case without needing focus at all.
+    - "visibilitychange"/"focus": covers returning to this same tab after
+      deleting elsewhere (a different tab, or navigating away and back),
+      where no storage event fires in this tab itself.
+  */
+  useEffect(() => {
+    if (!user) return;
+
+    function refetch() {
+      void loadApplications(user.id);
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === "careerelan:applications-changed") {
+        refetch();
+      }
+    }
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        refetch();
+      }
+    }
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", refetch);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", refetch);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [user]);
+
   async function loadApplications(
     currentUserId: string
   ) {

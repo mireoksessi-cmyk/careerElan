@@ -192,7 +192,9 @@ type UploadedResumeKind = "none" | "pdf" | "txt" | "docx" | "other";
 export default function CareerMemoryPage() {
   const { user, loading } = useLogin();
   const router = useRouter();
-  const [mode, setMode] = useState<"start" | "import" | "build">("start");
+  const [mode, setMode] = useState<
+    "start" | "import" | "importCoverLetter" | "build"
+  >("start");
   const [currentStep, setCurrentStep] = useState(0);
   const [memoryData, setMemoryData] = useState<CareerMemoryData>(defaultMemoryData);
   const [coverLetterUploadProgress, setCoverLetterUploadProgress] =
@@ -201,6 +203,7 @@ export default function CareerMemoryPage() {
  const [coverLetterUploadError, setCoverLetterUploadError] =
   useState("");
 const [isResumeDragging, setIsResumeDragging] = useState(false);
+const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [coverLetterImportStage, setCoverLetterImportStage] =
   useState<
     "idle" | "uploaded" | "parsing" | "parsed"
@@ -1413,8 +1416,50 @@ async function handleResumeDrop(
 ) {
   const file = event.target.files?.[0];
 
-if (!file) return;
+  if (!file) return;
 
+  await processCoverLetterFile(file);
+}
+
+function handleCoverLetterDragOver(
+  event: React.DragEvent<HTMLDivElement>
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  setIsCoverLetterDragging(true);
+}
+
+function handleCoverLetterDragLeave(
+  event: React.DragEvent<HTMLDivElement>
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  setIsCoverLetterDragging(false);
+}
+
+async function handleCoverLetterDrop(
+  event: React.DragEvent<HTMLDivElement>
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  setIsCoverLetterDragging(false);
+
+  const file = event.dataTransfer.files?.[0];
+
+  if (!file) {
+    setCoverLetterUploadError(
+      "No file was detected. Please try dropping your cover letter again."
+    );
+    return;
+  }
+
+  await processCoverLetterFile(file);
+}
+
+async function processCoverLetterFile(file: File) {
 setCoverLetterUploadError("");
 
   function resetCoverLetterImport() {
@@ -1687,6 +1732,12 @@ setCoverLetterImportMessage(
   function continueToImportPreview() {
   setImportStage("preview");
 }
+
+  async function saveCoverLetterAndContinue() {
+    await persistMemory();
+    alert("Cover Letter saved.");
+    continueToDashboard();
+  }
 
   function renderResumePreview() {
     return (
@@ -2433,25 +2484,12 @@ setCoverLetterImportMessage(
             <StartScreen
   strength={profileStrength}
   requiredCount={requiredCount}
-  coverLetterUploadError={coverLetterUploadError}
-  setCoverLetterUploadError={setCoverLetterUploadError}
   canUseService={canUseService()}
             onImport={() => setMode("import")}
+            onImportCoverLetter={() => setMode("importCoverLetter")}
             isUnlocked={isUnlocked}
             onBuild={() => setMode("build")}
             onContinue={continueToDashboard}
-            onSaveCoverLetter={async () => {
-  await persistMemory();
-  alert("Cover Letter saved.");
-  continueToDashboard();
-}}
-            coverLetterInputRef={coverLetterInputRef}
-            handleCoverLetterUpload={handleCoverLetterUpload}
-            coverLetterImportStage={coverLetterImportStage}
-            coverLetterUploadProgress={coverLetterUploadProgress}
-            coverLetterImportMessage={coverLetterImportMessage}
-            coverLetterPreview={coverLetterPreview}
-            setCoverLetterPreview={setCoverLetterPreview}
           />
           ) : (
             <>
@@ -2606,6 +2644,130 @@ setCoverLetterImportMessage(
           </button>
         </div>
       </>
+    )}
+  </div>
+)}
+
+{mode === "importCoverLetter" && (
+  <div className="rounded-2xl border border-blue-100 bg-white p-10 shadow-sm">
+    <button
+      type="button"
+      onClick={() => {
+        setMode("start");
+        setCoverLetterImportStage("idle");
+      }}
+      className="mb-6 font-bold text-blue-600"
+    >
+      ← Back
+    </button>
+
+    <h2 className="text-3xl font-extrabold">
+      Import Cover Letter
+    </h2>
+
+    <p className="mt-3 text-gray-500">
+      Upload your existing cover letter. Career Élan will save it so
+      you can reuse or tailor it for every job you apply to.
+    </p>
+
+    <input
+      ref={coverLetterInputRef}
+      type="file"
+      accept=".pdf,.docx,.txt"
+      className="hidden"
+      onChange={handleCoverLetterUpload}
+    />
+
+    <div
+      onDragOver={handleCoverLetterDragOver}
+      onDragEnter={handleCoverLetterDragOver}
+      onDragLeave={handleCoverLetterDragLeave}
+      onDrop={handleCoverLetterDrop}
+      className={`mt-8 rounded-2xl border-2 border-dashed p-16 text-center transition ${
+        isCoverLetterDragging
+          ? "border-purple-600 bg-purple-100 shadow-lg"
+          : "border-purple-200 bg-purple-50"
+      }`}
+    >
+      <div className="text-6xl">
+        {isCoverLetterDragging ? "⬇️" : "✉️"}
+      </div>
+
+      <h3 className="mt-5 text-xl font-bold">
+        {isCoverLetterDragging
+          ? "Drop your cover letter now"
+          : "Drop your cover letter here"}
+      </h3>
+
+      <p className="mt-2 text-sm text-gray-500">
+        PDF, DOCX, or TXT · Maximum 10MB
+      </p>
+
+      <button
+        type="button"
+        onClick={() => coverLetterInputRef.current?.click()}
+        className="mt-6 rounded-xl bg-purple-600 px-6 py-3 font-bold text-white"
+      >
+        Browse Files
+      </button>
+    </div>
+
+    {coverLetterImportStage !== "idle" && (
+      <ParsingStatus
+        stage={coverLetterImportStage}
+        requiredCount={requiredCount}
+        progress={coverLetterUploadProgress}
+        type="coverLetter"
+      />
+    )}
+
+    {coverLetterImportMessage && (
+      <p className="mt-5 rounded-xl bg-purple-50 px-4 py-3 text-sm font-bold text-purple-700">
+        {coverLetterImportMessage}
+      </p>
+    )}
+
+    {coverLetterUploadError && (
+      <div
+        role="alert"
+        className="mt-5 rounded-xl border border-red-300 bg-red-50 px-5 py-4"
+      >
+        <p className="font-black text-red-700">
+          Cover Letter upload failed
+        </p>
+
+        <p className="mt-1 text-sm leading-6 text-red-600">
+          {coverLetterUploadError}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => setCoverLetterUploadError("")}
+          className="mt-3 text-sm font-bold text-red-700 underline"
+        >
+          Dismiss
+        </button>
+      </div>
+    )}
+
+    {coverLetterImportStage === "parsed" && (
+      <div className="mt-8 flex justify-end gap-3">
+        <button
+          type="button"
+          onClick={() => setCoverLetterPreview(true)}
+          className="rounded-xl border border-blue-600 px-6 py-3 font-bold text-blue-600"
+        >
+          Preview
+        </button>
+
+        <button
+          type="button"
+          onClick={saveCoverLetterAndContinue}
+          className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white"
+        >
+          Save & Continue
+        </button>
+      </div>
     )}
   </div>
 )}
@@ -2831,55 +2993,22 @@ setCoverLetterImportMessage(
 function StartScreen({
   strength,
   requiredCount,
-  coverLetterUploadError,
-  setCoverLetterUploadError,
   canUseService,
   isUnlocked,
   onImport,
+  onImportCoverLetter,
   onBuild,
   onContinue,
-  onSaveCoverLetter,
-  coverLetterInputRef,
-  handleCoverLetterUpload,
-  coverLetterImportStage,
-  coverLetterUploadProgress,
-  coverLetterImportMessage,
-  coverLetterPreview,
-  setCoverLetterPreview,
 }: {
   strength: number;
 requiredCount: number;
 
-coverLetterUploadError: string;
-
-setCoverLetterUploadError: React.Dispatch<
-  React.SetStateAction<string>
->;
-
 canUseService: boolean;
   isUnlocked: boolean;
   onImport: () => void;
+  onImportCoverLetter: () => void;
   onBuild: () => void;
   onContinue: () => void;
-  onSaveCoverLetter: () => void;
-
-  coverLetterInputRef: React.RefObject<HTMLInputElement | null>;
-
-  handleCoverLetterUpload: (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => void;
-
-  coverLetterImportStage:
-    "idle" | "uploaded" | "parsing" | "parsed";
-
-  coverLetterUploadProgress: number;
-
-  coverLetterImportMessage: string;
-  coverLetterPreview: boolean;
-
- setCoverLetterPreview: React.Dispatch<
-  React.SetStateAction<boolean>
->;
 }) {
   return (
     <div className="mx-auto max-w-[1280px]">
@@ -2924,8 +3053,17 @@ canUseService: boolean;
     </div>
   </button>
 
-  {/* Cover Letter */}
-  <div className="rounded-3xl border border-purple-400 bg-gradient-to-r from-purple-200 to-violet-200 p-6 shadow-md">
+  {/* Cover Letter - navigates to a dedicated upload page (mode
+      "importCoverLetter"), exactly like Import Your Resume above, rather
+      than opening the OS file picker directly. The whole card is a
+      single <button> (no nested interactive elements), so there is
+      structurally only one thing that can ever fire a navigation - never
+      a double-trigger between an inner button and the card itself. */}
+  <button
+    type="button"
+    onClick={onImportCoverLetter}
+    className="w-full rounded-3xl border border-purple-400 bg-gradient-to-r from-purple-200 to-violet-200 p-6 text-left shadow-md transition hover:-translate-y-1 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 focus-visible:ring-offset-2"
+  >
     <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
       <div className="flex items-start gap-5">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-purple-50 text-4xl">
@@ -2955,83 +3093,11 @@ canUseService: boolean;
         </div>
       </div>
 
-      <div className="shrink-0">
-        <input
-          ref={coverLetterInputRef}
-          type="file"
-          accept=".pdf,.docx,.txt"
-          className="hidden"
-          onChange={handleCoverLetterUpload}
-        />
-
-        <button
-          type="button"
-          onClick={() => coverLetterInputRef.current?.click()}
-          className="rounded-xl border-2 border-purple-300 bg-purple-50 px-7 py-4 font-black text-purple-700 transition hover:bg-purple-100"
-        >
-          Upload Cover Letter
-        </button>
+      <div className="shrink-0 rounded-xl border-2 border-purple-300 bg-purple-50 px-7 py-4 text-center font-black text-purple-700">
+        Upload Cover Letter
       </div>
     </div>
-
-    {coverLetterImportStage !== "idle" && (
-      <ParsingStatus
-        stage={coverLetterImportStage}
-        requiredCount={requiredCount}
-        progress={coverLetterUploadProgress}
-        type="coverLetter"
-      />
-    )}
-
-    {coverLetterImportStage === "parsed" && (
-      <div className="mt-6 flex justify-end gap-3">
-        <button
-          type="button"
-          onClick={() => setCoverLetterPreview(true)}
-          className="rounded-xl border border-blue-600 px-6 py-3 font-bold text-blue-600"
-        >
-          Preview
-        </button>
-
-        <button
-          type="button"
-          onClick={onSaveCoverLetter}
-          className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white"
-        >
-          Save & Continue
-        </button>
-      </div>
-    )}
-
-    {coverLetterImportMessage && (
-      <p className="mt-4 rounded-xl bg-purple-50 px-4 py-3 text-sm font-bold text-purple-700">
-        {coverLetterImportMessage}
-      </p>
-      
-    )}
-    {coverLetterUploadError && (
-  <div
-    role="alert"
-    className="mt-4 rounded-xl border border-red-300 bg-red-50 px-5 py-4"
-  >
-    <p className="font-black text-red-700">
-      Cover Letter upload failed
-    </p>
-
-    <p className="mt-1 text-sm leading-6 text-red-600">
-      {coverLetterUploadError}
-    </p>
-
-    <button
-      type="button"
-      onClick={() => setCoverLetterUploadError("")}
-      className="mt-3 text-sm font-bold text-red-700 underline"
-    >
-      Dismiss
-    </button>
-  </div>
-)}
-  </div>
+  </button>
 
   {/* No Resume */}
   <button

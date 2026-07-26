@@ -11,6 +11,7 @@ import {
   extractJson,
   cleanDocumentText,
   stripEmailSignatureContact,
+  stripCoverLetterContactBlock,
   validateDocumentQuality,
   normalizePackageAnalysis,
   validateSourceIntegrity,
@@ -798,9 +799,17 @@ ${jobText}
     }
 
     const resume = cleanDocumentText(rawPackage.resume);
-    const coverLetter = cleanDocumentText(rawPackage.coverLetter);
     /*
-      Resume/cover letter contact info is untouched (out of scope) -
+      Resume contact info is untouched (out of scope) -
+      stripCoverLetterContactBlock only ever removes the applicant's own
+      contact lines directly under their name at the very top of the
+      cover letter, never the recipient's company/address block further
+      down or anything mentioned in the body.
+    */
+    const coverLetter = stripCoverLetterContactBlock(
+      cleanDocumentText(rawPackage.coverLetter)
+    );
+    /*
       stripEmailSignatureContact only ever removes a trailing phone/email
       line directly under the closing signature block, never anything
       mentioned earlier in the email body.

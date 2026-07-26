@@ -2156,6 +2156,139 @@ export function stripEmailSignatureContact(emailDraft: string): string {
   return lines.slice(0, cutoff).join("\n").trimEnd();
 }
 
+/* =========================================================
+   Cover Letter contact block stripping
+
+   Same product decision as the Email Draft signature above, applied to
+   the opposite end of the document: the applicant's own contact block
+   directly under their name at the very top. Scoped narrowly - only the
+   contiguous, contact-shaped lines immediately after the name, stopping
+   at the first blank line (or the first line that doesn't look like
+   contact info) - so the recipient block (company name/address) that
+   normally follows a blank line further down, and any company/location
+   mention in the body, are never reached by the scan and therefore never
+   touched.
+========================================================= */
+
+const CANADIAN_PROVINCES = [
+  "ON",
+  "QC",
+  "BC",
+  "AB",
+  "MB",
+  "SK",
+  "NS",
+  "NB",
+  "PE",
+  "NL",
+  "YT",
+  "NT",
+  "NU",
+  "Ontario",
+  "Quebec",
+  "British Columbia",
+  "Alberta",
+  "Manitoba",
+  "Saskatchewan",
+  "Nova Scotia",
+  "New Brunswick",
+  "Prince Edward Island",
+  "Newfoundland and Labrador",
+  "Yukon",
+  "Northwest Territories",
+  "Nunavut",
+];
+
+function isPostalCodeSegment(segment: string): boolean {
+  // Canadian (A1A 1A1) or US ZIP (12345 / 12345-6789) - the only two this
+  // app's Canada-only scope ever needs to recognize.
+  return (
+    /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/.test(segment) ||
+    /^\d{5}(-\d{4})?$/.test(segment)
+  );
+}
+
+function isCityProvinceSegment(segment: string): boolean {
+  const parts = segment
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) return false;
+
+  const last = parts[parts.length - 1];
+
+  return CANADIAN_PROVINCES.some(
+    (province) => province.toLowerCase() === last.toLowerCase()
+  );
+}
+
+function isStreetAddressSegment(segment: string): boolean {
+  // "123 Main St", "45 Oak Avenue Apt 2" - a leading street number is the
+  // one reasonably unambiguous street-address signal available without a
+  // full address-parsing library.
+  return /^\d+\s+\S/.test(segment);
+}
+
+function isPersonalContactLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+
+  const segments = trimmed
+    .split(/[|·]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  return (
+    segments.length > 0 &&
+    segments.every(
+      (segment) =>
+        isPhoneOnlySegment(segment) ||
+        isEmailOnlySegment(segment) ||
+        isPostalCodeSegment(segment) ||
+        isCityProvinceSegment(segment) ||
+        isStreetAddressSegment(segment)
+    )
+  );
+}
+
+export function stripCoverLetterContactBlock(coverLetter: string): string {
+  const lines = coverLetter.split("\n");
+
+  let nameIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      nameIdx = i;
+      break;
+    }
+  }
+
+  // Nothing but blank lines - nothing to do.
+  if (nameIdx === -1) return coverLetter;
+
+  let endIdx = nameIdx + 1;
+
+  for (let i = nameIdx + 1; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    // A blank line ends the header block - whatever comes after (date,
+    // recipient block, body) is a separate section and is never scanned.
+    if (!trimmed) break;
+
+    // The first line that doesn't look like contact info stops the scan
+    // immediately, preserving it and everything after it untouched.
+    if (!isPersonalContactLine(trimmed)) break;
+
+    endIdx = i + 1;
+  }
+
+  // Nothing matched right after the name - unchanged.
+  if (endIdx === nameIdx + 1) return coverLetter;
+
+  return [...lines.slice(0, nameIdx + 1), ...lines.slice(endIdx)].join("\n");
+}
+
 export function validateDocumentQuality(
   name: string,
   text: string

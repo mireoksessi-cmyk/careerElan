@@ -255,18 +255,51 @@ async function deleteApplication() {
   )
     return;
 
-  const { error } = await supabase
+  /*
+    .select("id") turns this into a genuine success check: Postgrest
+    returns 200 with an empty array (no error) when the WHERE clause
+    (id + user_id, RLS-enforced) matches zero rows - a plain
+    .delete() with no .select() would silently report "success" for a
+    delete that actually removed nothing (already-deleted row, a
+    mismatched id from stale client state, etc). Never show "Package
+    deleted." unless a row was actually confirmed removed.
+  */
+  const { data, error } = await supabase
     .from("applications")
     .delete()
     .eq("id", selectedApplication.id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("id");
 
   if (error) {
     alert(error.message);
     return;
   }
 
+  if (!data || data.length === 0) {
+    alert(
+      "Could not delete this package - it may have already been removed. Please refresh and try again."
+    );
+    return;
+  }
+
   alert("Package deleted.");
+
+  /*
+    Cross-tab/cross-page signal only - never read back as a source of
+    truth (Analytics always re-queries applications directly). Lets an
+    already-open Analytics tab notice the deletion immediately via the
+    "storage" event instead of showing stale totals/skills until the next
+    manual reload or navigation. See app/analytics/page.tsx's own listener.
+  */
+  try {
+    window.localStorage.setItem(
+      "careerelan:applications-changed",
+      String(Date.now())
+    );
+  } catch {
+    // Best-effort only - localStorage can be unavailable (private browsing).
+  }
 
   setSelectedApplication(null);
 

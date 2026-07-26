@@ -2951,9 +2951,15 @@ async function downloadDocx() {
         </span>
       </div>
 
-      <p className="mt-1 text-sm font-semibold text-white/90">
+      <p
+        className={
+          isGenerating || generationPhase === "poll_timeout"
+            ? "mt-1 rounded-lg bg-white/95 px-2.5 py-1.5 text-sm font-semibold text-indigo-950"
+            : "mt-1 text-sm font-semibold text-white/90"
+        }
+      >
         {isGenerating
-          ? "Package generation usually takes about 30 seconds to 1 minute."
+          ? "Package generation usually takes about 1 to 2 minutes."
           : generationPhase === "poll_timeout"
             ? "Your package is still being generated. Please try checking again shortly."
             : "Generate a tailored resume, cover letter, and email draft so you’re ready to apply in minutes."}
@@ -2999,7 +3005,7 @@ async function downloadDocx() {
 
             return (
               <>
-                <div className="flex items-center justify-between gap-4 text-xs font-bold text-white">
+                <div className="flex items-center justify-between gap-4 rounded-lg bg-white/95 px-2.5 py-1.5 text-xs font-bold text-indigo-950">
                   <span>{stageLabel}</span>
                   <span>
                     {generationPhase === "poll_timeout"
@@ -3035,7 +3041,7 @@ async function downloadDocx() {
                   />
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-white/75">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/90 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-950">
                   <span>
                     {generationPhase === "poll_timeout"
                       ? "This is taking longer than usual"
@@ -3056,7 +3062,7 @@ async function downloadDocx() {
                 </div>
 
                 {generationPhase === "pending" ? (
-                  <p className="mt-2 text-[11px] font-semibold text-white/75">
+                  <p className="mt-2 rounded-lg bg-white/90 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-950">
                     You can safely close this tab - generation continues on
                     our servers and your result will be here when you come
                     back.
