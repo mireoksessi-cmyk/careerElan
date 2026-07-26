@@ -1214,6 +1214,90 @@ const [
   }
 
   /*
+    Fires when a give-up timer expires - re-verifies against the live
+    server state before ever treating this as a real failure. A worker
+    that claimed late (e.g. right around when the retry's own re-enqueue
+    landed) can still be genuinely mid-OpenAI-call when 90s have passed
+    since the retry; showing a "could not start" popup purely because a
+    client-side timer elapsed, without checking, would be wrong in that
+    case even though nothing is actually broken. Only a fresh status read
+    that still shows "queued" (never claimed, never progressed) is treated
+    as confirmation the recovery genuinely failed - anything else (already
+    claimed/progressing, already succeeded, already failed for some other
+    reason, or an inconclusive/transient read) leaves the existing poller
+    (still running) as the sole authority on this attempt's outcome.
+  */
+  async function resolveGiveUpCheck(
+    currentApplicationId: string,
+    currentGenerationRequestId: string
+  ) {
+    if (!pollerRef.current) return;
+
+    let result: ReturnType<typeof parseStatusResponse>;
+
+    try {
+      const res = await fetch(
+        `/api/applications/${currentApplicationId}/status`
+      );
+      const contentType = res.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json");
+      let data: unknown = null;
+
+      if (isJson) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      }
+
+      result = parseStatusResponse(res.status, isJson && data !== null, data);
+    } catch {
+      /*
+        Could not confirm the live state - never fail an attempt purely
+        on an inability to check just now. The still-running poller
+        remains the source of truth; this give-up window simply takes no
+        action this time.
+      */
+      return;
+    }
+
+    // A newer resolution (or a manual retry) may have already stopped
+    // polling while this status fetch was in flight.
+    if (!pollerRef.current) return;
+
+    if (result.kind === "succeeded") {
+      stopPolling();
+      applySucceededResult(result);
+      return;
+    }
+
+    if (result.kind === "failed") {
+      stopPolling();
+      applyFailedResult(result);
+      return;
+    }
+
+    if (result.kind === "pending" && result.stage === "queued") {
+      stopPolling();
+      applyFailedResult({
+        code: "BACKGROUND_WORKER_NOT_STARTED",
+        message:
+          "Package generation could not start. No usage was deducted. Please try again.",
+      });
+
+      void requestGiveUpFinalize(currentApplicationId, currentGenerationRequestId);
+      return;
+    }
+
+    /*
+      Either still pending but past "queued" (claimed and genuinely
+      progressing) or a transient/invalid/unauthorized read - never
+      treated as a failure. Existing polling continues untouched.
+    */
+  }
+
+  /*
     Scheduled ~90s (or ~30s after a network error on the retry itself)
     after a successful automatic re-enqueue, to catch the case where the
     retry's own worker invocation *also* never actually starts running.
@@ -1231,23 +1315,7 @@ const [
 
     giveUpTimerRef.current = setTimeout(() => {
       giveUpTimerRef.current = null;
-
-      /*
-        Only act if this attempt is still the one actively being tracked -
-        pollerRef is only non-null while an attempt is still unresolved
-        (any success/failure stops it), so this can never fire after the
-        job has already been resolved through its normal path.
-      */
-      if (!pollerRef.current) return;
-
-      stopPolling();
-      applyFailedResult({
-        code: "BACKGROUND_WORKER_NOT_STARTED",
-        message:
-          "Package generation could not start. No usage was deducted. Please try again.",
-      });
-
-      void requestGiveUpFinalize(currentApplicationId, currentGenerationRequestId);
+      void resolveGiveUpCheck(currentApplicationId, currentGenerationRequestId);
     }, delayMs);
   }
 
