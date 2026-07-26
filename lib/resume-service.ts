@@ -62,6 +62,17 @@ export type ResolveSelectedResumeOptions = {
     generationText is just a stored column, never an AI call).
   */
   includeGenerationText?: boolean;
+
+  /*
+    app/api/generate-package/route.ts already fetches this same
+    career_memory row itself (for applicantName and the selected cover
+    letter, both independent of resume-source resolution) before calling
+    this function - passing it through here avoids issuing the exact same
+    `career_memory` select twice, sequentially, in one request. Optional
+    and unused by other callers (e.g. /api/resumes/selected), which keep
+    fetching their own copy exactly as before.
+  */
+  preloadedMemory?: Record<string, unknown> | null;
 };
 
 export async function resolveSelectedResume(
@@ -71,11 +82,15 @@ export async function resolveSelectedResume(
 ): Promise<ResolvedSelectedResume> {
   const includeGenerationText = options.includeGenerationText ?? true;
 
-  const { data: memory, error: memoryError } = await supabase
-    .from("career_memory")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
+  const memoryFetch = options.preloadedMemory
+    ? { data: options.preloadedMemory, error: null }
+    : await supabase
+        .from("career_memory")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+  const { data: memory, error: memoryError } = memoryFetch;
 
   if (memoryError) {
     throw new ResumeResolutionError(

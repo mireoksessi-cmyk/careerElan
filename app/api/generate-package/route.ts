@@ -24,6 +24,19 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+/*
+  Next.js Route Segment Config, read by Netlify's Next.js Runtime to
+  configure this function's execution duration (undeclared = whatever the
+  platform's own default is for the account's plan, which measured
+  Production latency for this route - a single OpenAI call that alone
+  takes ~26-31s locally, ~99% of total request time - may already exceed).
+  This only ever requests a longer ceiling from the platform; a plan whose
+  actual cap is lower simply keeps its own cap, and this export is a no-op
+  in local `next dev`/`next build`. Matches the SDK-level per-call timeout
+  already set on the OpenAI call below (OPENAI_CALL_TIMEOUT_MS = 60_000).
+*/
+export const maxDuration = 60;
+
 /* =========================================================
    TYPES
 ========================================================= */
@@ -3423,7 +3436,8 @@ export async function POST(
     try {
       resolvedResume = await resolveSelectedResume(
         supabase,
-        user.id
+        user.id,
+        { preloadedMemory: memory }
       );
     } catch (error) {
       if (error instanceof ResumeResolutionError) {
