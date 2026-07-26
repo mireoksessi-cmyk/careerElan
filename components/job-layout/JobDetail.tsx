@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import A4Preview from "@/app/job-tracker/A4Preview";
 
 type Props = {
@@ -116,6 +117,15 @@ export default function JobDetail({
             {selectedApplication.location ||
               "Location unavailable"}
           </p>
+
+          {selectedApplication.id && (
+            <Link
+              href={`/paste-job?applicationId=${selectedApplication.id}`}
+              className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-600 hover:underline"
+            >
+              View in Paste Job →
+            </Link>
+          )}
         </div>
 
         <span className="rounded-full bg-blue-100 px-4 py-2 text-sm font-bold text-blue-700">

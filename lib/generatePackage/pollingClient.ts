@@ -256,9 +256,38 @@ export function parseGenerateResponse(
    GET /api/applications/[id]/status response classification
 ========================================================= */
 
+/*
+  Job posting identity/analysis fields - never PII, present in every status
+  response regardless of generation_status (see the route's own comment)
+  so a caller recovering after navigation can reconstruct "what job was
+  this" even while still pending or after a failure, not only on success.
+*/
+export type JobContext = {
+  jobTitle: string | null;
+  company: string | null;
+  location: string | null;
+  jobType: string | null;
+  jobUrl: string | null;
+  jobAnalysis: unknown;
+};
+
+function parseJobContext(data: Record<string, unknown>): JobContext {
+  return {
+    jobTitle: typeof data.jobTitle === "string" ? data.jobTitle : null,
+    company: typeof data.company === "string" ? data.company : null,
+    location: typeof data.location === "string" ? data.location : null,
+    jobType: typeof data.jobType === "string" ? data.jobType : null,
+    jobUrl: typeof data.jobUrl === "string" ? data.jobUrl : null,
+    jobAnalysis:
+      data.jobAnalysis && typeof data.jobAnalysis === "object"
+        ? data.jobAnalysis
+        : null,
+  };
+}
+
 export type StatusResult =
-  | { kind: "pending"; applicationId: string }
-  | {
+  | ({ kind: "pending"; applicationId: string } & JobContext)
+  | ({
       kind: "succeeded";
       applicationId: string;
       resume: string;
@@ -266,8 +295,8 @@ export type StatusResult =
       emailDraft: string;
       packageAnalysis: unknown;
       selectedResume: unknown;
-    }
-  | { kind: "failed"; applicationId: string; code: string | null; message: string }
+    } & JobContext)
+  | ({ kind: "failed"; applicationId: string; code: string | null; message: string } & JobContext)
   /* 404, or an unowned/unknown applicationId - not a generation failure,
      just nothing valid to track. */
   | { kind: "invalid" }
@@ -291,6 +320,7 @@ export function parseStatusResponse(
   }
 
   const data = json as Record<string, unknown>;
+  const jobContext = parseJobContext(data);
 
   if (data.status === "succeeded") {
     return {
@@ -302,6 +332,7 @@ export function parseStatusResponse(
       emailDraft: typeof data.emailDraft === "string" ? data.emailDraft : "",
       packageAnalysis: data.packageAnalysis ?? null,
       selectedResume: data.selectedResume ?? null,
+      ...jobContext,
     };
   }
 
@@ -315,6 +346,7 @@ export function parseStatusResponse(
         typeof data.error === "string" && data.error
           ? data.error
           : "Package generation failed. Please try again.",
+      ...jobContext,
     };
   }
 
@@ -323,6 +355,7 @@ export function parseStatusResponse(
       kind: "pending",
       applicationId:
         typeof data.applicationId === "string" ? data.applicationId : "",
+      ...jobContext,
     };
   }
 
@@ -336,7 +369,7 @@ export function parseStatusResponse(
 ========================================================= */
 
 export interface PollerCallbacks {
-  onPending?: () => void;
+  onPending?: (result: Extract<StatusResult, { kind: "pending" }>) => void;
   onSucceeded: (result: Extract<StatusResult, { kind: "succeeded" }>) => void;
   onFailed: (result: Extract<StatusResult, { kind: "failed" }>) => void;
   onInvalid?: () => void;
@@ -451,7 +484,7 @@ export function createPoller(options: PollerOptions): PollerHandle {
 
     switch (result.kind) {
       case "pending":
-        options.onPending?.();
+        options.onPending?.(result);
         scheduleNext();
         return;
       case "succeeded":

@@ -16,9 +16,11 @@ import {
   createPoller,
   isGenerationActive,
   parseGenerateResponse,
+  parseStatusResponse,
   readActiveGeneration,
   writeActiveGeneration,
   type GenerationPhase,
+  type JobContext,
   type PollerHandle,
 } from "@/lib/generatePackage/pollingClient";
 
@@ -939,10 +941,6 @@ const [
 ] =
   useState<SavedPreviewType>(null);
 
-const [
-  generationProgress,
-  setGenerationProgress,
-] = useState(0);
   const [analyzed, setAnalyzed] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -1003,18 +1001,47 @@ const [
   }
 
   /*
+    Restores the "what job was this" panel (title/company/location/
+    keywords/requirements/summary) from the status endpoint's job fields -
+    present regardless of generation_status, so it's available whether the
+    recovered attempt is still pending, succeeded, or failed. Only applied
+    when the endpoint actually returned a usable jobAnalysis object;
+    otherwise the existing analysis state (if any) is left untouched
+    rather than being clobbered with an empty one.
+  */
+  function applyJobContext(context: JobContext) {
+    if (context.jobAnalysis && typeof context.jobAnalysis === "object") {
+      setAnalysis(context.jobAnalysis as JobAnalysis);
+      setAnalyzed(true);
+      return;
+    }
+
+    if (context.jobTitle || context.company) {
+      setAnalysis((prev) => ({
+        ...prev,
+        title: context.jobTitle || prev.title,
+        company: context.company || prev.company,
+        location: context.location || prev.location,
+      }));
+      setAnalyzed(true);
+    }
+  }
+
+  /*
     Applies a successful generation result (from either the initial POST's
     200 replay, the polling GET's "succeeded" state, or refresh recovery)
     identically in all three cases - one place defines what "a completed
     package" looks like on screen.
   */
-  function applySucceededResult(result: {
-    applicationId: string;
-    resume: string;
-    coverLetter: string;
-    emailDraft: string;
-    packageAnalysis: unknown;
-  }) {
+  function applySucceededResult(
+    result: {
+      applicationId: string;
+      resume: string;
+      coverLetter: string;
+      emailDraft: string;
+      packageAnalysis: unknown;
+    } & Partial<JobContext>
+  ) {
     setPackageData({
       resume: result.resume,
       coverLetter: result.coverLetter,
@@ -1026,22 +1053,26 @@ const [
     setGenerated(true);
     setApplicationId(result.applicationId || null);
     setGenerationPhase("succeeded");
-    setGenerationProgress(100);
     setGenerationErrorInfo(null);
-    setMessage(
-      "Your AI-tailored application package has been generated successfully."
-    );
+    setMessage("Your package is ready.");
+    if (result.jobAnalysis !== undefined) {
+      applyJobContext(result as JobContext);
+    }
     clearActiveGeneration(window.sessionStorage);
   }
 
-  function applyFailedResult(result: { code: string | null; message: string }) {
+  function applyFailedResult(
+    result: { code: string | null; message: string } & Partial<JobContext>
+  ) {
     setGenerationPhase("failed");
-    setGenerationProgress(0);
     setGenerationErrorInfo({
       code: result.code || undefined,
       message: result.message,
     });
     setMessage(result.message);
+    if (result.jobAnalysis !== undefined) {
+      applyJobContext(result as JobContext);
+    }
     clearActiveGeneration(window.sessionStorage);
   }
 
@@ -1054,12 +1085,19 @@ const [
   */
   function beginPolling(
     applicationId: string,
-    generationRequestId: string,
+    /*
+      null when recovering purely from a URL-provided applicationId (Job
+      Tracker link, or a reopened tab after the sessionStorage entry was
+      already lost) - the status endpoint only needs applicationId, and
+      persist is always false in that case anyway, so there is nothing to
+      write to sessionStorage.
+    */
+    generationRequestId: string | null,
     options: { persist: boolean; immediate: boolean }
   ) {
     stopPolling();
 
-    if (options.persist) {
+    if (options.persist && generationRequestId) {
       writeActiveGeneration(window.sessionStorage, {
         applicationId,
         generationRequestId,
@@ -1068,11 +1106,13 @@ const [
     }
 
     setGenerationPhase("pending");
-    setGenerationProgress(55);
 
     pollerRef.current = createPoller({
       applicationId,
       immediate: options.immediate,
+      onPending: (result) => {
+        applyJobContext(result);
+      },
       onSucceeded: (result) => {
         pollerRef.current = null;
         applySucceededResult(result);
@@ -1085,12 +1125,10 @@ const [
         pollerRef.current = null;
         clearActiveGeneration(window.sessionStorage);
         setGenerationPhase("idle");
-        setGenerationProgress(0);
       },
       onUnauthorized: () => {
         pollerRef.current = null;
         setGenerationPhase("failed");
-        setGenerationProgress(0);
         setGenerationErrorInfo({
           message: "Your session may have expired. Please sign in again.",
         });
@@ -1148,21 +1186,96 @@ useEffect(() => {
 }, [loading, user]);
 
 /*
-  Refresh recovery: runs once per page load, after auth resolves. Checks
-  for a previously-persisted active generation (see beginPolling's
-  persist:true write) and reconciles it against the server's current
-  view via one status call, before deciding whether to resume polling,
-  restore a completed result, show a failure, or silently clear a
-  stale/invalid entry. Never restores job-analysis state (analysis/
-  jobUrl/jobDescription) - only feasible with existing IDs, per Phase 2
-  scope; the same limitation already existed for a plain page refresh
-  before this feature.
+  Recovery on page load, in priority order:
+
+  1. URL ?applicationId=... (explicit navigation intent - a Job Tracker
+     link, or a bookmarked/reopened link) - the DB is the source of truth
+     here, not sessionStorage, so this works even in a brand-new tab where
+     sessionStorage was never populated (tab close/reopen, a different
+     browser/device that's still the same logged-in user, or the original
+     sessionStorage entry having already expired/been cleared). Job
+     analysis, generation state, and results are all reconstructed from
+     one GET to the existing status endpoint - no new endpoint needed,
+     since it already returns job context in every branch.
+  2. sessionStorage's persisted active-generation entry (same-tab refresh
+     recovery) - unchanged from before, and only attempted when no URL
+     applicationId is present, so the two recovery paths never race.
+
+  Runs once per page load, after auth resolves.
 */
 useEffect(() => {
   if (loading) return;
   if (!user) return;
   if (recoveryAttemptedRef.current) return;
   recoveryAttemptedRef.current = true;
+
+  const urlApplicationId = new URLSearchParams(
+    window.location.search
+  ).get("applicationId");
+
+  if (urlApplicationId) {
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/applications/${urlApplicationId}/status`
+        );
+        const contentType = res.headers.get("content-type") || "";
+        const isJson = contentType.includes("application/json");
+        let data: unknown = null;
+
+        if (isJson) {
+          try {
+            data = await res.json();
+          } catch {
+            data = null;
+          }
+        }
+
+        const result = parseStatusResponse(
+          res.status,
+          isJson && data !== null,
+          data
+        );
+
+        if (result.kind === "succeeded") {
+          applySucceededResult(result);
+          return;
+        }
+
+        if (result.kind === "failed") {
+          setApplicationId(result.applicationId || urlApplicationId);
+          applyFailedResult(result);
+          return;
+        }
+
+        if (result.kind === "pending") {
+          setApplicationId(result.applicationId || urlApplicationId);
+          applyJobContext(result);
+          setMessage(
+            "Resuming a previously started application package generation..."
+          );
+          beginPolling(urlApplicationId, null, {
+            persist: false,
+            immediate: true,
+          });
+          return;
+        }
+
+        /*
+          invalid (404/not owned)/unauthorized/transient - nothing safe
+          to recover; leave the page in its normal empty state rather
+          than showing an error for what may just be a stale/foreign link.
+        */
+      } catch (error) {
+        console.error(
+          "APPLICATION RECOVERY FETCH ERROR =",
+          error
+        );
+      }
+    })();
+
+    return;
+  }
 
   const stored: ActiveGeneration | null = readActiveGeneration(
     window.sessionStorage
@@ -1505,7 +1618,6 @@ packageAnalysis: null,
       clearActiveGeneration(window.sessionStorage);
       setGenerationPhase("idle");
       setGenerationErrorInfo(null);
-      setGenerationProgress(0);
 
       setAnalysis(nextAnalysis);
     setAnalyzed(true);
@@ -1533,7 +1645,6 @@ packageAnalysis: null,
       clearActiveGeneration(window.sessionStorage);
       setGenerationPhase("idle");
       setGenerationErrorInfo(null);
-      setGenerationProgress(0);
 
       setAnalysis(emptyAnalysis);
       setAnalyzed(false);
@@ -1718,7 +1829,6 @@ async function loadSelectedApplicationMaterials() {
 
   try {
     setGenerationPhase("submitting");
-    setGenerationProgress(10);
     setGenerationErrorInfo(null);
     setMessage("");
 
@@ -1831,7 +1941,6 @@ async function loadSelectedApplicationMaterials() {
     );
 
     setGenerationPhase("idle");
-    setGenerationProgress(0);
 
     /*
       AbortSignal.timeout() rejects fetch with a "TimeoutError"; a manual
@@ -2787,7 +2896,7 @@ async function downloadDocx() {
               : generationPhase === "poll_timeout"
                 ? "Still Generating..."
                 : generated
-                  ? "✅ Package Generated"
+                  ? "✅ Your package is ready"
                   : "Generate Full Package ✨"}
         </h3>
 
@@ -2833,19 +2942,17 @@ async function downloadDocx() {
                   ? "Still processing on our servers..."
                   : "Creating your application package..."}
             </span>
-
-            <span>
-              {generationProgress}%
-            </span>
           </div>
 
+          {/*
+            Indeterminate, not percentage-based: the server has no real
+            progress signal to report (see lib/generatePackage/
+            pollingClient.ts), so a numeric percentage would only ever be
+            fabricated. A continuously animated bar honestly communicates
+            "still working" without claiming a specific completion amount.
+          */}
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
-            <div
-              className="h-full rounded-full bg-white transition-all duration-700"
-              style={{
-                width: `${generationProgress}%`,
-              }}
-            />
+            <div className="h-full w-full animate-pulse rounded-full bg-white" />
           </div>
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-white/75">
@@ -2860,9 +2967,16 @@ async function downloadDocx() {
             <span className="whitespace-nowrap">
               {generationPhase === "poll_timeout"
                 ? "You can check back shortly"
-                : "Estimated: 30–60 seconds"}
+                : "Usually takes 1–3 minutes"}
             </span>
           </div>
+
+          {generationPhase === "pending" ? (
+            <p className="mt-2 text-[11px] font-semibold text-white/75">
+              You can safely close this tab - generation continues on our
+              servers and your result will be here when you come back.
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
