@@ -24,6 +24,26 @@ import {
   type PollerHandle,
 } from "@/lib/generatePackage/pollingClient";
 
+/*
+  Stale background-worker recovery thresholds (app/api/generate-package/
+  route.ts is the server-side counterpart). Mirrors that route's own
+  WORKER_STALE_THRESHOLD_MS (300s) plus a 10s buffer so this client-side
+  trigger never fires before the server would actually honor a reclaim -
+  an earlier trigger would just spend a request on a guaranteed 409 with
+  nothing to show for it. GIVE_UP_GRACE_MS mirrors the server's own
+  GIVE_UP_THRESHOLD_MS margin (90s past the retry) for the same reason:
+  generation_worker_claimed_at becoming non-null only requires the worker
+  to have *started* (its very first action), not finished, so 90s without
+  it happening is a safe, well-justified "this didn't start" signal, not
+  just "OpenAI is still thinking." GIVE_UP_GRACE_MS_AFTER_NETWORK_ERROR is
+  shorter because a network failure on the retry itself is a distinct,
+  already-uncertain condition - there is no successful re-enqueue to wait
+  out here.
+*/
+const AUTO_RETRY_ELAPSED_THRESHOLD_SECONDS = 310;
+const GIVE_UP_GRACE_MS = 90_000;
+const GIVE_UP_GRACE_MS_AFTER_NETWORK_ERROR = 30_000;
+
 type PasteMode = "url" | "description" | "file";
 
 type PreviewType = "resume" | "coverLetter" | "emailDraft";
@@ -1030,6 +1050,30 @@ const [
   const pollerRef = useRef<PollerHandle | null>(null);
   const recoveryAttemptedRef = useRef(false);
 
+  /*
+    Stale-worker recovery (app/api/generate-package/route.ts is the
+    server-side counterpart): autoRetryAttemptedRef guards "exactly one
+    automatic re-enqueue POST per generation attempt" - reset at the top of
+    beginPolling() for each fresh attempt, and deliberately never persisted
+    (a page refresh starting a new in-memory count is expected, matching
+    this whole recovery mechanism's non-persistent design). giveUpTimerRef
+    holds the scheduled "still stuck after the retry" check so it can be
+    cancelled the moment this attempt resolves through any path -
+    applySucceededResult()/applyFailedResult() below both clear it, so a
+    normal success/failure occurring on its own (unrelated to this
+    recovery) can never have a stray delayed check fire afterward and
+    incorrectly override an already-resolved outcome.
+  */
+  const autoRetryAttemptedRef = useRef(false);
+  const giveUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearGiveUpTimer() {
+    if (giveUpTimerRef.current) {
+      clearTimeout(giveUpTimerRef.current);
+      giveUpTimerRef.current = null;
+    }
+  }
+
   function stopPolling() {
     if (pollerRef.current) {
       pollerRef.current.stop();
@@ -1079,6 +1123,7 @@ const [
       packageAnalysis: unknown;
     } & Partial<JobContext>
   ) {
+    clearGiveUpTimer();
     setPackageData({
       resume: result.resume,
       coverLetter: result.coverLetter,
@@ -1102,6 +1147,7 @@ const [
   function applyFailedResult(
     result: { code: string | null; message: string } & Partial<JobContext>
   ) {
+    clearGiveUpTimer();
     setGenerationPhase("failed");
     setGenerationErrorInfo({
       code: result.code || undefined,
@@ -1122,6 +1168,202 @@ const [
     where the entry already exists) leaves it untouched until the attempt
     resolves.
   */
+  /*
+    Fire-and-forget, best-effort request that asks the server to finalize a
+    generation attempt that never got claimed as failed (marks it
+    generation_status='failed' and refunds its quota reservation - see
+    app/api/generate-package/route.ts's GIVE_UP_THRESHOLD_MS branch).
+    Deliberately does not stop polling or touch any UI state itself: by
+    the time this is called, the caller has already done that. Whatever
+    the server decides (finalize it, or discover it actually resolved by
+    now and no-op), the poller already stopped is not affected either way
+    - if the server response disagrees, the user's own next manual click
+    is the recovery path, not another automatic attempt here.
+  */
+  async function requestGiveUpFinalize(
+    currentApplicationId: string,
+    currentGenerationRequestId: string
+  ) {
+    try {
+      await fetch("/api/generate-package", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobAnalysis: analysis,
+          jobDescription: getOriginalJobSnippet(),
+          jobUrl: jobUrl.trim(),
+          generationRequestId: currentGenerationRequestId,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch {
+      /*
+        Best-effort only - the row may remain "pending" in this rare
+        double-failure case until the user's next manual Generate Package
+        click naturally reclaims/finalizes it through the same idempotent
+        server logic.
+      */
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "automatic recovery timed out",
+        applicationId: currentApplicationId,
+      })
+    );
+  }
+
+  /*
+    Scheduled ~90s (or ~30s after a network error on the retry itself)
+    after a successful automatic re-enqueue, to catch the case where the
+    retry's own worker invocation *also* never actually starts running.
+    Cancelled the instant this attempt resolves through any path (see
+    applySucceededResult()/applyFailedResult()'s clearGiveUpTimer() calls),
+    so it can only ever fire while the poller for this exact attempt is
+    still running with nothing having happened yet.
+  */
+  function scheduleGiveUpCheck(
+    currentApplicationId: string,
+    currentGenerationRequestId: string,
+    delayMs: number
+  ) {
+    clearGiveUpTimer();
+
+    giveUpTimerRef.current = setTimeout(() => {
+      giveUpTimerRef.current = null;
+
+      /*
+        Only act if this attempt is still the one actively being tracked -
+        pollerRef is only non-null while an attempt is still unresolved
+        (any success/failure stops it), so this can never fire after the
+        job has already been resolved through its normal path.
+      */
+      if (!pollerRef.current) return;
+
+      stopPolling();
+      applyFailedResult({
+        code: "BACKGROUND_WORKER_NOT_STARTED",
+        message:
+          "Package generation could not start. No usage was deducted. Please try again.",
+      });
+
+      void requestGiveUpFinalize(currentApplicationId, currentGenerationRequestId);
+    }, delayMs);
+  }
+
+  /*
+    Attempts exactly one automatic re-enqueue of the existing, already-
+    idempotent Generate Package POST route, reusing the same
+    generationRequestId (never a new one) - the server's own atomic worker
+    claim is what makes this safe even if the original invocation turns
+    out to have actually started in the interim (see route.ts's
+    generation_worker_claimed_at check).
+  */
+  async function performAutoRetry(
+    currentApplicationId: string,
+    currentGenerationRequestId: string
+  ) {
+    console.log(
+      JSON.stringify({
+        event: "automatic re-enqueue attempted",
+        applicationId: currentApplicationId,
+      })
+    );
+
+    try {
+      const response = await fetch("/api/generate-package", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobAnalysis: analysis,
+          jobDescription: getOriginalJobSnippet(),
+          jobUrl: jobUrl.trim(),
+          generationRequestId: currentGenerationRequestId,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json");
+      let data: unknown = null;
+
+      if (isJson) {
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+      }
+
+      const result = parseGenerateResponse(
+        response.status,
+        isJson && data !== null,
+        data
+      );
+
+      if (result.kind === "processing") {
+        scheduleGiveUpCheck(
+          currentApplicationId,
+          currentGenerationRequestId,
+          GIVE_UP_GRACE_MS
+        );
+        return;
+      }
+
+      if (result.kind === "succeeded") {
+        stopPolling();
+        applySucceededResult(result);
+        return;
+      }
+
+      /*
+        409 (already claimed, or the server itself already gave up and
+        marked it failed - the next poll tick will reflect that either
+        way) or any other error kind - never a second automatic attempt.
+        Existing polling continues untouched; no give-up timer is armed
+        since there was no successful re-enqueue to wait out.
+      */
+    } catch {
+      scheduleGiveUpCheck(
+        currentApplicationId,
+        currentGenerationRequestId,
+        GIVE_UP_GRACE_MS_AFTER_NETWORK_ERROR
+      );
+    }
+  }
+
+  /*
+    Watches the live poll stream (already running every ~2.5s) for a job
+    that has stayed at "queued" long enough that the server would honor a
+    reclaim, and fires the one automatic retry exactly once per attempt.
+  */
+  function maybeAutoRetry(
+    currentApplicationId: string,
+    currentGenerationRequestId: string | null,
+    status: { stage: string | null; elapsedSeconds: number | null }
+  ) {
+    if (autoRetryAttemptedRef.current) return;
+    if (!currentGenerationRequestId) return;
+    if (status.stage !== "queued") return;
+    if (
+      status.elapsedSeconds === null ||
+      status.elapsedSeconds < AUTO_RETRY_ELAPSED_THRESHOLD_SECONDS
+    ) {
+      return;
+    }
+
+    autoRetryAttemptedRef.current = true;
+
+    console.log(
+      JSON.stringify({
+        event: "stale queued job detected",
+        applicationId: currentApplicationId,
+      })
+    );
+
+    void performAutoRetry(currentApplicationId, currentGenerationRequestId);
+  }
+
   function beginPolling(
     applicationId: string,
     /*
@@ -1135,6 +1377,8 @@ const [
     options: { persist: boolean; immediate: boolean }
   ) {
     stopPolling();
+    clearGiveUpTimer();
+    autoRetryAttemptedRef.current = false;
 
     if (options.persist && generationRequestId) {
       writeActiveGeneration(window.sessionStorage, {
@@ -1155,6 +1399,10 @@ const [
         setProgressInfo({
           stage: result.stage,
           progress: result.progress,
+          elapsedSeconds: result.elapsedSeconds,
+        });
+        maybeAutoRetry(applicationId, generationRequestId, {
+          stage: result.stage,
           elapsedSeconds: result.elapsedSeconds,
         });
       },

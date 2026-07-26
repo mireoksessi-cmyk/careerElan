@@ -50,6 +50,21 @@ import {
 const WORKER_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 /*
+  How long a claim can go completely un-started (generation_worker_claimed_at
+  still null) - measured from the row's created_at, which no reclaim below
+  ever touches, so it keeps counting across multiple reclaim attempts -
+  before this route gives up entirely instead of reclaiming again. Sized as
+  WORKER_STALE_THRESHOLD_MS (the point a first automatic retry becomes
+  eligible) plus a 90s grace window for that retry's own re-enqueue to
+  actually get claimed, matching the client's own give-up wait
+  (app/paste-job/page.tsx). A row that is still unclaimed this long after
+  its very first attempt has had two full chances to start and has not -
+  continuing to reclaim it indefinitely would silently keep the user
+  waiting forever with nothing left to try.
+*/
+const GIVE_UP_THRESHOLD_MS = WORKER_STALE_THRESHOLD_MS + 90 * 1000;
+
+/*
   Immediately refunds a quota reservation on any early-return failure path
   after it was taken - never left to the outer catch block alone, since
   several failure paths below (missing OPENAI_API_KEY, resume resolution
@@ -489,7 +504,7 @@ export async function POST(req: Request) {
         const { data: existing, error: existingError } = await supabase
           .from("applications")
           .select(
-            "id, generation_status, generation_started_at, generation_worker_claimed_at, resume_text, cover_letter_text, email_draft, ai_insight"
+            "id, generation_status, created_at, generation_started_at, generation_worker_claimed_at, resume_text, cover_letter_text, email_draft, ai_insight"
           )
           .eq("user_id", user.id)
           .eq("generation_request_id", generationRequestId)
@@ -582,26 +597,139 @@ export async function POST(req: Request) {
           : 0;
         const pendingAgeMs = Date.now() - pendingStartedAt;
 
-        if (
-          existing.generation_status === "pending" &&
-          pendingAgeMs < WORKER_STALE_THRESHOLD_MS
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                "Generation is already in progress for this job. Please wait a moment and check Job Tracker.",
-              code: "GENERATION_IN_PROGRESS",
+        if (existing.generation_status === "pending") {
+          /*
+            A worker that has already claimed this row (claim_generate_
+            package_worker's atomic UPDATE succeeded, at some point, for
+            some invocation of it) may still be genuinely running - a slow
+            OpenAI call, or one that started late after a Background
+            Function cold-start delay. Never reset its claim or enqueue a
+            second worker while that's possible: the worker's own
+            OPENAI_CALL_TIMEOUT_MS (120s) and its own catch block are what
+            eventually resolve a genuinely stuck *claimed* row to 'failed',
+            not this route.
+          */
+          if (existing.generation_worker_claimed_at !== null) {
+            console.log(
+              JSON.stringify({
+                event: "reclaim skipped because worker already claimed",
+                applicationId: existing.id,
+              })
+            );
+
+            return NextResponse.json(
+              {
+                error:
+                  "Generation is already in progress for this job. Please wait a moment and check Job Tracker.",
+                code: "GENERATION_IN_PROGRESS",
+                applicationId: existing.id,
+              },
+              { status: 409 }
+            );
+          }
+
+          const totalAgeMs = existing.created_at
+            ? Date.now() - new Date(existing.created_at).getTime()
+            : pendingAgeMs;
+
+          /*
+            Never claimed at all (the Background Function invocation
+            itself never started running - see generate-package-
+            background.ts's own docstring on why a 202 does not guarantee
+            that), and now old enough since the very first attempt that a
+            worker should certainly have started by now even accounting for
+            one prior reclaim. Continuing to reclaim forever would just
+            keep the user waiting indefinitely with nothing left to try -
+            give up instead: mark this attempt failed and refund the quota
+            reservation rather than silently re-enqueueing again.
+          */
+          if (totalAgeMs >= GIVE_UP_THRESHOLD_MS) {
+            await supabase
+              .from("applications")
+              .update({
+                generation_status: "failed",
+                generation_error_code: "BACKGROUND_WORKER_NOT_STARTED",
+                generation_error_summary:
+                  "The background worker never started processing this request.",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existing.id)
+              .eq("user_id", user.id);
+
+            console.log(
+              JSON.stringify({
+                event: "queued job marked failed",
+                applicationId: existing.id,
+              })
+            );
+
+            const hadQuotaReservation = quotaReserved;
+
+            await releaseQuotaReservation(
+              quotaReserved,
+              userId,
+              generationRequestId,
+              { requestId }
+            );
+
+            console.log(
+              JSON.stringify({
+                event: hadQuotaReservation
+                  ? "quota reservation released"
+                  : "quota release skipped because already released",
+                userId,
+              })
+            );
+
+            logSafeError(
+              new Error(
+                "Background worker never started before give-up threshold."
+              ),
+              {
+                requestId,
+                route: "/api/generate-package#give-up",
+                userId,
+                generationRequestId,
+              }
+            );
+
+            return NextResponse.json(
+              {
+                error:
+                  "Package generation could not start. No usage was deducted. Please try again.",
+                code: "BACKGROUND_WORKER_NOT_STARTED",
+                applicationId: existing.id,
+              },
+              { status: 422 }
+            );
+          }
+
+          if (pendingAgeMs < WORKER_STALE_THRESHOLD_MS) {
+            return NextResponse.json(
+              {
+                error:
+                  "Generation is already in progress for this job. Please wait a moment and check Job Tracker.",
+                code: "GENERATION_IN_PROGRESS",
+                applicationId: existing.id,
+              },
+              { status: 409 }
+            );
+          }
+
+          console.log(
+            JSON.stringify({
+              event: "stale queued job detected",
               applicationId: existing.id,
-            },
-            { status: 409 }
+            })
           );
         }
 
         /*
           Either generation_status === "failed" (a previous attempt with
-          this same id failed), or it's "pending" but older than
-          WORKER_STALE_THRESHOLD_MS - almost certainly a worker invocation
-          that was killed before it could ever reach its own
+          this same id failed), or it's "pending", never claimed, and older
+          than WORKER_STALE_THRESHOLD_MS but not yet past
+          GIVE_UP_THRESHOLD_MS - almost certainly a worker invocation that
+          was killed (or never started) before it could ever reach its own
           success/failure update. Either way: reclaim and reuse this row
           rather than inserting a new one, then fall through to
           re-enqueue.
@@ -669,6 +797,13 @@ export async function POST(req: Request) {
       the row stuck at "pending" forever, so it's marked failed and the
       quota reservation refunded immediately.
     */
+    console.log(
+      JSON.stringify({
+        event: "automatic re-enqueue attempted",
+        applicationId: claimedApplicationId,
+      })
+    );
+
     try {
       const requestOrigin = new URL(req.url).origin;
 
@@ -677,7 +812,21 @@ export async function POST(req: Request) {
         claimedApplicationId,
         generationRequestId
       );
+
+      console.log(
+        JSON.stringify({
+          event: "automatic re-enqueue accepted",
+          applicationId: claimedApplicationId,
+        })
+      );
     } catch (enqueueError) {
+      console.log(
+        JSON.stringify({
+          event: "automatic re-enqueue rejected",
+          applicationId: claimedApplicationId,
+        })
+      );
+
       logSafeError(enqueueError, {
         requestId,
         route: "/api/generate-package#enqueue",
