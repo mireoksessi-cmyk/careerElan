@@ -1554,8 +1554,65 @@ async function loadSelectedApplicationMaterials() {
       }
     );
 
-    const data =
-      await response.json();
+    /*
+      A platform-level failure in front of the route handler itself
+      (Netlify function timeout/crash -> a 502/504 gateway page, an auth
+      proxy redirect, etc.) never reaches app/api/generate-package/route.ts
+      at all - every code path inside that route already returns JSON, so
+      a non-JSON body here means something upstream of it intercepted the
+      request. Checking content-type before parsing keeps that case from
+      surfacing as a raw "Unexpected token '<'" JSON.parse crash - the body
+      itself (which may be an HTML error page) is never shown to the user,
+      only logged for diagnostics.
+    */
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (!contentType.includes("application/json")) {
+      console.error(
+        "GENERATE PACKAGE NON-JSON RESPONSE =",
+        response.status,
+        contentType
+      );
+
+      if (
+        response.status === 502 ||
+        response.status === 504
+      ) {
+        throw new Error(
+          "Package generation took too long on the server. Please try again."
+        );
+      }
+
+      if (
+        response.status === 401 ||
+        response.status === 403
+      ) {
+        throw new Error(
+          "Your session may have expired. Please sign in again."
+        );
+      }
+
+      throw new Error(
+        "The server returned an unexpected response. Please try again."
+      );
+    }
+
+    let data;
+
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error(
+        "GENERATE PACKAGE RESPONSE PARSE ERROR =",
+        response.status,
+        parseError
+      );
+
+      throw new Error(
+        "The server returned an unexpected response. Please try again."
+      );
+    }
 
     if (
       response.status === 429 &&
