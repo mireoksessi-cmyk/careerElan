@@ -3232,6 +3232,16 @@ export async function POST(
   const requestId = crypto.randomUUID();
 
   /*
+    Diagnostic-only, investigating a Production 504/text-html response on
+    this route despite maxDuration=60. No behavior change - every line
+    below is a plain console.log carrying requestId, added purely to find
+    the exact last stage reached before the platform returns 504 (Netlify
+    Function Logs capture stdout regardless of whether the HTTP response
+    itself ever completes). Remove once the root cause is confirmed.
+  */
+  console.log(`GP START requestId=${requestId}`);
+
+  /*
     Declared outside the try block so the catch handler below can mark this
     generation attempt as failed even when the error is thrown after the
     row was already claimed - the id would otherwise be out of scope.
@@ -3815,6 +3825,7 @@ export async function POST(
       manifest
     );
 
+    console.log(`GP OPENAI START requestId=${requestId}`);
     const aiResponse =
       await client.responses.create({
         model:
@@ -4324,6 +4335,7 @@ COMPLETE JOB DESCRIPTION
 ${jobText}
 `,
       }, { timeout: OPENAI_CALL_TIMEOUT_MS });
+    console.log(`GP OPENAI END requestId=${requestId}`);
 
     const rawPackage =
       extractJson(
@@ -4417,6 +4429,7 @@ ${jobText}
       packageAnalysis
     );
 
+    console.log(`GP DB UPDATE START requestId=${requestId}`);
     await supabase
       .from("applications")
       .update({
@@ -4436,8 +4449,10 @@ ${jobText}
       })
       .eq("id", applicationId)
       .eq("user_id", userId);
+    console.log(`GP DB UPDATE END requestId=${requestId}`);
 
     if (quotaReserved && generationRequestId) {
+      console.log(`GP QUOTA COMPLETE START requestId=${requestId}`);
       let completeError = null;
 
       /*
@@ -4489,7 +4504,8 @@ ${jobText}
           generationRequestId,
         });
 
-        return NextResponse.json(
+        console.log(`GP RESPONSE SENT (quota-pending 500) requestId=${requestId}`);
+        const quotaPendingResponse = NextResponse.json(
           {
             error:
               "Your application package was generated successfully, but we couldn't confirm your usage count. Please try again - this will not use an additional generation.",
@@ -4499,10 +4515,14 @@ ${jobText}
           },
           { status: 500 }
         );
+        console.log(`GP END requestId=${requestId}`);
+        return quotaPendingResponse;
       }
+      console.log(`GP QUOTA COMPLETE END requestId=${requestId}`);
     }
 
-    return NextResponse.json({
+    console.log(`GP RESPONSE SENT (200) requestId=${requestId}`);
+    const successResponse = NextResponse.json({
       resume,
       coverLetter,
       emailDraft,
@@ -4520,7 +4540,23 @@ ${jobText}
       },
       applicationId,
     });
+    console.log(`GP END requestId=${requestId}`);
+    return successResponse;
   } catch (error) {
+    /*
+      Error class name only (e.g. "Error", "APIConnectionTimeoutError",
+      "RateLimitError") - never error.message. Some of this route's own
+      validators (e.g. validateSourceIntegrity) build their message from
+      applicant facts (name/email/phone) when a required fact is missing,
+      so message text is not safe to put in a plain diagnostic log even
+      truncated. logSafeError() below remains the one sanctioned place
+      that already handles this message safely.
+    */
+    const caughtErrorName =
+      error instanceof Error ? error.name : typeof error;
+    console.log(
+      `GP CAUGHT ERROR requestId=${requestId} name=${caughtErrorName}`
+    );
     if (quotaReserved && generationRequestId && userId) {
       try {
         /*
@@ -4577,7 +4613,8 @@ ${jobText}
       route: "/api/generate-package",
     });
 
-    return NextResponse.json(
+    console.log(`GP RESPONSE SENT (catch 500) requestId=${requestId}`);
+    const errorResponse = NextResponse.json(
       {
         error:
           "Failed to generate application package. Please try again.",
@@ -4592,5 +4629,7 @@ ${jobText}
         status: 500,
       }
     );
+    console.log(`GP END (error) requestId=${requestId}`);
+    return errorResponse;
   }
 }
