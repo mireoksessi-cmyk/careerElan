@@ -10,6 +10,17 @@ import A4Preview from "../job-tracker/A4Preview";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
+import {
+  ActiveGeneration,
+  clearActiveGeneration,
+  createPoller,
+  isGenerationActive,
+  parseGenerateResponse,
+  readActiveGeneration,
+  writeActiveGeneration,
+  type GenerationPhase,
+  type PollerHandle,
+} from "@/lib/generatePackage/pollingClient";
 
 type PasteMode = "url" | "description" | "file";
 
@@ -248,6 +259,22 @@ type GeneratedPackage = {
   coverLetter: string;
   emailDraft: string;
   packageAnalysis: PackageAnalysis | null;
+};
+
+/*
+  GenerationPhase itself lives in lib/generatePackage/pollingClient.ts
+  (imported above) so its duplicate-submit predicate, isGenerationActive(),
+  can be unit-tested against the exact same type the component uses.
+  Phase transitions: idle -> submitting (POST in flight) -> pending (202,
+  polling /api/applications/[id]/status) -> succeeded | failed |
+  poll_timeout. "poll_timeout" means only the browser gave up waiting -
+  the backend job may still complete; it never implies "failed" (that
+  only ever comes from the status endpoint itself reporting
+  generation_status = 'failed').
+*/
+type GenerationErrorInfo = {
+  code?: string;
+  message: string;
 };
 
 const menuItems = [
@@ -915,11 +942,23 @@ const [
 const [
   generationProgress,
   setGenerationProgress,
-] = useState(0);  
+] = useState(0);
   const [analyzed, setAnalyzed] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  /*
+    generationPhase is the source of truth for the async flow; isGenerating
+    is derived from it (submitting/pending only) so every existing
+    isGenerating-driven disabled/label check below keeps working unchanged.
+    poll_timeout deliberately does NOT count as isGenerating - the button
+    re-enables so the user isn't stuck if the browser gives up waiting,
+    and a genuine still-in-flight retry is safely rejected server-side
+    (409 GENERATION_IN_PROGRESS) rather than by disabling the client.
+  */
+  const [generationPhase, setGenerationPhase] = useState<GenerationPhase>("idle");
+  const isGenerating = isGenerationActive(generationPhase);
+  const [generationErrorInfo, setGenerationErrorInfo] =
+    useState<GenerationErrorInfo | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<PreviewType>("resume");
   const [showDefaultApplication, setShowDefaultApplication] = useState(false);
 
@@ -945,7 +984,127 @@ const [
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const autoAnalyzeStartedRef = useRef(false);
-  
+
+  /*
+    Poll lifecycle: pollerRef holds the currently active poller (if any),
+    so it can always be stopped - on unmount, on a new Generate click, on
+    retry, or when the tracked applicationId changes - without ever
+    leaving two pollers running at once. recoveryAttemptedRef guards the
+    refresh-recovery effect to run at most once per page load.
+  */
+  const pollerRef = useRef<PollerHandle | null>(null);
+  const recoveryAttemptedRef = useRef(false);
+
+  function stopPolling() {
+    if (pollerRef.current) {
+      pollerRef.current.stop();
+      pollerRef.current = null;
+    }
+  }
+
+  /*
+    Applies a successful generation result (from either the initial POST's
+    200 replay, the polling GET's "succeeded" state, or refresh recovery)
+    identically in all three cases - one place defines what "a completed
+    package" looks like on screen.
+  */
+  function applySucceededResult(result: {
+    applicationId: string;
+    resume: string;
+    coverLetter: string;
+    emailDraft: string;
+    packageAnalysis: unknown;
+  }) {
+    setPackageData({
+      resume: result.resume,
+      coverLetter: result.coverLetter,
+      emailDraft: result.emailDraft,
+      packageAnalysis:
+        (result.packageAnalysis as PackageAnalysis | null) || null,
+    });
+    setSelectedPreview("resume");
+    setGenerated(true);
+    setApplicationId(result.applicationId || null);
+    setGenerationPhase("succeeded");
+    setGenerationProgress(100);
+    setGenerationErrorInfo(null);
+    setMessage(
+      "Your AI-tailored application package has been generated successfully."
+    );
+    clearActiveGeneration(window.sessionStorage);
+  }
+
+  function applyFailedResult(result: { code: string | null; message: string }) {
+    setGenerationPhase("failed");
+    setGenerationProgress(0);
+    setGenerationErrorInfo({
+      code: result.code || undefined,
+      message: result.message,
+    });
+    setMessage(result.message);
+    clearActiveGeneration(window.sessionStorage);
+  }
+
+  /*
+    Begins polling GET /api/applications/{applicationId}/status for one
+    generation attempt. persist=true (a freshly claimed attempt) writes
+    the sessionStorage recovery entry; persist=false (refresh recovery,
+    where the entry already exists) leaves it untouched until the attempt
+    resolves.
+  */
+  function beginPolling(
+    applicationId: string,
+    generationRequestId: string,
+    options: { persist: boolean; immediate: boolean }
+  ) {
+    stopPolling();
+
+    if (options.persist) {
+      writeActiveGeneration(window.sessionStorage, {
+        applicationId,
+        generationRequestId,
+        startedAt: Date.now(),
+      });
+    }
+
+    setGenerationPhase("pending");
+    setGenerationProgress(55);
+
+    pollerRef.current = createPoller({
+      applicationId,
+      immediate: options.immediate,
+      onSucceeded: (result) => {
+        pollerRef.current = null;
+        applySucceededResult(result);
+      },
+      onFailed: (result) => {
+        pollerRef.current = null;
+        applyFailedResult(result);
+      },
+      onInvalid: () => {
+        pollerRef.current = null;
+        clearActiveGeneration(window.sessionStorage);
+        setGenerationPhase("idle");
+        setGenerationProgress(0);
+      },
+      onUnauthorized: () => {
+        pollerRef.current = null;
+        setGenerationPhase("failed");
+        setGenerationProgress(0);
+        setGenerationErrorInfo({
+          message: "Your session may have expired. Please sign in again.",
+        });
+      },
+      onTimeout: () => {
+        pollerRef.current = null;
+        setGenerationPhase("poll_timeout");
+        setMessage(
+          "Your package is still being generated. Please try checking again shortly."
+        );
+      },
+    });
+  }
+
 useEffect(() => {
   if (loading) return;
   if (!user) return;
@@ -987,6 +1146,54 @@ useEffect(() => {
     cancelled = true;
   };
 }, [loading, user]);
+
+/*
+  Refresh recovery: runs once per page load, after auth resolves. Checks
+  for a previously-persisted active generation (see beginPolling's
+  persist:true write) and reconciles it against the server's current
+  view via one status call, before deciding whether to resume polling,
+  restore a completed result, show a failure, or silently clear a
+  stale/invalid entry. Never restores job-analysis state (analysis/
+  jobUrl/jobDescription) - only feasible with existing IDs, per Phase 2
+  scope; the same limitation already existed for a plain page refresh
+  before this feature.
+*/
+useEffect(() => {
+  if (loading) return;
+  if (!user) return;
+  if (recoveryAttemptedRef.current) return;
+  recoveryAttemptedRef.current = true;
+
+  const stored: ActiveGeneration | null = readActiveGeneration(
+    window.sessionStorage
+  );
+
+  if (!stored) return;
+
+  setApplicationId(stored.applicationId);
+  setGenerationRequestId(stored.generationRequestId);
+  setMessage(
+    "Resuming a previously started application package generation..."
+  );
+
+  beginPolling(stored.applicationId, stored.generationRequestId, {
+    persist: false,
+    immediate: true,
+  });
+}, [loading, user]);
+
+/*
+  Cleanup on unmount: an in-flight poll must never call setState on an
+  unmounted component (React warning at best, a stale-closure bug at
+  worst) and must never keep hitting the status endpoint after the user
+  has navigated away.
+*/
+useEffect(() => {
+  return () => {
+    stopPolling();
+  };
+}, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const url = params.get("url");
@@ -1288,6 +1495,18 @@ packageAnalysis: null,
       : [],
 };
 
+      /*
+        A newly analyzed job supersedes whatever generation attempt (if
+        any) was previously being tracked for the old job - stop polling
+        it and drop its recovery entry so a refresh doesn't try to
+        resurrect a now-irrelevant attempt.
+      */
+      stopPolling();
+      clearActiveGeneration(window.sessionStorage);
+      setGenerationPhase("idle");
+      setGenerationErrorInfo(null);
+      setGenerationProgress(0);
+
       setAnalysis(nextAnalysis);
     setAnalyzed(true);
     setGenerated(false);
@@ -1310,6 +1529,12 @@ packageAnalysis: null,
         "currently analyzed job" identity, matching the reset already done
         at the start of a fresh, successful analyzeJob() call above.
       */
+      stopPolling();
+      clearActiveGeneration(window.sessionStorage);
+      setGenerationPhase("idle");
+      setGenerationErrorInfo(null);
+      setGenerationProgress(0);
+
       setAnalysis(emptyAnalysis);
       setAnalyzed(false);
       setGenerated(false);
@@ -1477,48 +1702,32 @@ async function loadSelectedApplicationMaterials() {
     return;
   }
 
-  let progressTimer:
-    | ReturnType<
-        typeof setInterval
-      >
-    | undefined;
+  /*
+    Duplicate-click protection beyond the disabled button attribute (which
+    a very fast double-click can race past before React re-renders):
+    submitting/pending means an attempt for this same generationRequestId
+    is already in flight or being polled - never send a second POST.
+  */
+  if (isGenerationActive(generationPhase)) {
+    return;
+  }
 
-  const generationStartedAt =
-    Date.now();
+  // A retry after failure/timeout starts clean: drop any leftover poller
+  // from a prior attempt before beginning this one.
+  stopPolling();
 
   try {
-    setIsGenerating(true);
+    setGenerationPhase("submitting");
     setGenerationProgress(10);
+    setGenerationErrorInfo(null);
     setMessage("");
 
     /*
-      실제 API의 세부 진행 상황은
-      전달받을 수 없으므로 예상 진행률을
-      10 → 30 → 50 → 70으로 표시한다.
-
-      API 완료 시에만 100이 된다.
+      Minimal job data only - the server resolves the caller's actual
+      selected resume itself (resolveSelectedResume(), keyed off the
+      authenticated session), so no resume/career_memory data is sent
+      from here anymore.
     */
-    progressTimer = setInterval(
-      () => {
-        const elapsed =
-          Date.now() -
-          generationStartedAt;
-
-       if (elapsed >= 45000) {
-  setGenerationProgress(85);
-} else if (elapsed >= 30000) {
-  setGenerationProgress(70);
-} else if (elapsed >= 15000) {
-  setGenerationProgress(50);
-} else if (elapsed >= 6000) {
-  setGenerationProgress(30);
-} else {
-  setGenerationProgress(10);
-}
-      },
-      1000
-    );
-
     const response = await fetch(
       "/api/generate-package",
       {
@@ -1529,12 +1738,6 @@ async function loadSelectedApplicationMaterials() {
             "application/json",
         },
 
-        /*
-          Minimal job data only - the server resolves the caller's actual
-          selected resume itself (resolveSelectedResume(), keyed off the
-          authenticated session), so no resume/career_memory data is sent
-          from here anymore.
-        */
         body: JSON.stringify({
           jobAnalysis: analysis,
           jobDescription:
@@ -1544,169 +1747,97 @@ async function loadSelectedApplicationMaterials() {
         }),
 
         /*
-          The server may still finish and persist a result after this
-          fires - it doesn't cancel server-side work, only this client's
-          wait for it. 90s sits above the server's own 60s OpenAI timeout,
-          so a hung request is caught server-side first in the normal case;
-          this is the backstop for when the server itself never responds.
+          Only guards against the claim step itself never responding - the
+          claim (auth, quota, resolve resume, insert/reclaim row, enqueue
+          worker) is designed to complete in well under a second, so this
+          is a generous backstop, not a normal-path timeout. It never
+          cancels server-side work; the actual generation now runs in a
+          background worker this request doesn't wait for at all.
         */
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(20_000),
       }
     );
 
-    /*
-      A platform-level failure in front of the route handler itself
-      (Netlify function timeout/crash -> a 502/504 gateway page, an auth
-      proxy redirect, etc.) never reaches app/api/generate-package/route.ts
-      at all - every code path inside that route already returns JSON, so
-      a non-JSON body here means something upstream of it intercepted the
-      request. Checking content-type before parsing keeps that case from
-      surfacing as a raw "Unexpected token '<'" JSON.parse crash - the body
-      itself (which may be an HTML error page) is never shown to the user,
-      only logged for diagnostics.
-    */
     const contentType =
       response.headers.get("content-type") || "";
+    const isJson = contentType.includes("application/json");
 
-    if (!contentType.includes("application/json")) {
+    let data: unknown = null;
+
+    if (isJson) {
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error(
+          "GENERATE PACKAGE RESPONSE PARSE ERROR =",
+          response.status,
+          parseError
+        );
+      }
+    } else {
       console.error(
         "GENERATE PACKAGE NON-JSON RESPONSE =",
         response.status,
         contentType
       );
-
-      if (
-        response.status === 502 ||
-        response.status === 504
-      ) {
-        throw new Error(
-          "Package generation took too long on the server. Please try again."
-        );
-      }
-
-      if (
-        response.status === 401 ||
-        response.status === 403
-      ) {
-        throw new Error(
-          "Your session may have expired. Please sign in again."
-        );
-      }
-
-      throw new Error(
-        "The server returned an unexpected response. Please try again."
-      );
     }
 
-    let data;
+    const result = parseGenerateResponse(
+      response.status,
+      isJson && data !== null,
+      data
+    );
 
-    try {
-      data = await response.json();
-    } catch (parseError) {
-      console.error(
-        "GENERATE PACKAGE RESPONSE PARSE ERROR =",
-        response.status,
-        parseError
+    if (result.kind === "processing") {
+      setMessage(
+        "Your application package is being generated. This page will update automatically."
       );
-
-      throw new Error(
-        "The server returned an unexpected response. Please try again."
-      );
+      beginPolling(result.applicationId, result.generationRequestId, {
+        persist: true,
+        immediate: false,
+      });
+      return;
     }
 
-    if (
-      response.status === 429 &&
-      data.code === "GENERATE_PACKAGE_LIMIT_REACHED"
-    ) {
+    if (result.kind === "succeeded") {
+      applySucceededResult(result);
+      return;
+    }
+
+    if (result.kind === "quota_reached") {
       setGeneratePackageQuota({
         enforced: true,
-        limit:
-          typeof data.limit === "number"
-            ? data.limit
-            : 5,
-        used:
-          typeof data.used === "number"
-            ? data.used
-            : null,
+        limit: result.limit,
+        used: result.used,
         remaining: 0,
       });
 
-      const limitError: Error & { code?: string } =
-        new Error(
-          "You have used all 5 Generate Package generations available for your account."
-        );
-
-      limitError.code =
-        "GENERATE_PACKAGE_LIMIT_REACHED";
-
+      const limitError: Error & { code?: string } = new Error(
+        "You have used all 5 Generate Package generations available for your account."
+      );
+      limitError.code = "GENERATE_PACKAGE_LIMIT_REACHED";
       throw limitError;
     }
 
-    if (response.status === 409) {
-      throw new Error(
-        data.error ||
-          "Generation is already in progress for this job. Please wait a moment."
-      );
+    if (result.kind === "in_progress") {
+      throw new Error(result.message);
     }
 
-    if (!response.ok) {
-      throw new Error(
-        data.details ||
-          data.error ||
-          "Failed to generate package."
-      );
-    }
-
-    setGenerationProgress(100);
-
-    setPackageData({
-      resume: data.resume,
-      coverLetter:
-        data.coverLetter,
-      emailDraft:
-        data.emailDraft,
-      packageAnalysis:
-        data.packageAnalysis ||
-        null,
-    });
-
-    setSelectedPreview("resume");
-    setGenerated(true);
-
-    /*
-      The server persists the applications row itself as part of this same
-      request (claimed before generation, updated on success) - the client
-      only needs to remember which row that was, by id, for savePackage()
-      to update later. No client-side insert here anymore.
-    */
-    setApplicationId(
-      data.applicationId || null
-    );
-
-    setMessage(
-      "Your AI-tailored application package has been generated successfully."
-    );
-
-    /*
-      100%가 화면에 잠시 보이도록 함
-    */
-    await new Promise(
-      (resolve) =>
-        setTimeout(resolve, 500)
-    );
+    throw new Error(result.message);
   } catch (error: any) {
     console.error(
       "PACKAGE GENERATION ERROR =",
       error
     );
 
+    setGenerationPhase("idle");
     setGenerationProgress(0);
 
     /*
       AbortSignal.timeout() rejects fetch with a "TimeoutError"; a manual
-      controller.abort() would reject with "AbortError" - either way this
-      is not the same as a hard failure, since the server may still finish
-      and persist a result after the client gave up waiting. The same
+      controller.abort() would reject with "AbortError". Either is a
+      client-side give-up on the claim step itself (not the background
+      generation, which this request no longer waits for) - the same
       generationRequestId is still set, so a manual retry click safely
       becomes an idempotent replay/409/reclaim per the server's own logic,
       not a duplicate generation.
@@ -1722,7 +1853,7 @@ async function loadSelectedApplicationMaterials() {
       error?.name === "AbortError"
     ) {
       alert(
-        "This is taking longer than expected. Check Job Tracker in a moment, or try again."
+        "This is taking longer than expected. Please try again."
       );
     } else {
       alert(
@@ -1730,14 +1861,6 @@ async function loadSelectedApplicationMaterials() {
           "Failed to generate package."
       );
     }
-  } finally {
-    if (progressTimer) {
-      clearInterval(
-        progressTimer
-      );
-    }
-
-    setIsGenerating(false);
   }
 }
   async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -2657,11 +2780,15 @@ async function downloadDocx() {
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-xl font-extrabold">
-          {isGenerating
-            ? "Generating Package..."
-            : generated
-              ? "✅ Package Generated"
-              : "Generate Full Package ✨"}
+          {generationPhase === "submitting"
+            ? "Submitting Request..."
+            : generationPhase === "pending"
+              ? "Generating Package..."
+              : generationPhase === "poll_timeout"
+                ? "Still Generating..."
+                : generated
+                  ? "✅ Package Generated"
+                  : "Generate Full Package ✨"}
         </h3>
 
         <span className="rounded-full bg-white/20 px-3 py-1 text-[11px] font-bold text-white">
@@ -2672,10 +2799,13 @@ async function downloadDocx() {
       <p className="mt-1 text-sm font-semibold text-white/90">
         {isGenerating
           ? "Package generation usually takes about 30 seconds to 1 minute."
-          : "Generate a tailored resume, cover letter, and email draft so you’re ready to apply in minutes."}
+          : generationPhase === "poll_timeout"
+            ? "Your package is still being generated. Please try checking again shortly."
+            : "Generate a tailored resume, cover letter, and email draft so you’re ready to apply in minutes."}
       </p>
 
       {!isGenerating &&
+      generationPhase !== "poll_timeout" &&
       generatePackageQuota?.enforced &&
       typeof generatePackageQuota.remaining === "number" ? (
         <p className="mt-1 text-xs font-bold text-white/80">
@@ -2687,11 +2817,21 @@ async function downloadDocx() {
         </p>
       ) : null}
 
-      {isGenerating ? (
+      {generationPhase === "failed" && generationErrorInfo ? (
+        <div className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-white">
+          {generationErrorInfo.message}
+        </div>
+      ) : null}
+
+      {isGenerating || generationPhase === "poll_timeout" ? (
         <div className="mt-4">
           <div className="flex items-center justify-between gap-4 text-xs font-bold text-white">
             <span>
-              Creating your application package...
+              {generationPhase === "submitting"
+                ? "Submitting your request..."
+                : generationPhase === "poll_timeout"
+                  ? "Still processing on our servers..."
+                  : "Creating your application package..."}
             </span>
 
             <span>
@@ -2710,21 +2850,17 @@ async function downloadDocx() {
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-white/75">
             <span>
-              {generationProgress <= 10
-  ? "Preparing selected resume"
-  : generationProgress <= 30
-    ? "Analyzing job requirements"
-    : generationProgress <= 50
-      ? "Tailoring resume content"
-      : generationProgress <= 70
-        ? "Creating cover letter and email"
-        : generationProgress <= 85
-          ? "Verifying claims and match analysis"
-          : "Finalizing package"}
+              {generationPhase === "submitting"
+                ? "Preparing selected resume"
+                : generationPhase === "poll_timeout"
+                  ? "This is taking longer than usual"
+                  : "Generating on our servers"}
             </span>
 
             <span className="whitespace-nowrap">
-              Estimated: 30–60 seconds
+              {generationPhase === "poll_timeout"
+                ? "You can check back shortly"
+                : "Estimated: 30–60 seconds"}
             </span>
           </div>
         </div>
