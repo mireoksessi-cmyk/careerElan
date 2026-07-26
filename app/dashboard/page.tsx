@@ -961,6 +961,20 @@ const {
  const careerMemoryCompleted =
   careerMemory?.required_completed ?? false;
 
+/*
+  Never "Guest" - profiles row can still be loading/absent even once
+  `user` itself is resolved (e.g. a brand-new OAuth signup whose
+  `profiles` trigger hasn't run yet), so fall back through the OAuth
+  provider's own metadata name, then the email's local part, before
+  finally landing on a neutral "Account" - never a fabricated identity.
+*/
+const displayName =
+  profile?.full_name ||
+  user?.user_metadata?.full_name ||
+  user?.user_metadata?.name ||
+  (user?.email ? user.email.split("@")[0] : "") ||
+  "Account";
+
 const [selectedResume, setSelectedResume] = useState("");
 const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
 const [
@@ -2179,6 +2193,19 @@ useEffect(() => {
   };
 }, [loading, user]);
 
+/*
+  Only redirect once the auth check has actually finished (loading ===
+  false) - redirecting while loading is still true would fire on every
+  page load/refresh before the session has had a chance to hydrate,
+  incorrectly bouncing a genuinely logged-in user to the homepage.
+*/
+useEffect(() => {
+  if (loading) return;
+  if (!user) {
+    router.replace("/");
+  }
+}, [loading, user, router]);
+
 
 
   function closeTour() {
@@ -2277,9 +2304,30 @@ function renderPreviewContent() {
 
   return null;
 }
-  
+
+/*
+  While the auth check is still in flight, never render the real
+  dashboard (which would show fallback/"Guest"-style content for a split
+  second) - a full-page skeleton instead. Once loading has finished and
+  there is genuinely no user, render nothing here; the redirect effect
+  above sends the browser to "/" (the existing login flow) on the same
+  tick React commits this state, so no dashboard content is ever shown
+  to an unauthenticated visitor.
+*/
+if (loading) {
   return (
-  
+    <main className="flex min-h-screen items-center justify-center bg-[#f6fbff]">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
+    </main>
+  );
+}
+
+if (!user) {
+  return null;
+}
+
+  return (
+
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
      {previewAsset && (
   <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
@@ -2469,7 +2517,7 @@ function renderPreviewContent() {
           <header className="flex flex-wrap items-center justify-between gap-4 px-8 py-6">
             <div>
              <h1 className="text-2xl font-extrabold">
-  Good morning, {profile?.full_name || "Guest"}! 👋
+  Good morning, {displayName}! 👋
 </h1>
               <p className="mt-1 text-sm text-gray-500">
                 Find jobs faster. Generate a tailored package in minutes.{" "}
@@ -2489,10 +2537,10 @@ function renderPreviewContent() {
 
               <a href="/settings" className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-blue-50">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
-  {(profile?.full_name || "Guest").charAt(0).toUpperCase()}
+  {displayName.charAt(0).toUpperCase()}
 </div>
                 <div>
-                  <p className="text-sm font-bold">{profile?.full_name || "Guest"}</p>
+                  <p className="text-sm font-bold">{displayName}</p>
                  <p className="text-sm text-gray-500">
   User
 </p>
