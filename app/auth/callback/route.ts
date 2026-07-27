@@ -5,6 +5,20 @@ import {
   isNetlifyRuntime,
   detectNetlifyRuntimeSource,
 } from "@/lib/generatePackage/backgroundTarget";
+import {
+  CONSENT_INTENT_COOKIE_NAME,
+  verifyConsentIntentCookieValue,
+} from "@/lib/auth/consentIntent";
+
+/*
+  Hardcoded, not read from any request - legal document versions are a
+  deliberate, reviewed decision (see docs/legal-drafts/), never something
+  a client request should be able to influence. Bumping these requires a
+  new code change, which is the point.
+*/
+const LEGAL_TERMS_VERSION = "2026-07-26";
+const PRIVACY_POLICY_VERSION = "2026-07-26";
+const COOKIE_POLICY_VERSION = "2026-07-26";
 
 /*
   Diagnostics-only (see the "OAuth redirect diagnostics" investigation) -
@@ -118,6 +132,13 @@ export async function GET(request: Request) {
   );
 
   if (!code) {
+    response.cookies.set({
+      name: CONSENT_INTENT_COOKIE_NAME,
+      value: "",
+      maxAge: 0,
+      path: "/",
+    });
+
     response.headers.set(
       "Location",
       new URL(
@@ -153,6 +174,13 @@ export async function GET(request: Request) {
         errorMessage: safeAuthErrorMessage(exchangeError),
       })
     );
+
+    response.cookies.set({
+      name: CONSENT_INTENT_COOKIE_NAME,
+      value: "",
+      maxAge: 0,
+      path: "/",
+    });
 
     response.headers.set(
       "Location",
@@ -236,6 +264,64 @@ export async function GET(request: Request) {
     console.error(
       "OAUTH PROFILE UPSERT ERROR =",
       profileError
+    );
+  }
+
+  /*
+    OAuth signup legal consent - only recorded when this callback was
+    reached via an OAuth button clicked on the Sign Up screen (see
+    app/api/auth/consent-intent/route.ts, called by app/page.tsx's
+    signInWithProvider() only when authMode === "signup"). A Login-screen
+    OAuth click never sets this cookie, so an existing user logging in
+    never reaches this branch at all - the WHERE clause below is a second,
+    redundant safety net that also protects the rare case of an existing
+    user clicking a Sign Up-screen OAuth button for an account that
+    already has a consent record: the UPDATE simply matches zero rows.
+
+    Email/password signup consent is recorded separately, atomically, by
+    the handle_new_user() database trigger at insert time (see this
+    migration: supabase/migrations/20260726220000_legal_consent_columns.sql) -
+    never here, since email signups never set this cookie.
+  */
+  try {
+    const consentIntentCookie = cookieStore.get(
+      CONSENT_INTENT_COOKIE_NAME
+    )?.value;
+    const consentSource = verifyConsentIntentCookieValue(consentIntentCookie);
+
+    if (consentSource) {
+      const { error: consentError } = await supabase
+        .from("profiles")
+        .update({
+          legal_terms_accepted_at: new Date().toISOString(),
+          legal_terms_version: LEGAL_TERMS_VERSION,
+          privacy_policy_version: PRIVACY_POLICY_VERSION,
+          cookie_policy_version: COOKIE_POLICY_VERSION,
+          consent_source: consentSource,
+        })
+        .eq("id", user.id)
+        .is("legal_terms_accepted_at", null);
+
+      if (consentError) {
+        console.error(
+          "OAUTH CONSENT RECORD ERROR =",
+          consentError
+        );
+      }
+    }
+
+    if (consentIntentCookie) {
+      response.cookies.set({
+        name: CONSENT_INTENT_COOKIE_NAME,
+        value: "",
+        maxAge: 0,
+        path: "/",
+      });
+    }
+  } catch (consentWriteError) {
+    console.error(
+      "OAUTH CONSENT RECORD EXCEPTION =",
+      consentWriteError
     );
   }
 

@@ -35,6 +35,7 @@ const [
   const [signupEmail, setSignupEmail] = useState("");
   const [loginId, setLoginId] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
+  const [agreedToLegalTerms, setAgreedToLegalTerms] = useState(false);
 useEffect(() => {
   const params = new URLSearchParams(
     window.location.search
@@ -120,6 +121,32 @@ useEffect(() => {
   async function signInWithProvider(provider: "google" | "linkedin_oidc" | "facebook") {
     setLoading(true);
     setMessage("");
+
+    /*
+      Only from the Sign Up screen: records "this browser is about to
+      start an OAuth signup with this provider" server-side, via a
+      signed, short-lived cookie the callback reads to decide whether to
+      record legal consent - see app/api/auth/consent-intent/route.ts and
+      app/auth/callback/route.ts. Never sent from the Login screen, so an
+      existing user's OAuth login is never affected. Best-effort: if this
+      request fails, OAuth sign-in still proceeds below - consent simply
+      won't be recorded for this attempt, which is safer than blocking
+      login over it.
+    */
+    if (authMode === "signup") {
+      try {
+        await fetch("/api/auth/consent-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider }),
+        });
+      } catch (consentIntentError) {
+        console.error(
+          "CONSENT INTENT REQUEST ERROR =",
+          consentIntentError
+        );
+      }
+    }
 
     const redirectTo = `${window.location.origin}/auth/callback`;
 
@@ -303,6 +330,19 @@ console.log("LOOKUP DATA =", lookupData);
     return;
   }
 
+  /*
+    Defense in depth - the "Create Account" button is already disabled
+    while unchecked (see its disabled prop below), but this guard makes
+    the requirement hold even if that ever changes or this function is
+    ever called some other way.
+  */
+  if (!agreedToLegalTerms) {
+    setMessage(
+      "You must agree to the Terms of Service, Privacy Policy, and Cookie Policy before creating an account."
+    );
+    return;
+  }
+
   setLoading(true);
   setMessage("");
 
@@ -316,6 +356,15 @@ console.log("LOOKUP DATA =", lookupData);
             full_name: cleanFullName,
             phone: cleanPhone,
             login_id: cleanLoginId,
+            /*
+              Consumed only by the handle_new_user() database trigger
+              (supabase/migrations/20260726220000_legal_consent_columns.sql)
+              at insert time, using the server's own now() and hardcoded
+              document version constants - never trusts a client-supplied
+              timestamp or version string, only this boolean/source pair.
+            */
+            legal_consent: true,
+            consent_source: "email_signup",
           },
           emailRedirectTo:
             `${window.location.origin}/auth/callback`,
@@ -1110,6 +1159,40 @@ async function handleUpdatePassword() {
         </button>
       </div>
 
+      {authMode === "signup" && (
+        <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
+          By continuing with Google, Facebook, or LinkedIn, you
+          acknowledge that you have read and agree to the{" "}
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 underline hover:text-blue-700"
+          >
+            Terms of Service
+          </a>
+          ,{" "}
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 underline hover:text-blue-700"
+          >
+            Privacy Policy
+          </a>
+          , and{" "}
+          <a
+            href="/cookies"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 underline hover:text-blue-700"
+          >
+            Cookie Policy
+          </a>
+          .
+        </p>
+      )}
+
       <div className="my-6 flex items-center gap-4">
         <div className="h-px flex-1 bg-slate-200" />
 
@@ -1162,10 +1245,67 @@ async function handleUpdatePassword() {
       type="password"
     />
 
+    <div className="flex items-start gap-3">
+      <input
+        id="legal-consent-checkbox"
+        type="checkbox"
+        checked={agreedToLegalTerms}
+        onChange={(e) => setAgreedToLegalTerms(e.target.checked)}
+        aria-describedby="legal-consent-hint"
+        className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+      />
+
+      <label
+        htmlFor="legal-consent-checkbox"
+        className="text-sm leading-relaxed text-slate-600"
+      >
+        I have read and agree to the{" "}
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-blue-600 underline hover:text-blue-700"
+        >
+          Terms of Service
+        </a>
+        ,{" "}
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-blue-600 underline hover:text-blue-700"
+        >
+          Privacy Policy
+        </a>
+        , and{" "}
+        <a
+          href="/cookies"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-blue-600 underline hover:text-blue-700"
+        >
+          Cookie Policy
+        </a>
+        .
+      </label>
+    </div>
+
+    {!agreedToLegalTerms && (
+      <p
+        id="legal-consent-hint"
+        role="alert"
+        aria-live="polite"
+        className="text-sm font-semibold text-red-600"
+      >
+        You must agree to the Terms of Service, Privacy Policy, and
+        Cookie Policy before creating an account.
+      </p>
+    )}
+
     <button
       type="button"
       onClick={handleEmailSignup}
-      disabled={loading}
+      disabled={loading || !agreedToLegalTerms}
       className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
     >
       {loading
