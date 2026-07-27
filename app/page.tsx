@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -1022,7 +1023,15 @@ async function handleUpdatePassword() {
           </div>
           <FooterGroup title="Product" items={["Features", "How It Works", "Examples", "Pricing"]} />
           <FooterGroup title="Company" items={["About Us", "Blog", "Careers", "Contact"]} />
-          <FooterGroup title="Legal" items={["Privacy Policy", "Terms of Service", "Cookie Policy"]} />
+          <FooterGroup
+            title="Legal"
+            items={["Privacy Policy", "Terms of Service", "Cookie Policy"]}
+            links={{
+              "Privacy Policy": "/privacy",
+              "Terms of Service": "/terms",
+              "Cookie Policy": "/cookies",
+            }}
+          />
         </div>
         <p className="mx-auto mt-8 max-w-7xl border-t border-white/10 pt-6 text-center text-sm text-slate-500">© 2026 Career Élan. All rights reserved.</p>
       </footer>
@@ -1474,8 +1483,40 @@ function StepCard({ number, title, body, icon }: { number: string; title: string
   return <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center gap-4"><div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-3xl text-blue-600">{icon}</div><p className="text-sm font-black text-blue-600">{number}</p><p className="font-black text-slate-950">{title}</p></div><p className="mt-3 text-sm leading-6 text-slate-600">{body}</p></div>;
 }
 
-function FooterGroup({ title, items }: { title: string; items: string[] }) {
-  return <div><p className="font-black">{title}</p><div className="mt-4 space-y-3 text-sm text-slate-400">{items.map((item) => <p key={item}>{item}</p>)}</div></div>;
+function FooterGroup({
+  title,
+  items,
+  links,
+}: {
+  title: string;
+  items: string[];
+  /*
+    Only items with a matching href here render as a real link - the rest
+    (Product/Company groups) stay plain text since those target pages
+    don't exist yet, avoiding broken footer links.
+  */
+  links?: Record<string, string>;
+}) {
+  return (
+    <div>
+      <p className="font-black">{title}</p>
+      <div className="mt-4 space-y-3 text-sm text-slate-400">
+        {items.map((item) =>
+          links?.[item] ? (
+            <Link
+              key={item}
+              href={links[item]}
+              className="block transition hover:text-white"
+            >
+              {item}
+            </Link>
+          ) : (
+            <p key={item}>{item}</p>
+          )
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ComparisonRow({

@@ -27,3 +27,90 @@ body {
   color: #171717;
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+  Scoped styling for the /privacy, /terms, /cookies pages
+  (components/legal/LegalLayout.tsx) - kept here instead of repeating
+  className on every heading/paragraph/list across three long documents,
+  and instead of adding a markdown-rendering/typography plugin dependency
+  for otherwise-static content.
+*/
+.legal-content h2 {
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #020617;
+}
+
+.legal-content h3 {
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #020617;
+}
+
+.legal-content p {
+  margin-top: 0.9rem;
+}
+
+.legal-content ul {
+  margin-top: 0.9rem;
+  list-style-type: disc;
+  padding-left: 1.5rem;
+}
+
+.legal-content li {
+  margin-top: 0.4rem;
+}
+
+.legal-content li > p {
+  margin-top: 0;
+}
+
+.legal-content table {
+  margin-top: 0.9rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.legal-content th,
+.legal-content td {
+  border: 1px solid #e2e8f0;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.legal-content th {
+  background: #f8fafc;
+  font-weight: 700;
+}
+
+.legal-content strong {
+  color: #020617;
+  font-weight: 700;
+}
+
+.legal-content a {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-content a:hover {
+  color: #1d4ed8;
+}
+
+.legal-content hr {
+  margin: 2rem 0;
+  border: none;
+  border-top: 1px solid #e2e8f0;
+}
+
+.legal-content section:first-child > h2:first-child {
+  margin-top: 0;
+}
