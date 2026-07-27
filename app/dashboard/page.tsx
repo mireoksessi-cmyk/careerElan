@@ -1095,16 +1095,22 @@ async function saveSelection(
   resumeId: string | null,
   coverLetterId: string | null
 ) {
-  
+
 
   if (!user) return;
 
+  /*
+    resumeId/coverLetterId can arrive as "" (React state's unselected
+    default) from callers that pass selectedResume/selectedCoverLetter
+    straight through - normalize to null so these uuid columns never
+    receive an empty string (Postgres 22P02).
+  */
   await supabase
     .from("career_memory")
     .update({
       selected_resume_type: resumeType,
-      selected_resume_id: resumeId,
-      selected_cover_letter_id: coverLetterId,
+      selected_resume_id: resumeId || null,
+      selected_cover_letter_id: coverLetterId || null,
     })
     .eq("user_id", user.id);
 }
