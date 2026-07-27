@@ -268,15 +268,25 @@ export async function GET(request: Request) {
   }
 
   /*
-    OAuth signup legal consent - only recorded when this callback was
-    reached via an OAuth button clicked on the Sign Up screen (see
-    app/api/auth/consent-intent/route.ts, called by app/page.tsx's
-    signInWithProvider() only when authMode === "signup"). A Login-screen
-    OAuth click never sets this cookie, so an existing user logging in
-    never reaches this branch at all - the WHERE clause below is a second,
-    redundant safety net that also protects the rare case of an existing
-    user clicking a Sign Up-screen OAuth button for an account that
-    already has a consent record: the UPDATE simply matches zero rows.
+    OAuth legal consent - recorded whenever this callback is reached via
+    a real OAuth button click, from EITHER the Sign Up or Login screen
+    (see app/api/auth/consent-intent/route.ts, called unconditionally by
+    app/page.tsx's signInWithProvider() regardless of authMode). Both
+    screens set this cookie because Supabase's signInWithOAuth() creates
+    a brand-new account on first use no matter which screen's button
+    triggered it - a user's very first OAuth sign-in can happen from the
+    Login screen, and that new account still needs a consent record.
+
+    The WHERE clause below (legal_terms_accepted_at IS NULL) is what
+    actually enforces every consent rule here, not which screen the
+    click came from:
+    - a returning user with an existing consent record: UPDATE matches
+      zero rows, nothing is overwritten
+    - a returning user whose consent happens to still be null (e.g. an
+      account created before this feature existed): this OAuth click is
+      treated as their consent and gets recorded now - that's correct,
+      not a bug, since they're actively clicking through the notice text
+    - a genuinely new account: recorded, exactly as intended
 
     Email/password signup consent is recorded separately, atomically, by
     the handle_new_user() database trigger at insert time (see this

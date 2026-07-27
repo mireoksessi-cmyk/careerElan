@@ -1,10 +1,15 @@
 import { createHmac, timingSafeEqual } from "crypto";
 
 /*
-  Carries "an OAuth signup was just started from the Sign Up screen, for
-  this provider" across the redirect to the OAuth provider and back to
+  Carries "an OAuth attempt was just started, for this provider" across
+  the redirect to the OAuth provider and back to
   app/auth/callback/route.ts - the only place that can safely confirm the
-  session was actually established. Deliberately NOT a plain
+  session was actually established. Set from both the Sign Up and Login
+  screens (Supabase's signInWithOAuth() can create a brand-new account
+  from either one), and it's the callback's own "never overwrite an
+  existing consent record" rule - not which screen the click came from -
+  that actually determines whether anything gets written. Deliberately
+  NOT a plain
   sessionStorage value or an unsigned cookie: either could be set/edited
   by the browser itself to claim an arbitrary consent_source. An
   HMAC-signed, server-issued, short-lived HttpOnly cookie is the

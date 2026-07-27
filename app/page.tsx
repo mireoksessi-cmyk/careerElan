@@ -123,29 +123,40 @@ useEffect(() => {
     setMessage("");
 
     /*
-      Only from the Sign Up screen: records "this browser is about to
-      start an OAuth signup with this provider" server-side, via a
-      signed, short-lived cookie the callback reads to decide whether to
-      record legal consent - see app/api/auth/consent-intent/route.ts and
-      app/auth/callback/route.ts. Never sent from the Login screen, so an
-      existing user's OAuth login is never affected. Best-effort: if this
-      request fails, OAuth sign-in still proceeds below - consent simply
-      won't be recorded for this attempt, which is safer than blocking
-      login over it.
+      From BOTH the Sign Up and Login screens: records "this browser is
+      about to start an OAuth attempt with this provider" server-side,
+      via a signed, short-lived cookie the callback reads - see
+      app/api/auth/consent-intent/route.ts and app/auth/callback/route.ts.
+
+      Sent unconditionally (not gated on authMode) because Supabase's
+      signInWithOAuth() creates a brand-new account on first use
+      regardless of which screen's button triggered it - a user's very
+      first OAuth sign-in can happen from the Login screen (e.g. they
+      never explicitly clicked "Sign up"), and that new account still
+      needs a consent record. This is still always safe for a genuinely
+      existing user logging back in: app/auth/callback/route.ts's UPDATE
+      only ever writes WHERE legal_terms_accepted_at IS NULL, so a
+      returning user with an existing consent record is never touched by
+      this - it also means the callback intentionally does NOT need to
+      distinguish "brand-new signup" from "existing user whose consent
+      happens to still be null" (e.g. a pre-feature account) - both are
+      handled by the same "never overwrite, only fill in when null" rule.
+
+      Best-effort: if this request fails, OAuth sign-in still proceeds
+      below - consent simply won't be recorded for this attempt, which is
+      safer than blocking login over it.
     */
-    if (authMode === "signup") {
-      try {
-        await fetch("/api/auth/consent-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider }),
-        });
-      } catch (consentIntentError) {
-        console.error(
-          "CONSENT INTENT REQUEST ERROR =",
-          consentIntentError
-        );
-      }
+    try {
+      await fetch("/api/auth/consent-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+    } catch (consentIntentError) {
+      console.error(
+        "CONSENT INTENT REQUEST ERROR =",
+        consentIntentError
+      );
     }
 
     const redirectTo = `${window.location.origin}/auth/callback`;
