@@ -5,7 +5,7 @@
   client-computed, unenforced monthly stat used purely for a dashboard
   widget. This constant backs a server-enforced, per-account, all-time cap.
 */
-export const GENERATE_PACKAGE_LIFETIME_LIMIT = 5;
+export const GENERATE_PACKAGE_LIFETIME_LIMIT = 3;
 
 /*
   How long a "reserved" quota row is honored before it's treated as

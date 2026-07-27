@@ -224,10 +224,10 @@ Account & Settings helps you keep your Career Élan account secure, personalized
   content: `
 Career Élan is currently available as a Free Beta.
 
-During the beta period, each account can generate up to 5 Application Packages at no cost.
+During the beta period, each account can generate up to 3 Application Packages at no cost.
 
 • Free Beta access.
-• Up to 5 Application Package generations per account.
+• Up to 3 Application Package generations per account.
 • No payment is required during the beta.
 • Additional plans and features will be announced in the future.
 

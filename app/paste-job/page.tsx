@@ -2285,7 +2285,7 @@ async function loadSelectedApplicationMaterials() {
       });
 
       const limitError: Error & { code?: string } = new Error(
-        "You have used all 5 Generate Package generations available for your account."
+        "You have used all 3 Generate Package generations available for your account."
       );
       limitError.code = "GENERATE_PACKAGE_LIMIT_REACHED";
       throw limitError;
@@ -2317,7 +2317,7 @@ async function loadSelectedApplicationMaterials() {
       error?.code === "GENERATE_PACKAGE_LIMIT_REACHED"
     ) {
       alert(
-        "Generate Package limit reached\n\nYou have used all 5 Generate Package generations available for your account."
+        "Generate Package limit reached\n\nYou have used all 3 Generate Package generations available for your account."
       );
     } else if (
       error?.name === "TimeoutError" ||

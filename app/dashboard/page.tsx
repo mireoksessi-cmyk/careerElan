@@ -15,7 +15,7 @@ import CareerMemoryTemplatePreview, {
   mapCareerMemoryRowToPreviewData,
 } from "@/components/resume/CareerMemoryTemplatePreview";
 
-const FREE_PACKAGE_LIMIT = 5;
+const FREE_PACKAGE_LIMIT = 3;
 const menuItems = [
   "Dashboard",
   "Career Memory",
