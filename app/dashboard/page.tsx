@@ -11,6 +11,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
+import CoverLetterPreviewRenderer from "@/components/coverLetter/CoverLetterPreviewRenderer";
 import CareerMemoryTemplatePreview, {
   mapCareerMemoryRowToPreviewData,
 } from "@/components/resume/CareerMemoryTemplatePreview";
@@ -2236,70 +2237,13 @@ function renderPreviewContent() {
   }
 
   /*
-    업로드한 Cover Letter
+    업로드한 Cover Letter - 이력서의 uploaded-resume 분기와 동일하게, 원본
+    파일 인식 공유 렌더러에 위임한다. 레거시(원본 파일 처리 파이프라인이
+    없던 시절) 커버레터와 처리 실패/대기 상태는 CoverLetterPreviewRenderer
+    내부의 CareerElanCoverLetterPreview 폴백이 예전과 동일하게 처리한다.
   */
   if (previewAsset.type === "cover-letter") {
-    const coverLetter = previewAsset.item;
-    const parsed = coverLetter.parsed_data || {};
-
-    return (
-      <div className="mx-auto max-w-[800px] bg-white p-10 text-slate-800">
-        <div className="border-b border-slate-300 pb-5">
-          <p className="text-sm font-black uppercase tracking-wide text-blue-600">
-            Uploaded Cover Letter
-          </p>
-
-          <h1 className="mt-2 text-2xl font-black">
-            {coverLetter.file_name ||
-              "Uploaded Cover Letter"}
-          </h1>
-        </div>
-
-        {coverLetter.original_text ? (
-          <pre className="mt-8 whitespace-pre-wrap font-sans text-sm leading-8 text-slate-700">
-            {coverLetter.original_text}
-          </pre>
-        ) : (
-          <div className="mt-8 text-sm leading-8">
-            {parsed.recipient && (
-              <p>{parsed.recipient}</p>
-            )}
-
-            {parsed.company && (
-              <p>{parsed.company}</p>
-            )}
-
-            {parsed.jobTitle && (
-              <p>{parsed.jobTitle}</p>
-            )}
-
-            {parsed.greeting && (
-              <p className="mt-8">
-                {parsed.greeting}
-              </p>
-            )}
-
-            {parsed.body && (
-              <p className="mt-6 whitespace-pre-wrap">
-                {parsed.body}
-              </p>
-            )}
-
-            {parsed.closing && (
-              <p className="mt-8">
-                {parsed.closing}
-              </p>
-            )}
-
-            {parsed.signature && (
-              <p className="mt-4 font-bold">
-                {parsed.signature}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    );
+    return <CoverLetterPreviewRenderer coverLetter={previewAsset.item} />;
   }
 
   return null;

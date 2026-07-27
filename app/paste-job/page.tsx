@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
+import CoverLetterPreviewRenderer from "@/components/coverLetter/CoverLetterPreviewRenderer";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import {
@@ -65,6 +66,7 @@ type SavedApplicationMaterial = {
     id: string | null;
     name: string;
     text: string;
+    coverLetterRow?: any;
   };
 };
 
@@ -2109,6 +2111,7 @@ async function loadSelectedApplicationMaterials() {
           text:
             selectedCover.original_text ||
             "",
+          coverLetterRow: selectedCover,
         }
       : {
           sourceType:
@@ -2782,6 +2785,12 @@ async function downloadDocx() {
                 <ResumePreviewRenderer
                   resume={savedApplicationMaterial.resume.resumeRow}
                   fallbackText={savedApplicationMaterial.resume.text}
+                />
+              ) : savedPreviewType === "coverLetter" &&
+                savedApplicationMaterial.coverLetter.coverLetterRow ? (
+                <CoverLetterPreviewRenderer
+                  coverLetter={savedApplicationMaterial.coverLetter.coverLetterRow}
+                  fallbackText={savedApplicationMaterial.coverLetter.text}
                 />
               ) : (
                 <div className="mx-auto min-h-[900px] max-w-[794px] bg-white p-10 shadow">

@@ -243,7 +243,21 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [coverLetterSaved, setCoverLetterSaved] = useState(false);
   const [uploadedCoverLetterKind, setUploadedCoverLetterKind] =
   useState<UploadedResumeKind>("none");
-  
+
+  /*
+    Same object-URL cleanup as uploadedResumeUrl above (lines ~231-237) -
+    revokes on every new cover letter upload and on unmount, so the blob
+    URL created for the "review before saving" step doesn't leak for the
+    life of the tab.
+  */
+  useEffect(() => {
+    return () => {
+      if (uploadedCoverLetterUrl) {
+        URL.revokeObjectURL(uploadedCoverLetterUrl);
+      }
+    };
+  }, [uploadedCoverLetterUrl]);
+
   
   const [uploadProgress, setUploadProgress] = useState(0);
   const uploadProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -1626,7 +1640,10 @@ return;
       return;
     }
 
-    const { error: saveError } =
+    const {
+      data: coverLetterData,
+      error: saveError,
+    } =
       await supabase
         .from("cover_letters")
         .insert({
@@ -1639,7 +1656,13 @@ return;
 
           // 기본값 로직은 기존대로 유지
           is_default: true,
-        });
+
+          // 원본 디자인 보존 프리뷰 파이프라인의 시작 상태 - 이력서와
+          // 동일하게 "pending"에서 시작해 /api/process-cover-letter-design가
+          // 비동기로 처리한다.
+          conversion_status: "pending",
+        })
+        .select();
 
     if (saveError) {
   console.error(
@@ -1659,6 +1682,38 @@ return;
 
   return;
 }
+
+    /*
+      원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음) -
+      app/career-memory/page.tsx의 이력서 업로드 흐름(processResumeFile)과
+      완전히 동일한 패턴: keepalive:true로 페이지 이동에도 요청이 살아남게
+      한다.
+    */
+    const newCoverLetterId = coverLetterData?.[0]?.id;
+
+    if (newCoverLetterId) {
+      fetch("/api/process-cover-letter-design", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coverLetterId: newCoverLetterId }),
+        keepalive: true,
+      }).catch((designError) => {
+        console.error(
+          "PROCESS COVER LETTER DESIGN REQUEST ERROR =",
+          designError
+        );
+      });
+    }
+
+    /*
+      "Review your cover letter before saving" 원본 preview에 필요한
+      kind/URL 배선 - 이력서의 processResumeFile과 동일한 패턴(이전에는
+      uploadedCoverLetterKind/Url이 선언만 되고 어디서도 set되지 않아
+      renderUploadedCoverLetterOriginalPreview()가 항상 fallback으로
+      떨어졌다).
+    */
+    setUploadedCoverLetterKind(guessFileKind(file));
+    setUploadedCoverLetterUrl(URL.createObjectURL(file));
 
 setMemoryData((prev) => ({
   ...prev,
@@ -1796,7 +1851,35 @@ setCoverLetterImportMessage(
     }
     return <div className="flex min-h-[900px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-xl"><div><p className="text-5xl">⚠️</p><h3 className="mt-5 text-2xl font-black text-slate-950">Preview not available</h3><p className="mt-3 max-w-md text-sm leading-6 text-slate-500">Please upload a PDF, DOCX, or TXT resume.</p></div></div>;
   }
-   function renderCoverLetterPreview() {
+
+  /*
+    이력서의 renderUploadedOriginalPreview()와 동일한 패턴/동작을 그대로
+    이식한 커버레터 버전 - PDF/TXT는 방금 업로드한 파일의 로컬 blob URL로
+    실제 렌더링하고, DOCX는 이력서와 똑같이 "미리보기 준비 중" 플레이스홀더를
+    보여준다(이력서도 이 단계에서는 DOCX 원본을 렌더링하지 않으므로, 여기서
+    더 잘 보여주면 오히려 이력서 동작을 "초과"하게 된다).
+  */
+  function renderUploadedCoverLetterOriginalPreview() {
+    if (!uploadedCoverLetterUrl && !memoryData.uploadedCoverLetterText) {
+      return <div className="flex min-h-[900px] items-center justify-center rounded-2xl bg-white text-center text-sm font-semibold text-slate-500">Upload a cover letter to preview the original file.</div>;
+    }
+    if (uploadedCoverLetterKind === "pdf" && uploadedCoverLetterUrl) {
+      return <iframe src={`${uploadedCoverLetterUrl}#toolbar=1&navpanes=0&view=FitH`} title="Uploaded cover letter preview" className="h-[900px] w-full rounded-2xl border border-slate-200 bg-white" />;
+    }
+    if (uploadedCoverLetterKind === "txt") {
+      return <pre className="min-h-[900px] whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-10 text-sm leading-7 text-slate-800 shadow-xl">{memoryData.uploadedCoverLetterText || "TXT cover letter preview is empty."}</pre>;
+    }
+    if (uploadedCoverLetterKind === "docx") {
+      return (
+        <div className="flex min-h-[900px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-xl">
+          <div><p className="text-5xl">📄</p><h3 className="mt-5 text-2xl font-black text-slate-950">DOCX uploaded</h3><p className="mt-3 max-w-md text-sm leading-6 text-slate-500">Browser preview for DOCX is not available in this page yet. Convert DOCX to PDF on the backend or extract its text before showing the full cover letter.</p><p className="mt-4 text-sm font-bold text-blue-600">{memoryData.uploadedCoverLetterName}</p></div>
+        </div>
+      );
+    }
+    return <div className="flex min-h-[900px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-xl"><div><p className="text-5xl">⚠️</p><h3 className="mt-5 text-2xl font-black text-slate-950">Preview not available</h3><p className="mt-3 max-w-md text-sm leading-6 text-slate-500">Please upload a PDF, DOCX, or TXT cover letter.</p></div></div>;
+  }
+
+  function renderBuiltCoverLetterPreview() {
   return (
     <div className="rounded-2xl bg-white p-10 shadow">
 
@@ -1817,6 +1900,21 @@ setCoverLetterImportMessage(
     </div>
   );
 }
+
+  /*
+    이력서의 renderFullResumePreview()가 resumeSource==="uploaded"일 때
+    renderUploadedOriginalPreview()로 분기하는 것과 동일한 패턴 - 업로드한
+    커버레터는 원본 파일 미리보기로, Career Memory 필드로 직접 작성한
+    커버레터는 기존 필드 기반 미리보기(renderBuiltCoverLetterPreview)로
+    그대로 유지한다.
+  */
+  function renderCoverLetterPreview() {
+    if (memoryData.coverLetterSource === "uploaded") {
+      return renderUploadedCoverLetterOriginalPreview();
+    }
+
+    return renderBuiltCoverLetterPreview();
+  }
 
   function renderBuiltResumePreview() {
     return <CareerMemoryTemplatePreview data={memoryData} />;
