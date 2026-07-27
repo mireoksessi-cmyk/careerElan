@@ -22,6 +22,20 @@ export const CONSENT_INTENT_COOKIE_NAME = "legal_consent_intent";
 const INTENT_TTL_MS = 15 * 60 * 1000;
 export const CONSENT_INTENT_MAX_AGE_SECONDS = INTENT_TTL_MS / 1000;
 
+/*
+  Wording note for anything that describes this cookie's lifecycle: it is
+  only ever cleared by code - in app/auth/callback/route.ts, on every
+  branch that route can actually reach (missing code, failed exchange,
+  or a successful exchange). If OAuth is abandoned before the browser
+  ever returns to our site at all (e.g. the user closes the provider's
+  consent screen and never comes back), no code runs to clear it - it
+  simply stops being sent once its own Max-Age (CONSENT_INTENT_MAX_AGE_SECONDS,
+  15 minutes) elapses, which is the browser's own behavior, not ours.
+  "Cleared immediately on cancel" is only accurate for cancellations that
+  actually redirect back to /auth/callback (e.g. with an ?error= param) -
+  never claim it holds for a browser tab that's simply abandoned.
+*/
+
 export type ConsentSource =
   | "google_oauth"
   | "facebook_oauth"
@@ -34,20 +48,48 @@ const ALL_CONSENT_SOURCES: ConsentSource[] = [
 ];
 
 /*
-  Local-dev fallback only, same convention as
-  lib/generatePackage/backgroundTarget.ts's LOCAL_DEV_FALLBACK_SECRET -
-  this signature is not a real access-control boundary (see doc comment
-  above), so a fixed fallback key when the env var isn't set still
-  provides the "not trivially editable by the browser" property this
-  exists for; Production should still set LEGAL_CONSENT_SIGNING_SECRET
-  for a real per-deployment key.
+  Local-dev/test fallback ONLY - structurally unreachable in production
+  (see resolveSigningSecret() below, which throws before this constant is
+  ever read when NODE_ENV === "production"). Unlike
+  lib/generatePackage/backgroundTarget.ts's LOCAL_DEV_FALLBACK_SECRET
+  (which the Netlify-vs-local branch already makes unreachable in
+  Production by construction, since that route 404s there), this cookie
+  is read on every real Production OAuth-signup attempt, so a silent
+  fallback would mean Production silently running with a
+  publicly-known key - refusing to start that flow at all is safer than
+  that.
 */
 const LOCAL_DEV_FALLBACK_SECRET = "local-dev-legal-consent-intent-secret";
 
+/*
+  Production requires LEGAL_CONSENT_SIGNING_SECRET to be explicitly set -
+  no fallback there, for the reason above. Throws (never logs the actual
+  secret value, only the fact that it's missing) rather than silently
+  signing with a guessable key. This only affects the OAuth-signup
+  consent-intent path specifically, not login or email signup:
+  verifyConsentIntentCookieValue() below returns null before ever calling
+  this for the (overwhelmingly common) case where no
+  legal_consent_intent cookie is present at all, and
+  app/auth/callback/route.ts already wraps its one caller of this module
+  in its own try/catch that logs and continues rather than blocking the
+  redirect - a misconfigured secret fails loud in logs without taking
+  down login/signup.
+*/
 function resolveSigningSecret(): string {
-  return (
-    process.env.LEGAL_CONSENT_SIGNING_SECRET || LOCAL_DEV_FALLBACK_SECRET
-  );
+  const secret = process.env.LEGAL_CONSENT_SIGNING_SECRET;
+
+  if (secret) {
+    return secret;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "LEGAL_CONSENT_SIGNING_SECRET is not set. Refusing to sign or verify " +
+        "legal consent-intent cookies in production without it."
+    );
+  }
+
+  return LOCAL_DEV_FALLBACK_SECRET;
 }
 
 function sign(encodedPayload: string): string {

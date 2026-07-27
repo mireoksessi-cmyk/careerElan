@@ -31,19 +31,41 @@ export async function POST(req: Request) {
     );
   }
 
+  let cookieValue: string;
+
+  try {
+    cookieValue = createConsentIntentCookieValue(source);
+  } catch (signingError) {
+    /*
+      Only reachable in production with LEGAL_CONSENT_SIGNING_SECRET
+      unset (see lib/auth/consentIntent.ts) - logs only the error's own
+      message (which never contains the secret itself), never the error
+      object wholesale. The caller (app/page.tsx's signInWithProvider())
+      already ignores this response's body/status either way, so this
+      failing loudly here - instead of silently signing with a fallback
+      key - never blocks OAuth sign-in, only skips recording consent for
+      this one attempt.
+    */
+    console.error(
+      "CONSENT INTENT SIGNING ERROR =",
+      signingError instanceof Error ? signingError.message : "Unknown error"
+    );
+
+    return NextResponse.json(
+      { error: "Consent intent could not be recorded." },
+      { status: 500 }
+    );
+  }
+
   const response = NextResponse.json({ ok: true });
 
-  response.cookies.set(
-    CONSENT_INTENT_COOKIE_NAME,
-    createConsentIntentCookieValue(source),
-    {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: CONSENT_INTENT_MAX_AGE_SECONDS,
-      path: "/",
-    }
-  );
+  response.cookies.set(CONSENT_INTENT_COOKIE_NAME, cookieValue, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: CONSENT_INTENT_MAX_AGE_SECONDS,
+    path: "/",
+  });
 
   return response;
 }

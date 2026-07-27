@@ -1159,7 +1159,7 @@ async function handleUpdatePassword() {
         </button>
       </div>
 
-      {authMode === "signup" && (
+      {authMode === "signup" ? (
         <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
           By continuing with Google, Facebook, or LinkedIn, you
           acknowledge that you have read and agree to the{" "}
@@ -1181,6 +1181,43 @@ async function handleUpdatePassword() {
             Privacy Policy
           </a>
           , and{" "}
+          <a
+            href="/cookies"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 underline hover:text-blue-700"
+          >
+            Cookie Policy
+          </a>
+          .
+        </p>
+      ) : (
+        /*
+          Informational only - purely a disclosure notice, never a gate.
+          No checkbox, and nothing here disables or otherwise blocks the
+          OAuth buttons above: an existing user logging in must never be
+          blocked by this text.
+        */
+        <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
+          By continuing, you agree to the{" "}
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 underline hover:text-blue-700"
+          >
+            Terms of Service
+          </a>{" "}
+          and acknowledge the{" "}
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 underline hover:text-blue-700"
+          >
+            Privacy Policy
+          </a>{" "}
+          and{" "}
           <a
             href="/cookies"
             target="_blank"

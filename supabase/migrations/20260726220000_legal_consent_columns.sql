@@ -49,12 +49,47 @@ ALTER TABLE public.profiles
   of the four allowed values, or every consent column stays NULL - a
   malformed/missing value only skips recording, it never fails signup or
   produces a CHECK-constraint violation.
+
+  KNOWN LIMITATION / FUTURE IMPROVEMENT: for the email_signup path,
+  legal_consent and consent_source arrive via raw_user_meta_data, which
+  is set by the client's own supabase.auth.signUp({options:{data:...}})
+  call (see app/page.tsx's handleEmailSignup()) - the same trust level as
+  every other field already passed that way (full_name, phone, login_id).
+  A request crafted directly against Supabase's API (bypassing this
+  app's own checkbox-gated UI) could in principle claim legal_consent:
+  true without the user ever having seen the checkbox. This is NOT a
+  privilege-escalation or data-access risk (it only affects what gets
+  recorded about the caller's own new account), but it does mean this
+  column records "our own client code decided to send this flag," not a
+  cryptographic attestation that the checkbox was actually seen and
+  checked. If a stronger guarantee is ever needed, the recommended
+  approach is a server-signed attestation instead of a bare metadata
+  flag: e.g. a short-lived endpoint (mirroring
+  app/api/auth/consent-intent/route.ts's pattern for OAuth) that the
+  client calls only after the checkbox is checked, which mints a signed
+  token the email signup flow must present back - verified server-side
+  before the trigger (or an equivalent server-side check after signUp())
+  treats consent as given. Not implemented here - explicitly out of
+  scope for this change, per instruction to document rather than
+  restructure.
+
+  SECURITY DEFINER + SET search_path TO '' (deliberately empty, not
+  'public'): this function runs with the privileges of its owner
+  regardless of who triggers it, so an empty search_path is required to
+  prevent a search_path-hijacking attack (a malicious role creating an
+  object - e.g. a same-named function - earlier in what would otherwise
+  be a resolvable path). With an empty search_path, every table
+  reference in this function must be fully schema-qualified (already
+  true here - `public.profiles`, unchanged from before this migration)
+  or resolve to pg_catalog, which stays implicitly searched regardless of
+  the search_path setting (so built-ins like coalesce/lower/split_part/now
+  still resolve correctly).
 */
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO 'public'
+SET search_path TO ''
 AS $function$
 declare
   consent_given boolean;
