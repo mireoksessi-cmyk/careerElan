@@ -1048,6 +1048,8 @@ if (!user) {
 
   let storagePath = "";
   let insertedResumeId = "";
+  // [RESUME_TRACE] instrumentation-only - Resume upload path fetch timing marker.
+  let resumeFetchStartTime: number | null = null;
 
   try {
     /*
@@ -1255,28 +1257,108 @@ return;
     setImportMessage("Extracting text and analyzing with AI");
     setUploadProgress(60);
 
+    // [RESUME_TRACE] instrumentation-only - logging added for production
+    // root-cause investigation. Does not change control flow, requests,
+    // parsing, or cleanup behavior.
+    resumeFetchStartTime = performance.now();
+    console.log("[RESUME_TRACE] ANALYZE_RESUME_FETCH_START", {
+      resumeId: insertedResumeId,
+      storagePath,
+      performanceNow: resumeFetchStartTime,
+      dateNow: Date.now(),
+    });
+
     const analyzeResponse = await fetch("/api/analyze-resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resumeId: insertedResumeId }),
     });
 
+    // [RESUME_TRACE] instrumentation-only.
+    {
+      const resolvedAt = performance.now();
+      const headerEntries: Record<string, string> = {};
+      analyzeResponse.headers.forEach((value, key) => {
+        headerEntries[key] = value;
+      });
+
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_FETCH_RESOLVED", {
+        performanceNow: resolvedAt,
+        elapsedMs: resumeFetchStartTime !== null ? resolvedAt - resumeFetchStartTime : null,
+        status: analyzeResponse.status,
+        statusText: analyzeResponse.statusText,
+        ok: analyzeResponse.ok,
+        redirected: analyzeResponse.redirected,
+        type: analyzeResponse.type,
+        url: analyzeResponse.url,
+        headers: headerEntries,
+      });
+    }
+
     let analyzeResult: any;
 
     try {
+      // [RESUME_TRACE] instrumentation-only - read raw body via clone()
+      // purely for logging, before the existing analyzeResponse.json()
+      // call below runs unchanged. clone() ensures the original response
+      // stream is untouched, so parsing behavior is identical to before.
+      const rawResponseTextForTrace = await analyzeResponse.clone().text();
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_RAW_RESPONSE", {
+        rawBody: rawResponseTextForTrace,
+        bodyLength: rawResponseTextForTrace.length,
+        contentType: analyzeResponse.headers.get("content-type"),
+      });
+
       analyzeResult = await analyzeResponse.json();
+
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_JSON_OK", {
+        performanceNow: performance.now(),
+      });
     } catch (jsonError) {
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_JSON_ERROR", {
+        name: jsonError instanceof Error ? jsonError.name : undefined,
+        message: jsonError instanceof Error ? jsonError.message : String(jsonError),
+        stack: jsonError instanceof Error ? jsonError.stack : undefined,
+      });
+
       console.error(
         "RESUME ANALYSIS JSON ERROR =",
         jsonError
       );
 
-      await supabase.storage.from("resumes").remove([storagePath]);
-      await supabase
-        .from("resumes")
-        .delete()
-        .eq("id", insertedResumeId)
-        .eq("user_id", user.id);
+      // [RESUME_TRACE] instrumentation-only.
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_CLEANUP_START", {
+        resumeId: insertedResumeId,
+        storagePath,
+        reason: "json_parse_error",
+      });
+
+      {
+        const storageDeleteStart = performance.now();
+        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
+          resumeId: insertedResumeId,
+          storagePath,
+        });
+        await supabase.storage.from("resumes").remove([storagePath]);
+        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
+          elapsedMs: performance.now() - storageDeleteStart,
+        });
+      }
+
+      {
+        const dbDeleteStart = performance.now();
+        console.log("[RESUME_TRACE] RESUME_DB_DELETE_START", {
+          resumeId: insertedResumeId,
+        });
+        await supabase
+          .from("resumes")
+          .delete()
+          .eq("id", insertedResumeId)
+          .eq("user_id", user.id);
+        console.log("[RESUME_TRACE] RESUME_DB_DELETE_DONE", {
+          elapsedMs: performance.now() - dbDeleteStart,
+        });
+      }
 
       resetResumeImport();
 
@@ -1288,17 +1370,53 @@ return;
     }
 
     if (!analyzeResponse.ok || !analyzeResult.success) {
+      // [RESUME_TRACE] instrumentation-only.
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_RESPONSE_FAILED", {
+        status: analyzeResponse.status,
+        ok: analyzeResponse.ok,
+        parsedSuccess: analyzeResult?.success,
+        message: analyzeResult?.message,
+        parsedObject: analyzeResult,
+      });
+
       console.error(
         "RESUME ANALYSIS FAILED =",
         analyzeResult
       );
 
-      await supabase.storage.from("resumes").remove([storagePath]);
-      await supabase
-        .from("resumes")
-        .delete()
-        .eq("id", insertedResumeId)
-        .eq("user_id", user.id);
+      // [RESUME_TRACE] instrumentation-only.
+      console.log("[RESUME_TRACE] ANALYZE_RESUME_CLEANUP_START", {
+        resumeId: insertedResumeId,
+        storagePath,
+        reason: "response_failed",
+      });
+
+      {
+        const storageDeleteStart = performance.now();
+        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
+          resumeId: insertedResumeId,
+          storagePath,
+        });
+        await supabase.storage.from("resumes").remove([storagePath]);
+        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
+          elapsedMs: performance.now() - storageDeleteStart,
+        });
+      }
+
+      {
+        const dbDeleteStart = performance.now();
+        console.log("[RESUME_TRACE] RESUME_DB_DELETE_START", {
+          resumeId: insertedResumeId,
+        });
+        await supabase
+          .from("resumes")
+          .delete()
+          .eq("id", insertedResumeId)
+          .eq("user_id", user.id);
+        console.log("[RESUME_TRACE] RESUME_DB_DELETE_DONE", {
+          elapsedMs: performance.now() - dbDeleteStart,
+        });
+      }
 
       resetResumeImport();
 
@@ -1311,6 +1429,16 @@ return;
 
     applyResumeAnalysisResult(file, analyzeResult.data);
   } catch (error) {
+    // [RESUME_TRACE] instrumentation-only.
+    console.log("[RESUME_TRACE] ANALYZE_RESUME_FETCH_EXCEPTION", {
+      name: error instanceof Error ? error.name : undefined,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      performanceNow: performance.now(),
+      elapsedSinceFetchStartMs:
+        resumeFetchStartTime !== null ? performance.now() - resumeFetchStartTime : null,
+    });
+
     console.error(
       "RESUME UPLOAD ERROR =",
       error
@@ -1321,19 +1449,43 @@ return;
       uploadProgressTimerRef.current = null;
     }
 
+    // [RESUME_TRACE] instrumentation-only.
+    console.log("[RESUME_TRACE] ANALYZE_RESUME_CLEANUP_START", {
+      resumeId: insertedResumeId,
+      storagePath,
+      reason: "exception",
+    });
+
     if (insertedResumeId) {
+      const dbDeleteStart = performance.now();
+      console.log("[RESUME_TRACE] RESUME_DB_DELETE_START", {
+        resumeId: insertedResumeId,
+      });
       await supabase
         .from("resumes")
         .delete()
         .eq("id", insertedResumeId)
         .eq("user_id", user.id);
+      console.log("[RESUME_TRACE] RESUME_DB_DELETE_DONE", {
+        elapsedMs: performance.now() - dbDeleteStart,
+      });
     }
 
     if (storagePath) {
+      const storageDeleteStart = performance.now();
+      console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
+        resumeId: insertedResumeId,
+        storagePath,
+      });
+
       const { error: cleanupError } =
         await supabase.storage
           .from("resumes")
           .remove([storagePath]);
+
+      console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
+        elapsedMs: performance.now() - storageDeleteStart,
+      });
 
       if (cleanupError) {
         console.error(

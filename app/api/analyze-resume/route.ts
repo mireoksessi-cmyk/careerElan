@@ -37,6 +37,18 @@ export const maxDuration = 60;
   matching the original synchronous contract client code expects.
 */
 
+// [RESUME_TRACE] instrumentation-only - logs right before every return in
+// POST() below. Does not construct or alter the returned NextResponse.
+function traceResumeReturn(status: number, success: boolean, message?: string) {
+  console.log("[RESUME_TRACE] ANALYZE_RESUME_RETURN", {
+    status,
+    success,
+    message,
+    timestamp: new Date().toISOString(),
+    performanceNow: performance.now(),
+  });
+}
+
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
 
@@ -49,6 +61,7 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
+      traceResumeReturn(401, false, "Unauthorized.");
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
@@ -56,6 +69,7 @@ export async function POST(req: NextRequest) {
     const resumeId = typeof body.resumeId === "string" ? body.resumeId : "";
 
     if (!resumeId) {
+      traceResumeReturn(400, false, "resumeId is required.");
       return NextResponse.json(
         { success: false, message: "resumeId is required." },
         { status: 400 }
@@ -70,6 +84,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (fetchError || !resume) {
+      traceResumeReturn(404, false, "Resume not found.");
       return NextResponse.json(
         { success: false, message: "Resume not found." },
         { status: 404 }
@@ -79,10 +94,16 @@ export async function POST(req: NextRequest) {
     // Idempotent replay - a duplicate call here (double-click, retried
     // request) should never re-run analysis on an already-resolved row.
     if (resume.analysis_status === "succeeded") {
+      traceResumeReturn(200, true);
       return NextResponse.json({ success: true, data: resume.parsed_data });
     }
 
     if (resume.analysis_status === "failed") {
+      traceResumeReturn(
+        200,
+        false,
+        resume.analysis_error_summary || "Failed to analyze resume."
+      );
       return NextResponse.json({
         success: false,
         message: resume.analysis_error_summary || "Failed to analyze resume.",
@@ -90,12 +111,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // [RESUME_TRACE] instrumentation-only.
+    const runResumeAnalysisStart = performance.now();
+    console.log("[RESUME_TRACE] RUN_RESUME_ANALYSIS_START", {
+      resumeId,
+      performanceNow: runResumeAnalysisStart,
+      timestamp: new Date().toISOString(),
+    });
+
     // Runs the full extraction + 3 sequential OpenAI calls in-process,
     // writing analysis_status/parsed_data/original_text (or the failure
     // fields) via runResumeAnalysis's own atomic claim + RPC writes -
     // unchanged from the Background Function version, just awaited here
     // instead of dispatched over HTTP.
     await runResumeAnalysis(resumeId);
+
+    // [RESUME_TRACE] instrumentation-only.
+    const runResumeAnalysisEnd = performance.now();
+    console.log("[RESUME_TRACE] RUN_RESUME_ANALYSIS_END", {
+      resumeId,
+      performanceNow: runResumeAnalysisEnd,
+      timestamp: new Date().toISOString(),
+      totalMs: runResumeAnalysisEnd - runResumeAnalysisStart,
+    });
 
     const { data: finalRow, error: finalError } = await supabase
       .from("resumes")
@@ -105,6 +143,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (finalError || !finalRow) {
+      traceResumeReturn(500, false, "Failed to analyze resume. Please try again.");
       return NextResponse.json(
         { success: false, message: "Failed to analyze resume. Please try again." },
         { status: 500 }
@@ -112,9 +151,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (finalRow.analysis_status === "succeeded") {
+      traceResumeReturn(200, true);
       return NextResponse.json({ success: true, data: finalRow.parsed_data });
     }
 
+    traceResumeReturn(
+      200,
+      false,
+      finalRow.analysis_error_summary || "Failed to analyze resume."
+    );
     return NextResponse.json({
       success: false,
       message: finalRow.analysis_error_summary || "Failed to analyze resume.",
@@ -123,6 +168,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     logSafeError(error, { requestId, route: "/api/analyze-resume" });
 
+    traceResumeReturn(500, false, "Failed to analyze resume.");
     return NextResponse.json(
       { success: false, message: "Failed to analyze resume." },
       { status: 500 }
