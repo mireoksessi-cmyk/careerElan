@@ -52,11 +52,15 @@ export async function GET(
     const code = row.analysis_error_code;
     const message = row.analysis_error_summary || "Failed to analyze cover letter.";
 
-    if (row.storage_path) {
-      await supabase.storage.from("cover-letters").remove([row.storage_path]);
-    }
-
-    await supabase.from("cover_letters").delete().eq("id", row.id).eq("user_id", user.id);
+    /*
+      TEMPORARY DIAGNOSTIC - cleanup disabled to preserve the failed row for
+      inspection. See app/api/resumes/[id]/analysis-status/route.ts's own
+      comment - revert both together after the investigation is complete.
+    */
+    // if (row.storage_path) {
+    //   await supabase.storage.from("cover-letters").remove([row.storage_path]);
+    // }
+    // await supabase.from("cover_letters").delete().eq("id", row.id).eq("user_id", user.id);
 
     return NextResponse.json({
       status: "failed",

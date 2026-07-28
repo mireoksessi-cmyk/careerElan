@@ -59,11 +59,18 @@ export async function GET(
     const code = row.analysis_error_code;
     const message = row.analysis_error_summary || "Failed to analyze resume.";
 
-    if (row.storage_path) {
-      await supabase.storage.from("resumes").remove([row.storage_path]);
-    }
-
-    await supabase.from("resumes").delete().eq("id", row.id).eq("user_id", user.id);
+    /*
+      TEMPORARY DIAGNOSTIC - cleanup disabled to preserve the failed row for
+      inspection (analysis_stage/analysis_error_code/analysis_worker_claimed_at/
+      analysis_started_at) while root-causing the Background Function
+      failure. Revert to the original delete-on-failed behavior
+      immediately after this investigation - see the surrounding docstring
+      for why cleanup normally happens here.
+    */
+    // if (row.storage_path) {
+    //   await supabase.storage.from("resumes").remove([row.storage_path]);
+    // }
+    // await supabase.from("resumes").delete().eq("id", row.id).eq("user_id", user.id);
 
     return NextResponse.json({
       status: "failed",
