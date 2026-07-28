@@ -172,11 +172,18 @@ async function processPdf(
 ) {
   delete (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker;
 
-  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-
   let doc;
 
+  /*
+    Same fix as app/api/process-resume-design/route.ts's own processPdf() -
+    see that file's comment for the full rationale. The dynamic import
+    itself (not just getDocument()) is inside this try/catch, since
+    pdfjs-dist's legacy Node build can fail to load at all in Netlify's
+    function bundle (missing @napi-rs/canvas -> DOMMatrix ReferenceError).
+  */
   try {
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
     doc = await withTimeout(
       getDocument({ data: new Uint8Array(buffer) }).promise,
       PROCESSING_TIMEOUT_MS
@@ -187,10 +194,11 @@ async function processPdf(
     await supabase
       .from("cover_letters")
       .update({
-        conversion_status: "failed",
-        preview_mode: null,
+        conversion_status: "succeeded",
+        preview_mode: "pdf_original",
         original_file_type: "pdf",
-        conversion_error: "The PDF file could not be opened.",
+        conversion_error:
+          "The original design could not be reconstructed; showing the original PDF instead.",
       })
       .eq("id", coverLetterId);
 

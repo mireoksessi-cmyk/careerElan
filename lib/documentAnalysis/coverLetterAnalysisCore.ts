@@ -1,7 +1,4 @@
 import OpenAI from "openai";
-import pdf from "pdf-parse-new";
-import mammoth from "mammoth";
-import { fromBuffer } from "pdf2pic";
 import { supabaseAdmin } from "../supabaseAdmin";
 import { logSafeError } from "../errors/publicError";
 import {
@@ -15,8 +12,10 @@ import { classifyGenerationError } from "./shared";
   as ./resumeAnalysisCore.ts, see that file's own docstring for the full
   rationale (production 504/HTML-gateway-timeout root cause, Background
   Function execution budget, relative-import requirement for Netlify's
-  function bundler). Every extraction/prompt/normalization step below is
-  copied verbatim from the old app/api/analyze-cover-letter/route.ts.
+  function bundler, and why pdf-parse-new/mammoth/pdf2pic are loaded
+  lazily inside the try block rather than as top-level imports). Every
+  extraction/prompt/normalization step below is copied verbatim from the
+  old app/api/analyze-cover-letter/route.ts.
 */
 
 const client = new OpenAI({
@@ -43,7 +42,10 @@ function normalizeParagraph(text: string) {
     .trim();
 }
 
-async function extractPdfText(buffer: Buffer) {
+async function extractPdfText(
+  buffer: Buffer,
+  pdf: (buffer: Buffer) => Promise<{ text?: string }>
+) {
   try {
     const parsed = await pdf(buffer);
 
@@ -55,7 +57,10 @@ async function extractPdfText(buffer: Buffer) {
   return "";
 }
 
-async function pdfToImages(buffer: Buffer) {
+async function pdfToImages(
+  buffer: Buffer,
+  fromBuffer: (buffer: Buffer, options: Record<string, unknown>) => any
+) {
   const convert = fromBuffer(buffer, {
     density: 220,
     format: "png",
@@ -192,19 +197,55 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
     const lowerFileName = fileName.toLowerCase();
 
     if (lowerFileName.endsWith(".pdf")) {
-      coverLetterText = await extractPdfText(buffer);
+      let pdf: (buffer: Buffer) => Promise<{ text?: string }>;
+
+      try {
+        pdf = (await import("pdf-parse-new")).default;
+      } catch (importError) {
+        console.error("COVER LETTER PDF-PARSE-NEW LOAD ERROR =", importError);
+        throw new AnalysisFailure(
+          "MODULE_LOAD_FAILED",
+          "We couldn't process this cover letter. Please try again."
+        );
+      }
+
+      coverLetterText = await extractPdfText(buffer, pdf);
 
       if (coverLetterText.trim().length < 300) {
         await setStage(coverLetterId, userId, "running_ocr");
 
         console.log("Cover Letter appears scanned. Running Vision OCR...");
 
-        const images = await pdfToImages(buffer);
+        let fromBuffer: (buffer: Buffer, options: Record<string, unknown>) => any;
+
+        try {
+          fromBuffer = (await import("pdf2pic")).fromBuffer;
+        } catch (importError) {
+          console.error("COVER LETTER PDF2PIC LOAD ERROR =", importError);
+          throw new AnalysisFailure(
+            "MODULE_LOAD_FAILED",
+            "We couldn't process this cover letter. Please try again."
+          );
+        }
+
+        const images = await pdfToImages(buffer, fromBuffer);
         coverLetterText = await visionOCR(images);
 
         console.log("Vision OCR complete.");
       }
     } else if (lowerFileName.endsWith(".docx")) {
+      let mammoth: { extractRawText: (input: { buffer: Buffer }) => Promise<{ value: string }> };
+
+      try {
+        mammoth = await import("mammoth");
+      } catch (importError) {
+        console.error("COVER LETTER MAMMOTH LOAD ERROR =", importError);
+        throw new AnalysisFailure(
+          "MODULE_LOAD_FAILED",
+          "We couldn't process this cover letter. Please try again."
+        );
+      }
+
       const doc = await mammoth.extractRawText({ buffer });
       coverLetterText = doc.value;
     } else if (lowerFileName.endsWith(".txt")) {

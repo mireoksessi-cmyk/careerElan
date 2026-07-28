@@ -199,11 +199,24 @@ async function processPdf(
   */
   delete (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker;
 
-  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-
   let doc;
 
+  /*
+    The dynamic import itself - not just getDocument() - is included in this
+    try/catch. Confirmed in production: pdfjs-dist's legacy Node build can
+    fail to even load (ReferenceError: DOMMatrix is not defined, stemming
+    from its optional @napi-rs/canvas dependency not being present in
+    Netlify's function bundle) - previously this threw past this function
+    entirely, landing in the outer POST() catch and marking the row
+    conversion_status="failed" with no preview at all. Since detectFileType()
+    already confirmed valid PDF magic bytes before this function was ever
+    called, an import/open failure here is treated the same as any other
+    layout-reconstruction failure below: fall back to showing the original
+    file via pdf_original rather than failing outright.
+  */
   try {
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
     doc = await withTimeout(
       getDocument({ data: new Uint8Array(buffer) }).promise,
       PROCESSING_TIMEOUT_MS
@@ -214,10 +227,11 @@ async function processPdf(
     await supabase
       .from("resumes")
       .update({
-        conversion_status: "failed",
-        preview_mode: null,
+        conversion_status: "succeeded",
+        preview_mode: "pdf_original",
         original_file_type: "pdf",
-        conversion_error: "The PDF file could not be opened.",
+        conversion_error:
+          "The original design could not be reconstructed; showing the original PDF instead.",
       })
       .eq("id", resumeId);
 

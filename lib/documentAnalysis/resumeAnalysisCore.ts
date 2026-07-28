@@ -1,6 +1,4 @@
 import OpenAI from "openai";
-import pdf from "pdf-parse-new";
-import mammoth from "mammoth";
 import { supabaseAdmin } from "../supabaseAdmin";
 import { logSafeError } from "../errors/publicError";
 import { RESUME_PARSE_DRAFT_MODEL, RESUME_PARSE_MODEL } from "../config/aiModels";
@@ -28,6 +26,24 @@ import { classifyGenerationError } from "./shared";
   Every extraction/prompt/normalization step below is copied verbatim from
   the old app/api/analyze-resume/route.ts (no wording, model, or logic
   change) - only the surrounding claim/stage/persist plumbing is new.
+
+  pdf-parse-new and mammoth are deliberately NOT imported at module top
+  level - confirmed via direct production DB inspection that this exact
+  mistake silently killed every invocation of this Background Function
+  before any of its own code (not even the first console.log) ever ran:
+  the resumes row stayed at analysis_status='pending' with
+  analysis_worker_claimed_at still null, meaning runResumeAnalysis()
+  never even reached its own first line. This is the identical class of
+  bug already documented and fixed once in app/api/process-resume-design/
+  route.ts's own top comment - Netlify's classic Background Function
+  bundler (a separate pipeline from the Next.js Runtime that already
+  handles these two packages fine via next.config.js's
+  serverExternalPackages) apparently cannot load one of them from a
+  static top-level import. Loading them lazily inside runResumeAnalysis's
+  own try block, after the atomic claim has already succeeded, guarantees
+  a load failure is caught by the existing catch and turned into a
+  correctly-terminated 'failed' status instead of an unrecoverable
+  'pending' row the client polls forever.
 */
 
 const client = new OpenAI({
@@ -138,7 +154,10 @@ function normalizeProjects(data: any) {
   }));
 }
 
-async function extractPdfText(buffer: Buffer) {
+async function extractPdfText(
+  buffer: Buffer,
+  pdf: (buffer: Buffer) => Promise<{ text?: string }>
+) {
   try {
     const parsed = await pdf(buffer);
 
@@ -243,7 +262,19 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
     const lowerFileName = fileName.toLowerCase();
 
     if (lowerFileName.endsWith(".pdf")) {
-      resumeText = await extractPdfText(buffer);
+      let pdf: (buffer: Buffer) => Promise<{ text?: string }>;
+
+      try {
+        pdf = (await import("pdf-parse-new")).default;
+      } catch (importError) {
+        console.error("RESUME PDF-PARSE-NEW LOAD ERROR =", importError);
+        throw new AnalysisFailure(
+          "MODULE_LOAD_FAILED",
+          "We couldn't process this resume. Please try again."
+        );
+      }
+
+      resumeText = await extractPdfText(buffer, pdf);
 
       if (resumeText.trim().length < 300) {
         throw new AnalysisFailure(
@@ -252,6 +283,18 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
         );
       }
     } else if (lowerFileName.endsWith(".docx")) {
+      let mammoth: { extractRawText: (input: { buffer: Buffer }) => Promise<{ value: string }> };
+
+      try {
+        mammoth = await import("mammoth");
+      } catch (importError) {
+        console.error("RESUME MAMMOTH LOAD ERROR =", importError);
+        throw new AnalysisFailure(
+          "MODULE_LOAD_FAILED",
+          "We couldn't process this resume. Please try again."
+        );
+      }
+
       const doc = await mammoth.extractRawText({ buffer });
       resumeText = doc.value;
     } else if (lowerFileName.endsWith(".txt")) {
