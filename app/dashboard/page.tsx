@@ -15,6 +15,10 @@ import CoverLetterPreviewRenderer from "@/components/coverLetter/CoverLetterPrev
 import CareerMemoryTemplatePreview, {
   mapCareerMemoryRowToPreviewData,
 } from "@/components/resume/CareerMemoryTemplatePreview";
+import CareerFairCard from "@/components/careerFairs/CareerFairCard";
+import ProvinceSelect from "@/components/careerFairs/ProvinceSelect";
+import { useUserLocation } from "@/lib/careerFairs/useUserLocation";
+import type { RecommendedCareerFair } from "@/lib/careerFairs/types";
 
 const FREE_PACKAGE_LIMIT = 3;
 const menuItems = [
@@ -55,18 +59,6 @@ type PreviewAsset =
   | null;
 
 
-
-const defaultCareerFairs = [
-  { title: "Toronto Career Fair", date: "Jul 12", location: "Metro Toronto Convention Centre", icon: "🎓", tags: ["General", "Toronto"], match: "", why: ["Open to multiple industries", "Good for entry-level roles"] },
-  { title: "Legal Career Expo", date: "Jul 18", location: "North York Civic Centre", icon: "⚖️", tags: ["Legal", "Law Clerk"], match: "", why: ["Useful for legal and office roles", "Good networking opportunity"] },
-  { title: "Government Hiring Fair", date: "Aug 2", location: "Mississauga Convention Centre", icon: "🏛️", tags: ["Government", "Public Sector"], match: "", why: ["Public sector opportunities", "Good for administrative roles"] },
-];
-
-const personalizedCareerFairs = [
-  { title: "Toronto Legal Career Expo", date: "May 22", location: "Metro Toronto Convention Centre", icon: "⚖️", tags: ["Legal", "Law Clerk", "Toronto"], match: "95%", why: ["Matches your target role: Law Clerk", "Legal industry focused", "Location preference: Toronto"] },
-  { title: "Administrative & Office Career Fair", date: "Jun 5", location: "Beanfield Centre", icon: "💼", tags: ["Administrative", "Office", "Entry Level"], match: "89%", why: ["Matches your skills and experience", "Entry-level friendly", "Great for career growth"] },
-  { title: "Government & Public Sector Expo", date: "Jun 18", location: "Enercare Centre", icon: "🏛️", tags: ["Government", "Public Sector", "Toronto"], match: "85%", why: ["Government roles in high demand", "Stable career opportunities", "Matches your goals"] },
-];
 
 function getMenuHref(item: string) {
   if (item === "Dashboard") return "/dashboard";
@@ -999,7 +991,12 @@ const [
   resettingCareerMemory,
   setResettingCareerMemory,
 ] = useState(false);
-  const [careerFairLocation, setCareerFairLocation] = useState("Toronto, ON");
+  const userLocation = useUserLocation();
+  const [manualProvince, setManualProvince] = useState("");
+  const [manualCity, setManualCity] = useState("");
+  const [careerFairsLoading, setCareerFairsLoading] = useState(true);
+  const [careerFairsError, setCareerFairsError] = useState(false);
+  const [careerFairsHasLocation, setCareerFairsHasLocation] = useState(false);
  const [stats, setStats] = useState<DashboardStats>({
   packages: 0,
   applications: 0,
@@ -1030,7 +1027,59 @@ const [
     used: number | null;
     remaining: number | null;
   } | null>(null);
-  const [careerFairs, setCareerFairs] = useState(defaultCareerFairs);
+  const [careerFairs, setCareerFairs] = useState<RecommendedCareerFair[]>([]);
+
+  /*
+    manualCity is bound directly to the input's onChange for instant
+    visual feedback as the user types, but effectiveCity (and the fetch
+    effect below keyed on it) uses this debounced copy instead - without
+    it, every keystroke in "City (optional)" would fire its own
+    /api/career-fairs/recommend request (confirmed during production
+    performance QA, spec section 11's explicit "no per-keystroke request
+    while typing a city" requirement).
+  */
+  const [debouncedManualCity, setDebouncedManualCity] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedManualCity(manualCity), 400);
+    return () => clearTimeout(timer);
+  }, [manualCity]);
+
+  const effectiveCity = userLocation.city || debouncedManualCity || null;
+  const effectiveProvince = userLocation.province || manualProvince || null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCareerFairs() {
+      setCareerFairsLoading(true);
+      setCareerFairsError(false);
+
+      try {
+        const params = new URLSearchParams();
+        if (effectiveCity) params.set("city", effectiveCity);
+        if (effectiveProvince) params.set("province", effectiveProvince);
+
+        const res = await fetch(`/api/career-fairs/recommend?${params.toString()}`);
+        if (!res.ok) throw new Error("Failed to load career fairs.");
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        setCareerFairs(data.fairs || []);
+        setCareerFairsHasLocation(Boolean(data.hasLocation));
+      } catch {
+        if (!cancelled) setCareerFairsError(true);
+      } finally {
+        if (!cancelled) setCareerFairsLoading(false);
+      }
+    }
+
+    loadCareerFairs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCity, effectiveProvince]);
   const [showTour, setShowTour] = useState(false);
   const [visibleJobs, setVisibleJobs] = useState(6);
   const [recommendedJobs, setRecommendedJobs] =
@@ -1523,8 +1572,6 @@ if (!selectedPayload) {
  
 
 
-  setCareerFairs(defaultCareerFairs);
-
   const isCacheStale =
     !cachedJobs ||
     !cachedTime ||
@@ -1725,10 +1772,6 @@ useEffect(() => {
     careerMemory
       .selected_cover_letter_id ||
       ""
-  );
-
-  setCareerFairs(
-    defaultCareerFairs
   );
 
   const tourSeen =
@@ -2220,10 +2263,6 @@ useEffect(() => {
     setShowTour(false);
   }
 
-  function handleCareerFairSearch() {
-    setCareerFairs(careerMemoryCompleted ? personalizedCareerFairs : defaultCareerFairs);
-  }
-   
 function renderPreviewContent() {
   if (!previewAsset) return null;
 
@@ -3186,158 +3225,130 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 )}
 
                  
-              <div className="relative overflow-hidden rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-  {/* Coming Soon Overlay */}
-  <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80 px-6 backdrop-blur-[2px]">
-    <div className="max-w-md text-center">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
-        🎪
-      </div>
+              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  <div className="mb-5 flex items-center justify-between gap-3">
+    <div>
+      <h2 className="text-lg font-bold">🎪 Career Fair Search</h2>
 
-      <span className="mt-5 inline-flex rounded-full bg-blue-100 px-4 py-2 text-xs font-black uppercase tracking-wide text-blue-700">
-        Coming Soon
-      </span>
-
-      <h3 className="mt-4 text-2xl font-black text-slate-950">
-        Career Fair Search
-      </h3>
-
-      <p className="mt-3 text-sm leading-6 text-slate-600">
-        Career Fair Search will be available in the official release of
-        Career Élan.
-      </p>
-
-      <p className="mt-2 text-xs font-semibold text-slate-400">
-        This feature is not available during the Free Beta.
+      <p className="mt-1 text-sm text-gray-500">
+        {careerFairsHasLocation
+          ? "Career fairs near you."
+          : "Upcoming across Canada."}
       </p>
     </div>
+
+    <a
+      href="/career-fairs"
+      className="text-sm font-bold text-blue-600 hover:underline"
+    >
+      View All
+    </a>
   </div>
 
-  {/* Disabled preview content */}
-  <div
-    aria-hidden="true"
-    className="pointer-events-none select-none opacity-30"
-  >
-    <div className="mb-5 flex items-center justify-between">
-      <div>
-        <h2 className="text-lg font-bold">
-          🎪 Career Fair Search
-        </h2>
+  <div className="mb-6 flex flex-wrap items-center gap-3">
+    <span className="text-xl">📍</span>
 
-        <p className="mt-1 text-sm text-gray-500">
-          {careerMemoryCompleted
-            ? "AI finds career fairs that match your profile and goals."
-            : "Search career fairs by location. Add Career Memory for AI matching."}
-        </p>
-      </div>
-
-      <button
-        type="button"
-        disabled
-        className="cursor-not-allowed text-sm font-bold text-blue-600"
-      >
-        View All
-      </button>
-    </div>
-
-    <div className="mb-6 flex flex-wrap items-center gap-3">
-      <span className="text-xl">📍</span>
-
-      <input
-        type="text"
-        value={careerFairLocation}
-        readOnly
-        disabled
-        placeholder="Toronto, ON"
-        className="min-w-0 flex-1 cursor-not-allowed rounded-xl border border-gray-300 bg-slate-50 px-4 py-2 text-slate-400 outline-none"
-      />
-
-      <button
-        type="button"
-        disabled
-        className="cursor-not-allowed rounded-xl bg-blue-600 px-8 py-2 font-semibold text-white"
-      >
-        Search
-      </button>
-    </div>
-
-    <div className="space-y-4">
-      {careerFairs.map((fair) => (
-        <div
-          key={fair.title}
-          className="grid gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm md:grid-cols-12"
+    {userLocation.status === "granted" &&
+    (userLocation.city || userLocation.province) ? (
+      <span className="text-sm font-semibold text-slate-600">
+        Using your location:{" "}
+        {userLocation.city ? `${userLocation.city}, ` : ""}
+        {userLocation.province || ""}
+      </span>
+    ) : (
+      <>
+        <button
+          type="button"
+          onClick={userLocation.requestLocation}
+          disabled={userLocation.status === "requesting"}
+          className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <div className="col-span-12 flex items-center gap-4 md:col-span-7">
-            <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-blue-50 text-4xl">
-              {fair.icon}
-            </div>
+          {userLocation.status === "requesting"
+            ? "Locating..."
+            : "📍 Use my location"}
+        </button>
 
-            <div>
-              <div className="flex items-center gap-2">
-                {fair.match && (
-                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
-                    {fair.match} Match
-                  </span>
-                )}
+        <span className="text-sm text-slate-400">or choose</span>
 
-                <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
-                  {fair.date}
-                </span>
-              </div>
+        <ProvinceSelect
+          value={manualProvince}
+          onChange={setManualProvince}
+        />
 
-              <h3 className="mt-2 text-lg font-extrabold">
-                {fair.title}
-              </h3>
+        <input
+          type="text"
+          value={manualCity}
+          onChange={(e) => setManualCity(e.target.value)}
+          placeholder="City (optional)"
+          aria-label="City (optional)"
+          className="min-w-0 flex-1 rounded-xl border border-gray-300 px-4 py-2 text-sm outline-none focus:border-blue-400"
+        />
+      </>
+    )}
+  </div>
 
-              <p className="mt-1 text-sm text-gray-500">
-                {fair.location}
-              </p>
-
-              <div className="mt-2 flex flex-wrap gap-2">
-                {fair.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="col-span-12 rounded-xl bg-green-50 p-4 md:col-span-5">
-            <h4 className="font-bold text-green-700">
-              {careerMemoryCompleted
-                ? "Why this match?"
-                : "Why this event?"}
-            </h4>
-
-            <div className="mt-2 space-y-1">
-              {fair.why.map((reason) => (
-                <p
-                  key={reason}
-                  className="text-sm text-green-700"
-                >
-                  ✓ {reason}
-                </p>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              disabled
-              className="mt-3 cursor-not-allowed rounded-lg bg-white px-4 py-2 text-sm font-bold text-blue-600"
-            >
-              View Details
-            </button>
-          </div>
-        </div>
+  {careerFairsLoading ? (
+    <div
+      role="status"
+      aria-live="polite"
+      className="grid gap-4 md:grid-cols-3"
+    >
+      <span className="sr-only">Loading career fairs…</span>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          aria-hidden="true"
+          className="h-40 animate-pulse rounded-2xl bg-slate-100"
+        />
       ))}
     </div>
-  </div>
+  ) : careerFairsError ? (
+    <div
+      role="alert"
+      className="rounded-xl border border-red-100 bg-red-50 p-6 text-center text-sm font-semibold text-red-600"
+    >
+      Couldn&apos;t load career fairs right now. Please try again later.
+    </div>
+  ) : careerFairs.length === 0 ? (
+    <div className="rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+      No upcoming career fairs found right now. Check back soon.
+    </div>
+  ) : (
+    <>
+      {/*
+        The recommend API already ranks public/newcomers/alumni ahead of
+        students_only within each location tier - but when literally
+        every result is students_only (or eligibility is unknown), that
+        ranking alone doesn't tell a non-student job seeker anything.
+        This banner makes that explicit instead of silently showing a
+        wall of events they likely can't attend.
+      */}
+      {careerFairs.every(
+        (fair) =>
+          fair.audience === "students_only" ||
+          fair.audience === "employer_invite_only" ||
+          fair.audience === "unknown" ||
+          !fair.audience
+      ) && (
+        <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs font-semibold text-amber-700">
+          These upcoming fairs are mostly student/alumni-focused or have
+          unclear eligibility - check each event&apos;s badge before attending
+          if you&apos;re not a current student.
+        </div>
+      )}
+      <div className="grid gap-4 md:grid-cols-3">
+        {careerFairs.map((fair) => (
+          <CareerFairCard
+            key={fair.id}
+            fair={fair}
+            matchTier={fair.matchTier}
+          />
+        ))}
+      </div>
+    </>
+  )}
+</div>
 
-                </div>
               </div>
             </section>
 
