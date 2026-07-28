@@ -1,12 +1,28 @@
+import { schedule } from "@netlify/functions";
 import type { Handler } from "@netlify/functions";
 
 /*
-  Netlify Scheduled Function - the "config.schedule" export below is what
-  registers this as a cron-triggered function (Netlify's own scheduling
-  mechanism, invoked automatically once deployed; there is no equivalent
-  local-dev trigger, so this file is only ever exercised on a real Netlify
-  deploy - locally, POST directly to /api/internal/refresh-career-fairs
-  with the same bearer secret to test ingestion).
+  Netlify Scheduled Function - the "schedule(cron, handler)" wrapper below
+  is what registers this as a cron-triggered function (Netlify's own
+  scheduling mechanism, invoked automatically once deployed; there is no
+  equivalent local-dev trigger, so this file is only ever exercised on a
+  real Netlify deploy - locally, POST directly to
+  /api/internal/refresh-career-fairs with the same bearer secret to test
+  ingestion).
+
+  Deliberately NOT a bare `export const config = { schedule: "..." }`
+  object: that shape only registers with Netlify's V2 ("NetlifyFunction",
+  fetch-based) function format. This file uses the classic `Handler` type
+  (event/context signature, still the documented style for this package),
+  and for that style @netlify/functions instead ships a dedicated
+  `schedule()` wrapper - confirmed by reading this repo's installed
+  node_modules/@netlify/functions/dist/main.d.ts, whose JSDoc for
+  `schedule` explicitly documents this exact `export const handler =
+  schedule(cron, handler)` pattern as the supported mechanism for
+  Handler-typed functions. The bare-config version was silently ignored at
+  the build/bundle level (confirmed live: the deployed function showed
+  `schedule: null` in Netlify's own function metadata despite deploying
+  successfully) - a correct-looking but non-functional configuration.
 
   This function does no ingestion work itself - it only makes one
   authenticated fetch back into the already-deployed Next.js app's own
@@ -28,11 +44,7 @@ import type { Handler } from "@netlify/functions";
   this env var's availability). No local-dev fallback origin is needed
   here since this handler never runs outside a real Netlify deploy.
 */
-export const config = {
-  schedule: "0 8 * * *",
-};
-
-export const handler: Handler = async () => {
+export const handler: Handler = schedule("0 8 * * *", async () => {
   const secret = process.env.CAREER_FAIR_REFRESH_SECRET;
   const siteUrl = process.env.URL;
 
@@ -88,4 +100,4 @@ export const handler: Handler = async () => {
 
     return { statusCode: 500, body: message };
   }
-};
+});
