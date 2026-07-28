@@ -11,10 +11,6 @@ import {
   MAX_CREATED_RESUMES,
   MAX_COVER_LETTERS,
 } from "@/lib/config/careerMemoryLimits";
-import {
-  createDocAnalysisPoller,
-  type DocAnalysisPollerHandle,
-} from "@/lib/documentAnalysis/pollingClient";
 const DRAFT_KEY = "career-memory-draft";
 const steps = [
   {
@@ -267,8 +263,6 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const uploadProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
-  const resumeAnalysisPollerRef = useRef<DocAnalysisPollerHandle | null>(null);
-  const coverLetterAnalysisPollerRef = useRef<DocAnalysisPollerHandle | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
  const [profileStrength, setProfileStrength] = useState(0);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
@@ -996,48 +990,6 @@ function continueUploadedDashboard() {
       .join("");
   }
 
-  /*
-    Real server-reported stage -> user-facing message, for the async
-    Resume/Cover Letter analysis polling flows. Replaces the old fixed
-    40->66% interval ticker (which had no relationship to actual server
-    progress) with wording that reflects the worker's own reported stage.
-  */
-  function describeResumeAnalysisStage(stage: string | null): string {
-    switch (stage) {
-      case "downloading_file":
-        return "Reading your document";
-      case "extracting_text":
-        return "Extracting text";
-      case "reconstructing_text":
-        return "Understanding your experience";
-      case "extracting_fields":
-        return "Identifying skills and education";
-      case "verifying":
-        return "Building your Career Memory";
-      default:
-        return "Extracting text and analyzing with AI";
-    }
-  }
-
-  function describeCoverLetterAnalysisStage(stage: string | null): string {
-    switch (stage) {
-      case "downloading_file":
-        return "Reading your document";
-      case "extracting_text":
-        return "Extracting text";
-      case "running_ocr":
-        return "Reading scanned pages";
-      case "reconstructing_text":
-        return "Understanding your cover letter";
-      case "extracting_fields":
-        return "Identifying sections";
-      case "verifying":
-        return "Finalizing your cover letter";
-      default:
-        return "Career Élan is analyzing your cover letter...";
-    }
-  }
-
   async function processResumeFile(file: File) {
   setResumeUploadError("");
 
@@ -1062,11 +1014,6 @@ function continueUploadedDashboard() {
     if (uploadProgressTimerRef.current) {
       clearInterval(uploadProgressTimerRef.current);
       uploadProgressTimerRef.current = null;
-    }
-
-    if (resumeAnalysisPollerRef.current) {
-      resumeAnalysisPollerRef.current.stop();
-      resumeAnalysisPollerRef.current = null;
     }
 
     setImportStage("idle");
@@ -1212,14 +1159,12 @@ return;
     /*
       4. resumes 테이블에 새 이력서 추가 (분석 시작 전)
 
-      Inserted BEFORE analysis now, not after - production reproduction
-      confirmed the old synchronous analyze-resume call (3 sequential
-      OpenAI calls in one request) was being killed by Netlify's own
-      gateway timeout on real-world documents (504, HTML body, unparsable
-      as JSON). Analysis now runs in a Background Function
-      (lib/documentAnalysis/resumeAnalysisCore.ts) that claims this row and
-      writes its result onto it - see app/api/analyze-resume/route.ts's own
-      docstring for the full async pipeline.
+      Inserted with analysis_status='pending' before analysis runs, so a
+      row already exists (for Dashboard-immediate-refresh and the
+      content-hash duplicate check) even though the call below awaits
+      analysis synchronously in the same request - see
+      app/api/analyze-resume/route.ts's own docstring for why analysis
+      itself runs in-process rather than a separate worker.
     */
     setImportMessage("Saving to your account");
     setUploadProgress(40);
@@ -1303,25 +1248,26 @@ return;
     });
 
     /*
-      5. 비동기 분석 시작 - claim + enqueue만 수행하고 202로 즉시 응답받는다.
-      실제 텍스트 추출/OpenAI 호출은 Background Function에서 실행된다.
+      5. 분석 실행 - Next.js Route 런타임에서 동기적으로 실행하고 최종
+      결과를 한 번에 응답받는다 (pdf-parse-new는 이 런타임의
+      serverExternalPackages 보호를 받으므로 여기서 정상 동작한다).
     */
     setImportMessage("Extracting text and analyzing with AI");
-    setUploadProgress(45);
+    setUploadProgress(60);
 
-    const enqueueResponse = await fetch("/api/analyze-resume", {
+    const analyzeResponse = await fetch("/api/analyze-resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resumeId: insertedResumeId }),
     });
 
-    let enqueueResult: any;
+    let analyzeResult: any;
 
     try {
-      enqueueResult = await enqueueResponse.json();
+      analyzeResult = await analyzeResponse.json();
     } catch (jsonError) {
       console.error(
-        "RESUME ENQUEUE JSON ERROR =",
+        "RESUME ANALYSIS JSON ERROR =",
         jsonError
       );
 
@@ -1341,10 +1287,10 @@ return;
       return;
     }
 
-    if (!enqueueResponse.ok || enqueueResult.success === false) {
+    if (!analyzeResponse.ok || !analyzeResult.success) {
       console.error(
-        "RESUME ANALYSIS ENQUEUE FAILED =",
-        enqueueResult
+        "RESUME ANALYSIS FAILED =",
+        analyzeResult
       );
 
       await supabase.storage.from("resumes").remove([storagePath]);
@@ -1357,64 +1303,13 @@ return;
       resetResumeImport();
 
       setResumeUploadError(
-        enqueueResult.message || "Failed to analyze resume."
+        analyzeResult.message || "Failed to analyze resume."
       );
 
       return;
     }
 
-    // Idempotent replay path - already succeeded (astronomically unlikely
-    // on a fresh upload, but the route supports it for safety).
-    if (enqueueResult.data) {
-      applyResumeAnalysisResult(file, enqueueResult.data);
-      return;
-    }
-
-    /*
-      6. 폴링 시작 - 서버가 보고하는 실제 stage/progress만 표시한다.
-      고정된 가짜 진행률 타이머는 더 이상 사용하지 않는다.
-    */
-    resumeAnalysisPollerRef.current = createDocAnalysisPoller({
-      url: `/api/resumes/${insertedResumeId}/analysis-status`,
-      onPending: (result) => {
-        setUploadProgress(Math.max(45, result.progress));
-        setImportMessage(describeResumeAnalysisStage(result.stage));
-      },
-      onSucceeded: (result) => {
-        resumeAnalysisPollerRef.current = null;
-        applyResumeAnalysisResult(file, result.data);
-      },
-      onFailed: (result) => {
-        resumeAnalysisPollerRef.current = null;
-        // The status route already deleted the row + storage object on
-        // first observing "failed" - nothing left to clean up here.
-        resetResumeImport();
-        setResumeUploadError(result.message);
-      },
-      onInvalid: () => {
-        resumeAnalysisPollerRef.current = null;
-        resetResumeImport();
-        setResumeUploadError(
-          "The resume could not be found. Please try uploading again."
-        );
-      },
-      onUnauthorized: () => {
-        resumeAnalysisPollerRef.current = null;
-        resetResumeImport();
-        setResumeUploadError(
-          "Your session may have expired. Please sign in again."
-        );
-      },
-      onTimeout: () => {
-        resumeAnalysisPollerRef.current = null;
-        // Analysis may still finish server-side after this point - only
-        // stop waiting for it here, never delete the row/storage.
-        resetResumeImport();
-        setResumeUploadError(
-          "This is taking longer than expected. Please check back in a moment, or try uploading again."
-        );
-      },
-    });
+    applyResumeAnalysisResult(file, analyzeResult.data);
   } catch (error) {
     console.error(
       "RESUME UPLOAD ERROR =",
@@ -1558,11 +1453,6 @@ async function processCoverLetterFile(file: File) {
 setCoverLetterUploadError("");
 
   function resetCoverLetterImport() {
-    if (coverLetterAnalysisPollerRef.current) {
-      coverLetterAnalysisPollerRef.current.stop();
-      coverLetterAnalysisPollerRef.current = null;
-    }
-
     setCoverLetterImportStage("idle");
     setCoverLetterImportMessage("");
     setCoverLetterUploadProgress(0);
@@ -1739,26 +1629,27 @@ return;
     });
 
     /*
-      비동기 분석 시작 - claim + enqueue만 수행하고 202로 즉시 응답받는다.
+      분석 실행 - Next.js Route 런타임에서 동기적으로 실행하고 최종
+      결과를 한 번에 응답받는다.
     */
     setCoverLetterImportMessage(
       "Career Élan is analyzing your cover letter..."
     );
-    setCoverLetterUploadProgress(30);
+    setCoverLetterUploadProgress(60);
 
-    const enqueueResponse = await fetch("/api/analyze-cover-letter", {
+    const analyzeResponse = await fetch("/api/analyze-cover-letter", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ coverLetterId: insertedCoverLetterId }),
     });
 
-    let enqueueResult: any;
+    let analyzeResult: any;
 
     try {
-      enqueueResult = await enqueueResponse.json();
+      analyzeResult = await analyzeResponse.json();
     } catch (jsonError) {
       console.error(
-        "COVER LETTER ENQUEUE JSON ERROR =",
+        "COVER LETTER ANALYSIS JSON ERROR =",
         jsonError
       );
 
@@ -1778,10 +1669,10 @@ return;
       return;
     }
 
-    if (!enqueueResponse.ok || enqueueResult.success === false) {
+    if (!analyzeResponse.ok || !analyzeResult.success) {
       console.error(
-        "COVER LETTER ANALYSIS ENQUEUE FAILED =",
-        enqueueResult
+        "COVER LETTER ANALYSIS FAILED =",
+        analyzeResult
       );
 
       await supabase.storage.from("cover-letters").remove([storagePath]);
@@ -1794,59 +1685,14 @@ return;
       resetCoverLetterImport();
 
       setCoverLetterUploadError(
-        enqueueResult.message ||
+        analyzeResult.message ||
           "Failed to analyze cover letter. Please try again."
       );
 
       return;
     }
 
-    if (enqueueResult.data) {
-      applyCoverLetterAnalysisResult(file, enqueueResult.data);
-      return;
-    }
-
-    coverLetterAnalysisPollerRef.current = createDocAnalysisPoller({
-      url: `/api/cover-letters/${insertedCoverLetterId}/analysis-status`,
-      onPending: (result) => {
-        setCoverLetterUploadProgress(Math.max(30, result.progress));
-        setCoverLetterImportMessage(
-          describeCoverLetterAnalysisStage(result.stage)
-        );
-      },
-      onSucceeded: (result) => {
-        coverLetterAnalysisPollerRef.current = null;
-        applyCoverLetterAnalysisResult(file, result.data);
-      },
-      onFailed: (result) => {
-        coverLetterAnalysisPollerRef.current = null;
-        // The status route already deleted the row + storage object on
-        // first observing "failed" - nothing left to clean up here.
-        resetCoverLetterImport();
-        setCoverLetterUploadError(result.message);
-      },
-      onInvalid: () => {
-        coverLetterAnalysisPollerRef.current = null;
-        resetCoverLetterImport();
-        setCoverLetterUploadError(
-          "The cover letter could not be found. Please try uploading again."
-        );
-      },
-      onUnauthorized: () => {
-        coverLetterAnalysisPollerRef.current = null;
-        resetCoverLetterImport();
-        setCoverLetterUploadError(
-          "Your session may have expired. Please sign in again."
-        );
-      },
-      onTimeout: () => {
-        coverLetterAnalysisPollerRef.current = null;
-        resetCoverLetterImport();
-        setCoverLetterUploadError(
-          "This is taking longer than expected. Please check back in a moment, or try uploading again."
-        );
-      },
-    });
+    applyCoverLetterAnalysisResult(file, analyzeResult.data);
   } catch (error) {
     console.error(
       "COVER LETTER UPLOAD ERROR =",

@@ -8,14 +8,11 @@ import {
 import { classifyGenerationError } from "./shared";
 
 /*
-  Background worker for the async Cover Letter analysis flow - same split
-  as ./resumeAnalysisCore.ts, see that file's own docstring for the full
-  rationale (production 504/HTML-gateway-timeout root cause, Background
-  Function execution budget, relative-import requirement for Netlify's
-  function bundler, and why pdf-parse-new/mammoth/pdf2pic are loaded
-  lazily inside the try block rather than as top-level imports). Every
-  extraction/prompt/normalization step below is copied verbatim from the
-  old app/api/analyze-cover-letter/route.ts.
+  Cover Letter analysis worker - same as ./resumeAnalysisCore.ts, see that
+  file's own docstring for the full rationale (why this is invoked
+  directly from app/api/analyze-cover-letter/route.ts's Next.js Route
+  runtime, and why pdf-parse-new/mammoth/pdf2pic still stay lazily
+  imported inside the try block rather than as top-level imports).
 */
 
 const client = new OpenAI({

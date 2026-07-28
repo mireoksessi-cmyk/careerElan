@@ -1,75 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { logSafeError } from "@/lib/errors/publicError";
-import {
-  resolveBackgroundFunctionSecret,
-  resolveNamedBackgroundFunctionUrl,
-} from "@/lib/generatePackage/backgroundTarget";
+import { runResumeAnalysis } from "@/lib/documentAnalysis/resumeAnalysisCore";
 
 /*
-  Async rewrite: this route no longer receives the file or runs any text
-  extraction/OpenAI call itself - production reproduction confirmed the old
-  synchronous version (3 sequential OpenAI calls in one request handler)
-  was being killed by Netlify's own gateway timeout on real-world documents
-  (504, HTML body, "Unexpected token '<'" on the client - the request never
-  even reached the point of returning JSON). The file is already in
-  Supabase Storage and the resumes row already exists (both done client-side
-  before this route is called, unchanged from before) - this route's only
-  job now is to claim-by-enqueue: verify ownership, hand off to the
-  background worker, and return 202 immediately. The actual work now lives
-  in lib/documentAnalysis/resumeAnalysisCore.ts, run by
-  netlify/functions/analyze-resume-background.ts (Production) or
-  app/api/internal/analyze-resume-worker/route.ts (local dev) - exactly
-  mirroring the Generate Package Phase 1 async pattern
-  (app/api/generate-package/route.ts / lib/generatePackage/generateCore.ts).
+  Synchronous again - reverted from the Background Function enqueue
+  pattern after production DB evidence (analysis_worker_claimed_at set,
+  analysis_error_code='MODULE_LOAD_FAILED' at the exact
+  `await import("pdf-parse-new")` line in resumeAnalysisCore.ts) proved
+  pdf-parse-new fails to load inside Netlify's classic Background Function
+  bundle (netlify/functions/*.ts), which - unlike this Next.js Route
+  Handler's own bundle (___netlify-server-handler) - is not covered by
+  next.config.js's `serverExternalPackages: ["pdf-parse-new", ...]`. The
+  same extraction/OpenAI logic (lib/documentAnalysis/resumeAnalysisCore.ts)
+  is reused verbatim, just invoked directly and awaited here instead of
+  enqueued to a separate function - this is exactly the runtime commit
+  cab8755 used, where pdf-parse-new was already proven to load correctly.
+
+  maxDuration=60 restored (present in e2d9ad5, removed when this route
+  became enqueue-only) - this route now does the same long-running
+  synchronous work cab8755 did, so the same per-route execution-limit
+  raise applies again. Real observed latency locally: ~15-30s for a
+  short resume; real-world documents may run longer, which is the same
+  timeout risk cab8755 always had - not a new regression introduced by
+  this revert.
 */
 
-const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
+export const maxDuration = 60;
 
-async function enqueueResumeAnalysisWorker(params: {
-  requestOrigin: string;
-  resumeId: string;
-}): Promise<void> {
-  const { requestOrigin, resumeId } = params;
-
-  const secret = resolveBackgroundFunctionSecret();
-
-  if (!secret) {
-    throw new Error("Background analysis is not configured.");
-  }
-
-  const { url: backgroundUrl } = resolveNamedBackgroundFunctionUrl(
-    requestOrigin,
-    "analyze-resume-background",
-    "/api/internal/analyze-resume-worker"
-  );
-
-  const timeoutSignal =
-    typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-      ? AbortSignal.timeout(ENQUEUE_FETCH_TIMEOUT_MS)
-      : (() => {
-          const controller = new AbortController();
-          setTimeout(
-            () => controller.abort(new Error("Enqueue fetch timed out.")),
-            ENQUEUE_FETCH_TIMEOUT_MS
-          );
-          return controller.signal;
-        })();
-
-  const res = await fetch(backgroundUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${secret}`,
-    },
-    body: JSON.stringify({ resumeId }),
-    signal: timeoutSignal,
-  });
-
-  if (res.status !== 202) {
-    throw new Error(`Background function returned ${res.status}, expected 202.`);
-  }
-}
+/*
+  The resumes row is still inserted client-side before this route is
+  called (unchanged - needed for Dashboard-immediate-refresh and the
+  content-hash duplicate check), so this route claims-and-runs rather than
+  claims-and-enqueues: it awaits the full analysis in-process and returns
+  the final {success, data} or {success, message, code} in one response,
+  matching the original synchronous contract client code expects.
+*/
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
@@ -110,9 +76,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Idempotent replay - the client polls its own status route once
-    // enqueued, but a duplicate call here (double-click, retried request)
-    // should never re-run analysis on an already-resolved row.
+    // Idempotent replay - a duplicate call here (double-click, retried
+    // request) should never re-run analysis on an already-resolved row.
     if (resume.analysis_status === "succeeded") {
       return NextResponse.json({ success: true, data: resume.parsed_data });
     }
@@ -125,38 +90,36 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    try {
-      await enqueueResumeAnalysisWorker({
-        requestOrigin: new URL(req.url).origin,
-        resumeId,
-      });
-    } catch (enqueueError) {
-      logSafeError(enqueueError, {
-        requestId,
-        route: "/api/analyze-resume#enqueue",
-        userId: user.id,
-      });
+    // Runs the full extraction + 3 sequential OpenAI calls in-process,
+    // writing analysis_status/parsed_data/original_text (or the failure
+    // fields) via runResumeAnalysis's own atomic claim + RPC writes -
+    // unchanged from the Background Function version, just awaited here
+    // instead of dispatched over HTTP.
+    await runResumeAnalysis(resumeId);
 
-      await supabase
-        .from("resumes")
-        .update({
-          analysis_status: "failed",
-          analysis_error_code: "ENQUEUE_FAILED",
-          analysis_error_summary: "Failed to start resume analysis.",
-        })
-        .eq("id", resumeId)
-        .eq("user_id", user.id);
+    const { data: finalRow, error: finalError } = await supabase
+      .from("resumes")
+      .select("analysis_status, parsed_data, analysis_error_code, analysis_error_summary")
+      .eq("id", resumeId)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
+    if (finalError || !finalRow) {
       return NextResponse.json(
-        { success: false, message: "Failed to start resume analysis. Please try again." },
-        { status: 502 }
+        { success: false, message: "Failed to analyze resume. Please try again." },
+        { status: 500 }
       );
     }
 
-    return NextResponse.json(
-      { success: true, status: "processing", resumeId },
-      { status: 202 }
-    );
+    if (finalRow.analysis_status === "succeeded") {
+      return NextResponse.json({ success: true, data: finalRow.parsed_data });
+    }
+
+    return NextResponse.json({
+      success: false,
+      message: finalRow.analysis_error_summary || "Failed to analyze resume.",
+      code: finalRow.analysis_error_code || "UNKNOWN",
+    });
   } catch (error) {
     logSafeError(error, { requestId, route: "/api/analyze-resume" });
 

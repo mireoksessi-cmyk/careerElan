@@ -5,45 +5,20 @@ import { RESUME_PARSE_DRAFT_MODEL, RESUME_PARSE_MODEL } from "../config/aiModels
 import { classifyGenerationError } from "./shared";
 
 /*
-  Background worker for the async Resume analysis flow - the actual text
-  extraction + 3 sequential OpenAI calls that used to run inside
-  app/api/analyze-resume/route.ts's synchronous request handler, which
-  production reproduction confirmed was being killed by Netlify's gateway
-  timeout on real-world documents (504, HTML body, Netlify function logs
-  showing progress only as far as PDF text extraction). Moved here so that
-  work runs inside a Netlify Background Function's much longer execution
-  budget instead - see netlify/functions/analyze-resume-background.ts
-  (Production trigger) and app/api/internal/analyze-resume-worker/route.ts
-  (local-dev stand-in), mirroring lib/generatePackage/generateCore.ts's
-  own split exactly.
+  Resume analysis worker - the actual text extraction + 3 sequential
+  OpenAI calls. Now invoked directly and awaited in-process by
+  app/api/analyze-resume/route.ts (Next.js Route runtime), not by a
+  Netlify classic Background Function - production DB evidence proved
+  pdf-parse-new fails to load in that bundler, which (unlike the Next.js
+  Runtime) next.config.js's serverExternalPackages does not cover. See
+  app/api/analyze-resume/route.ts's own top comment for the full history.
 
-  Deliberately relative imports throughout (matching generateCore.ts's own
-  documented reasoning) - this file is imported directly by
-  netlify/functions/analyze-resume-background.ts, whose bundler is a
-  separate build step from `next build` and is not confirmed to resolve
-  tsconfig.json's "@/..." alias the same way Next.js does.
-
-  Every extraction/prompt/normalization step below is copied verbatim from
-  the old app/api/analyze-resume/route.ts (no wording, model, or logic
-  change) - only the surrounding claim/stage/persist plumbing is new.
-
-  pdf-parse-new and mammoth are deliberately NOT imported at module top
-  level - confirmed via direct production DB inspection that this exact
-  mistake silently killed every invocation of this Background Function
-  before any of its own code (not even the first console.log) ever ran:
-  the resumes row stayed at analysis_status='pending' with
-  analysis_worker_claimed_at still null, meaning runResumeAnalysis()
-  never even reached its own first line. This is the identical class of
-  bug already documented and fixed once in app/api/process-resume-design/
-  route.ts's own top comment - Netlify's classic Background Function
-  bundler (a separate pipeline from the Next.js Runtime that already
-  handles these two packages fine via next.config.js's
-  serverExternalPackages) apparently cannot load one of them from a
-  static top-level import. Loading them lazily inside runResumeAnalysis's
-  own try block, after the atomic claim has already succeeded, guarantees
-  a load failure is caught by the existing catch and turned into a
-  correctly-terminated 'failed' status instead of an unrecoverable
-  'pending' row the client polls forever.
+  pdf-parse-new and mammoth are still deliberately NOT imported at module
+  top level, even though this now runs in a runtime where the static
+  import would work - this keeps a load failure caught by the existing
+  try/catch and turned into a correctly-terminated 'failed' status rather
+  than an uncaught module-load exception, matching
+  app/api/process-resume-design/route.ts's own documented convention.
 */
 
 const client = new OpenAI({
