@@ -10,6 +10,20 @@ import {
   RESUME_PARSE_MODEL,
 } from "@/lib/config/aiModels";
 
+/*
+  This route makes 3 sequential OpenAI calls per upload (reconstruction,
+  structured extraction, verification) - measured at ~17s locally for a
+  short test resume, and longer for real ones. Netlify's Next.js Runtime
+  reads this route segment config to raise the underlying function's own
+  execution limit (capped at whatever the account's plan actually allows);
+  without it, a slow real-world resume risks the platform killing the
+  function mid-request and returning its own non-JSON error page, which is
+  indistinguishable on the client from a malformed API response (both fail
+  the same response.json() parse). Does not touch any parsing/business
+  logic below.
+*/
+export const maxDuration = 60;
+
 
 function normalizeSkills(data: any) {
   if (!data) return "";

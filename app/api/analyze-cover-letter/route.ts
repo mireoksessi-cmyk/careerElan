@@ -10,6 +10,19 @@ import {
   COVER_LETTER_PARSE_MODEL,
 } from "@/lib/config/aiModels";
 
+/*
+  Same rationale as app/api/analyze-resume/route.ts: this route makes up
+  to 4 sequential OpenAI calls per upload (reconstruction, structured
+  extraction, verification, plus per-page vision OCR when direct text
+  extraction fails) - measured at ~9s locally for a short test cover
+  letter, longer for real ones or when OCR is needed. Raises the
+  function's own execution limit (capped at whatever the account's plan
+  allows) so a slow real-world upload doesn't get killed by the platform
+  mid-request and return a non-JSON error page. Does not touch any
+  parsing/business logic below.
+*/
+export const maxDuration = 60;
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
