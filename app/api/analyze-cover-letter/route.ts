@@ -1,119 +1,67 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
-import pdf from "pdf-parse-new";
-import mammoth from "mammoth";
-import { fromBuffer } from "pdf2pic";
 import { createClient } from "@/lib/supabase-server";
 import { logSafeError } from "@/lib/errors/publicError";
 import {
-  COVER_LETTER_PARSE_DRAFT_MODEL,
-  COVER_LETTER_PARSE_MODEL,
-} from "@/lib/config/aiModels";
+  resolveBackgroundFunctionSecret,
+  resolveNamedBackgroundFunctionUrl,
+} from "@/lib/generatePackage/backgroundTarget";
 
 /*
-  Same rationale as app/api/analyze-resume/route.ts: this route makes up
-  to 4 sequential OpenAI calls per upload (reconstruction, structured
-  extraction, verification, plus per-page vision OCR when direct text
-  extraction fails) - measured at ~9s locally for a short test cover
-  letter, longer for real ones or when OCR is needed. Raises the
-  function's own execution limit (capped at whatever the account's plan
-  allows) so a slow real-world upload doesn't get killed by the platform
-  mid-request and return a non-JSON error page. Does not touch any
-  parsing/business logic below.
+  Async rewrite, identical shape and rationale to
+  app/api/analyze-resume/route.ts (see that file's own docstring) - claim-
+  by-enqueue only, no file/OpenAI work in this request. Actual work lives in
+  lib/documentAnalysis/coverLetterAnalysisCore.ts, run by
+  netlify/functions/analyze-cover-letter-background.ts (Production) or
+  app/api/internal/analyze-cover-letter-worker/route.ts (local dev).
 */
-export const maxDuration = 60;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
 
-function normalizeParagraph(text: string) {
-  return text
-    .replace(/\r/g, "")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
+async function enqueueCoverLetterAnalysisWorker(params: {
+  requestOrigin: string;
+  coverLetterId: string;
+}): Promise<void> {
+  const { requestOrigin, coverLetterId } = params;
 
-async function extractPdfText(buffer: Buffer) {
-  try {
-    const parsed = await pdf(buffer);
+  const secret = resolveBackgroundFunctionSecret();
 
-    if (parsed.text && parsed.text.trim().length > 300) {
-      return parsed.text;
-    }
-  } catch {}
+  if (!secret) {
+    throw new Error("Background analysis is not configured.");
+  }
 
-  return "";
-}
+  const { url: backgroundUrl } = resolveNamedBackgroundFunctionUrl(
+    requestOrigin,
+    "analyze-cover-letter-background",
+    "/api/internal/analyze-cover-letter-worker"
+  );
 
-async function pdfToImages(buffer: Buffer) {
-  const convert = fromBuffer(buffer, {
-    density: 220,
-    format: "png",
-    width: 1700,
-    height: 2200,
+  const timeoutSignal =
+    typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(ENQUEUE_FETCH_TIMEOUT_MS)
+      : (() => {
+          const controller = new AbortController();
+          setTimeout(
+            () => controller.abort(new Error("Enqueue fetch timed out.")),
+            ENQUEUE_FETCH_TIMEOUT_MS
+          );
+          return controller.signal;
+        })();
+
+  const res = await fetch(backgroundUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify({ coverLetterId }),
+    signal: timeoutSignal,
   });
 
-  const images: string[] = [];
-
-  let page = 1;
-
-  while (true) {
-    try {
-      const result = await convert(page, {
-        responseType: "base64",
-      });
-
-      if (!result.base64) break;
-
-      images.push(result.base64);
-
-      page++;
-    } catch {
-      break;
-    }
+  if (res.status !== 202) {
+    throw new Error(`Background function returned ${res.status}, expected 202.`);
   }
-
-  return images;
 }
 
-async function visionOCR(images: string[]) {
-
-  let text = "";
-
-  for (const img of images) {
-
-    const res = await openai.chat.completions.create({
-
-      model: COVER_LETTER_PARSE_MODEL,
-
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Extract every visible word from this cover letter. Preserve formatting and paragraphs. Do not summarize.",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/png;base64,${img}`,
-              },
-            },
-          ],
-        },
-      ],
-    });
-
-    text +=
-      (res.choices[0].message.content || "") + "\n";
-  }
-
-  return text;
-}
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
 
@@ -126,407 +74,88 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const coverLetterId = typeof body.coverLetterId === "string" ? body.coverLetterId : "";
+
+    if (!coverLetterId) {
       return NextResponse.json(
-        { error: "Unauthorized." },
-        { status: 401 }
+        { success: false, message: "coverLetterId is required." },
+        { status: 400 }
       );
     }
 
-    const formData = await req.formData();
+    const { data: coverLetter, error: fetchError } = await supabase
+      .from("cover_letters")
+      .select(
+        "id, analysis_status, parsed_data, analysis_error_code, analysis_error_summary"
+      )
+      .eq("id", coverLetterId)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    const file = formData.get("file") as File | null;
-
-    if (!file) {
+    if (fetchError || !coverLetter) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Cover letter file is missing.",
-        },
-        {
-          status: 400,
-        }
+        { success: false, message: "Cover letter not found." },
+        { status: 404 }
       );
     }
 
-    const buffer = Buffer.from(
-      await file.arrayBuffer()
-    );
-
-    let coverLetterText = "";
-
-    // ------------------------
-    // PDF
-    // ------------------------
-
-    if (file.name.toLowerCase().endsWith(".pdf")) {
-
-      coverLetterText =
-        await extractPdfText(buffer);
-
-      if (coverLetterText.trim().length < 300) {
-
-        console.log(
-          "Cover Letter appears scanned. Running Vision OCR..."
-        );
-
-        const images =
-          await pdfToImages(buffer);
-
-        coverLetterText =
-          await visionOCR(images);
-
-        console.log(
-          "Vision OCR complete."
-        );
-      }
-
+    if (coverLetter.analysis_status === "succeeded") {
+      return NextResponse.json({ success: true, data: coverLetter.parsed_data });
     }
 
-    // ------------------------
-    // DOCX
-    // ------------------------
-
-    else if (
-      file.name.toLowerCase().endsWith(".docx")
-    ) {
-
-      const doc =
-        await mammoth.extractRawText({
-          buffer,
-        });
-
-      coverLetterText = doc.value;
-
-    }
-
-    // ------------------------
-    // TXT
-    // ------------------------
-
-    else if (
-      file.name.toLowerCase().endsWith(".txt")
-    ) {
-
-      coverLetterText =
-        buffer.toString("utf8");
-
-    }
-
-    else {
-
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "Unsupported file format.",
-        },
-        {
-          status: 400,
-        }
-      );
-
-    }
-
-    if (!coverLetterText.trim()) {
-
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "No readable text found.",
-        },
-        {
-          status: 400,
-        }
-      );
-
-    }
-
-    coverLetterText =
-      normalizeParagraph(
-        coverLetterText
-      );
-
-    // ------------------------
-    // GPT Reconstruction
-    // ------------------------
-
-    const rebuilt =
-      await openai.chat.completions.create({
-
-        model: COVER_LETTER_PARSE_DRAFT_MODEL,
-
-        temperature: 0,
-
-        messages: [
-
-          {
-            role: "system",
-
-            content: `
-You are an expert cover letter reconstruction engine.
-
-Rebuild the cover letter exactly as a human would type it.
-
-Rules:
-
-- Never invent information.
-- Never summarize.
-- Preserve paragraphs.
-- Preserve greetings.
-- Preserve closing.
-- Preserve signature.
-- Preserve dates.
-- Preserve addresses.
-- Preserve company names.
-- Preserve formatting.
-- If OCR merged lines,
-split them naturally.
-
-Output ONLY the rebuilt cover letter.
-`,
-          },
-
-          {
-            role: "user",
-
-            content:
-              coverLetterText,
-          },
-
-        ],
-
+    if (coverLetter.analysis_status === "failed") {
+      return NextResponse.json({
+        success: false,
+        message: coverLetter.analysis_error_summary || "Failed to analyze cover letter.",
+        code: coverLetter.analysis_error_code || "UNKNOWN",
       });
-
-    coverLetterText =
-      rebuilt.choices[0]
-        .message.content ||
-      coverLetterText;
-
-    console.log(
-      coverLetterText
-    );
-
-    const numberedLetter =
-      coverLetterText
-        .split("\n")
-        .map(
-          (line, i) =>
-            `${i + 1}. ${line}`
-        )
-        .join("\n");
-        const prompt = `
-You are an expert cover letter parser.
-
-Return ONLY valid JSON.
-
-Never invent information.
-
-Extract everything you can from the cover letter.
-
-JSON format:
-
-{
-  "recipient":"",
-  "company":"",
-  "jobTitle":"",
-  "greeting":"",
-  "body":"",
-  "closing":"",
-  "signature":"",
-  "tone":""
-}
-
-Rules:
-
-- recipient = Hiring Manager if explicitly written
-- company = company name
-- jobTitle = position applying for
-- greeting = Dear ...
-- body = entire body excluding greeting & closing
-- closing = Sincerely / Best Regards / Thank you ...
-- signature = applicant name
-- tone = Professional / Formal / Friendly / Government / Executive
-
-Return ONLY valid JSON.
-
-Cover Letter:
-
-${numberedLetter}
-`;
-
-    const completion =
-      await openai.chat.completions.create({
-
-        model: COVER_LETTER_PARSE_MODEL,
-
-        temperature: 0,
-
-        response_format: {
-          type: "json_object",
-        },
-
-        messages: [
-
-          {
-            role: "system",
-            content:
-              "You extract cover letter information. Respond ONLY with valid JSON.",
-          },
-
-          {
-            role: "user",
-            content: prompt,
-          },
-
-        ],
-
-      });
-
-    const content =
-      completion.choices[0]
-        .message.content || "{}";
-
-    let parsed;
+    }
 
     try {
+      await enqueueCoverLetterAnalysisWorker({
+        requestOrigin: new URL(req.url).origin,
+        coverLetterId,
+      });
+    } catch (enqueueError) {
+      logSafeError(enqueueError, {
+        requestId,
+        route: "/api/analyze-cover-letter#enqueue",
+        userId: user.id,
+      });
 
-      parsed =
-        JSON.parse(content);
-
-      // -----------------------------
-      // Second verification pass
-      // -----------------------------
-
-      const verify =
-        await openai.chat.completions.create({
-
-          model: COVER_LETTER_PARSE_DRAFT_MODEL,
-
-          temperature: 0,
-
-          response_format: {
-            type: "json_object",
-          },
-
-          messages: [
-
-            {
-
-              role: "system",
-
-              content: `
-You verify cover letter JSON.
-
-Never invent information.
-
-Only fix obvious OCR mistakes.
-
-Never change facts.
-
-Return ONLY valid JSON.
-              `,
-
-            },
-
-            {
-
-              role: "user",
-
-              content: `
-Original Cover Letter
-
-${numberedLetter}
-
-Parsed JSON
-
-${JSON.stringify(parsed, null, 2)}
-
-Compare both.
-
-Correct only extraction mistakes.
-
-Return ONLY valid JSON.
-`,
-
-            },
-
-          ],
-
-        });
-
-      parsed = JSON.parse(
-        verify.choices[0]
-          .message.content || "{}"
-      );
-
-    } catch {
+      await supabase
+        .from("cover_letters")
+        .update({
+          analysis_status: "failed",
+          analysis_error_code: "ENQUEUE_FAILED",
+          analysis_error_summary: "Failed to start cover letter analysis.",
+        })
+        .eq("id", coverLetterId)
+        .eq("user_id", user.id);
 
       return NextResponse.json(
         {
           success: false,
-          message:
-            "We couldn't process this cover letter. Please try again.",
+          message: "Failed to start cover letter analysis. Please try again.",
         },
-        {
-          status: 500,
-        }
+        { status: 502 }
       );
-
     }
-    return NextResponse.json({
-
-      success: true,
-
-      data: {
-
-        recipient:
-          parsed.recipient || "",
-
-        company:
-          parsed.company || "",
-
-        jobTitle:
-          parsed.jobTitle || "",
-
-        greeting:
-          parsed.greeting || "",
-
-        body:
-          parsed.body || "",
-
-        closing:
-          parsed.closing || "",
-
-        signature:
-          parsed.signature || "",
-
-        tone:
-          parsed.tone || "",
-
-        // 앞으로 Preview나 재생성에 사용
-        originalText:
-          coverLetterText,
-
-      },
-
-    });
-
-  } catch (error) {
-
-    logSafeError(error, {
-      requestId,
-      route: "/api/analyze-cover-letter",
-    });
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to analyze cover letter.",
-      },
+      { success: true, status: "processing", coverLetterId },
+      { status: 202 }
+    );
+  } catch (error) {
+    logSafeError(error, { requestId, route: "/api/analyze-cover-letter" });
+
+    return NextResponse.json(
+      { success: false, message: "Failed to analyze cover letter." },
       { status: 500 }
     );
-
   }
-
 }

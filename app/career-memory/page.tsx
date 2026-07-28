@@ -11,6 +11,10 @@ import {
   MAX_CREATED_RESUMES,
   MAX_COVER_LETTERS,
 } from "@/lib/config/careerMemoryLimits";
+import {
+  createDocAnalysisPoller,
+  type DocAnalysisPollerHandle,
+} from "@/lib/documentAnalysis/pollingClient";
 const DRAFT_KEY = "career-memory-draft";
 const steps = [
   {
@@ -263,6 +267,8 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const uploadProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
+  const resumeAnalysisPollerRef = useRef<DocAnalysisPollerHandle | null>(null);
+  const coverLetterAnalysisPollerRef = useRef<DocAnalysisPollerHandle | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
  const [profileStrength, setProfileStrength] = useState(0);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
@@ -990,6 +996,48 @@ function continueUploadedDashboard() {
       .join("");
   }
 
+  /*
+    Real server-reported stage -> user-facing message, for the async
+    Resume/Cover Letter analysis polling flows. Replaces the old fixed
+    40->66% interval ticker (which had no relationship to actual server
+    progress) with wording that reflects the worker's own reported stage.
+  */
+  function describeResumeAnalysisStage(stage: string | null): string {
+    switch (stage) {
+      case "downloading_file":
+        return "Reading your document";
+      case "extracting_text":
+        return "Extracting text";
+      case "reconstructing_text":
+        return "Understanding your experience";
+      case "extracting_fields":
+        return "Identifying skills and education";
+      case "verifying":
+        return "Building your Career Memory";
+      default:
+        return "Extracting text and analyzing with AI";
+    }
+  }
+
+  function describeCoverLetterAnalysisStage(stage: string | null): string {
+    switch (stage) {
+      case "downloading_file":
+        return "Reading your document";
+      case "extracting_text":
+        return "Extracting text";
+      case "running_ocr":
+        return "Reading scanned pages";
+      case "reconstructing_text":
+        return "Understanding your cover letter";
+      case "extracting_fields":
+        return "Identifying sections";
+      case "verifying":
+        return "Finalizing your cover letter";
+      default:
+        return "Career Élan is analyzing your cover letter...";
+    }
+  }
+
   async function processResumeFile(file: File) {
   setResumeUploadError("");
 
@@ -1016,6 +1064,11 @@ function continueUploadedDashboard() {
       uploadProgressTimerRef.current = null;
     }
 
+    if (resumeAnalysisPollerRef.current) {
+      resumeAnalysisPollerRef.current.stop();
+      resumeAnalysisPollerRef.current = null;
+    }
+
     setImportStage("idle");
     setImportMessage("");
     setUploadProgress(0);
@@ -1024,6 +1077,20 @@ function continueUploadedDashboard() {
       fileInputRef.current.value = "";
     }
   }
+
+  function applyResumeAnalysisResult(uploadedFile: File, data: any) {
+    setMemoryData((prev) => ({
+      ...prev,
+      uploadedResumeName: uploadedFile.name,
+      uploadedResumeText: data?.originalText || "",
+      resumeSource: "uploaded",
+    }));
+
+    setUploadProgress(100);
+    setImportStage("parsed");
+    setImportMessage("Resume analyzed successfully.");
+  }
+
 if (!user) {
   resetResumeImport();
   setResumeUploadError(
@@ -1033,6 +1100,7 @@ if (!user) {
 }
 
   let storagePath = "";
+  let insertedResumeId = "";
 
   try {
     /*
@@ -1113,9 +1181,6 @@ return;
     setImportMessage("Uploading to secure storage");
     setUploadProgress(30);
 
-    const formData = new FormData();
-    formData.append("file", file);
-
     storagePath =
       `${user.id}/${Date.now()}-${file.name}`;
 
@@ -1138,141 +1203,26 @@ return;
     }
 
     /*
-      4-5. 텍스트 추출 + AI 분석 (analyze-resume 하나의 요청 안에서 순차 처리됨)
-
-      A single request handles both - there is no intermediate signal from
-      the server to split this into two independently-observable phases.
-      Leaving the bar frozen for however long the AI call takes was the
-      "stuck at 28%" symptom; instead, a bounded interval ticks it slowly
-      upward within this phase only (never past 65%, well short of the
-      next real checkpoint), and is always cleared the moment the request
-      actually resolves. The phase label, not the number, is the real
-      signal here.
-    */
-    setImportMessage("Extracting text and analyzing with AI");
-    setUploadProgress(40);
-
-    uploadProgressTimerRef.current = setInterval(() => {
-      setUploadProgress((prev) => (prev < 65 ? prev + 2 : prev));
-    }, 1200);
-
-    const response = await fetch(
-      "/api/analyze-resume",
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
-
-    let result: any;
-
-    try {
-      result = await response.json();
-    } catch (jsonError) {
-      console.error(
-        "RESUME JSON ERROR =",
-        jsonError
-      );
-
-      if (uploadProgressTimerRef.current) {
-        clearInterval(uploadProgressTimerRef.current);
-        uploadProgressTimerRef.current = null;
-      }
-
-      await supabase.storage
-        .from("resumes")
-        .remove([storagePath]);
-
-      resetResumeImport();
-
-      setResumeUploadError(
-  "The resume analysis server returned an invalid response. Please try again."
-);
-
-      return;
-    }
-
-    if (uploadProgressTimerRef.current) {
-      clearInterval(uploadProgressTimerRef.current);
-      uploadProgressTimerRef.current = null;
-    }
-
-    /*
-      분석 실패 처리
-    */
-    if (!response.ok || !result.success) {
-      console.error(
-        "RESUME ANALYSIS FAILED =",
-        result
-      );
-
-      const { error: cleanupError } =
-        await supabase.storage
-          .from("resumes")
-          .remove([storagePath]);
-
-      if (cleanupError) {
-        console.error(
-          "RESUME STORAGE CLEANUP ERROR =",
-          cleanupError
-        );
-      }
-
-      resetResumeImport();
-
-      setResumeUploadError(
-  result.message ||
-  result.error ||
-  "Failed to analyze resume."
-);
-
-      return;
-    }
-
-    if (!result.data) {
-      await supabase.storage
-        .from("resumes")
-        .remove([storagePath]);
-
-      resetResumeImport();
-
-      setResumeUploadError(
-"The resume was analyzed, but no usable data was returned."
-);
-
-      return;
-    }
-
-    /*
-      데이터 구조화 및 화면 반영
-    */
-    setImportMessage("Structuring your data");
-    setUploadProgress(75);
-
-    setMemoryData((prev) => ({
-  ...prev,
-
-  uploadedResumeName: file.name,
-  uploadedResumeText:
-    result.data.originalText || "",
-  resumeSource: "uploaded",
-}));
-
-    /*
-      "Review your resume before saving" 원본 preview에 필요한
-      kind/URL 배선. 이전에는 uploadedResumeKind가 선언만 되고 어디서도
-      set되지 않아 renderUploadedOriginalPreview()가 항상 "Preview not
-      available" fallback으로 떨어졌다 - Dashboard 선택과는 무관하게, 지금
-      막 업로드한 이 파일 자체를 미리보기 위한 상태다.
+      "Review your resume before saving" 원본 preview에 필요한 kind/URL
+      배선 - 원본 파일이 확보되는 즉시 설정하며, 분석 완료 여부와는 무관하다.
     */
     setUploadedResumeKind(guessFileKind(file));
     setUploadedResumeUrl(URL.createObjectURL(file));
 
     /*
-      6. resumes 테이블에 새 이력서 추가
+      4. resumes 테이블에 새 이력서 추가 (분석 시작 전)
+
+      Inserted BEFORE analysis now, not after - production reproduction
+      confirmed the old synchronous analyze-resume call (3 sequential
+      OpenAI calls in one request) was being killed by Netlify's own
+      gateway timeout on real-world documents (504, HTML body, unparsable
+      as JSON). Analysis now runs in a Background Function
+      (lib/documentAnalysis/resumeAnalysisCore.ts) that claims this row and
+      writes its result onto it - see app/api/analyze-resume/route.ts's own
+      docstring for the full async pipeline.
     */
     setImportMessage("Saving to your account");
-    setUploadProgress(85);
+    setUploadProgress(40);
 
     const {
       data: resumeData,
@@ -1284,12 +1234,10 @@ return;
         source_type: "uploaded",
         file_name: file.name,
         storage_path: storagePath,
-        original_text:
-          result.data.originalText || "",
-        parsed_data: result.data,
         content_hash: contentHash,
         is_default: uploadedCount === 0,
         conversion_status: "pending",
+        analysis_status: "pending",
       })
       .select();
 
@@ -1319,48 +1267,154 @@ return;
         ? `You can upload up to ${MAX_UPLOADED_RESUMES} resumes. Delete an existing resume before uploading another one.`
         : saveError.code === "23505"
           ? "You've already uploaded this resume. Delete it first if you want to re-upload it."
-          : `Your resume was analyzed, but could not be saved: ${saveError.message}`;
+          : `Your resume could not be saved: ${saveError.message}`;
 
       setResumeUploadError(raceMessage);
       return;
     }
 
-    /*
-      원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음)
+    insertedResumeId = resumeData?.[0]?.id || "";
 
-      keepalive: true - this fetch is intentionally not awaited (the
-      upload flow doesn't block on it), but without keepalive the browser
-      can cancel it mid-flight the moment this page unmounts (e.g. the
-      user clicks "Continue to Dashboard" right after upload). That left
-      later-uploaded resumes stuck at conversion_status "pending" forever
-      (the exact resume that had time to finish before navigation
-      "worked"; ones cut off by navigation silently didn't) - keepalive
-      lets the request survive the navigation instead of being aborted.
-    */
-    const newResumeId = resumeData?.[0]?.id;
-
-    if (newResumeId) {
-      fetch("/api/process-resume-design", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resumeId: newResumeId }),
-        keepalive: true,
-      }).catch((designError) => {
-        console.error(
-          "PROCESS RESUME DESIGN REQUEST ERROR =",
-          designError
-        );
-      });
+    if (!insertedResumeId) {
+      await supabase.storage.from("resumes").remove([storagePath]);
+      resetResumeImport();
+      setResumeUploadError(
+        "Your resume was saved, but could not be found afterward. Please try again."
+      );
+      return;
     }
 
     /*
-      7. 완료
+      원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음) -
+      AI 텍스트 분석과 완전히 독립된 파이프라인이므로 분석 완료를 기다리지
+      않고 바로 실행한다. keepalive: true - 페이지 이동에도 요청이 살아남게
+      한다 (기존과 동일한 이유).
     */
-    setUploadProgress(100);
-    setImportStage("parsed");
-    setImportMessage(
-      "Resume analyzed successfully."
-    );
+    fetch("/api/process-resume-design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resumeId: insertedResumeId }),
+      keepalive: true,
+    }).catch((designError) => {
+      console.error(
+        "PROCESS RESUME DESIGN REQUEST ERROR =",
+        designError
+      );
+    });
+
+    /*
+      5. 비동기 분석 시작 - claim + enqueue만 수행하고 202로 즉시 응답받는다.
+      실제 텍스트 추출/OpenAI 호출은 Background Function에서 실행된다.
+    */
+    setImportMessage("Extracting text and analyzing with AI");
+    setUploadProgress(45);
+
+    const enqueueResponse = await fetch("/api/analyze-resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resumeId: insertedResumeId }),
+    });
+
+    let enqueueResult: any;
+
+    try {
+      enqueueResult = await enqueueResponse.json();
+    } catch (jsonError) {
+      console.error(
+        "RESUME ENQUEUE JSON ERROR =",
+        jsonError
+      );
+
+      await supabase.storage.from("resumes").remove([storagePath]);
+      await supabase
+        .from("resumes")
+        .delete()
+        .eq("id", insertedResumeId)
+        .eq("user_id", user.id);
+
+      resetResumeImport();
+
+      setResumeUploadError(
+        "The resume analysis server returned an invalid response. Please try again."
+      );
+
+      return;
+    }
+
+    if (!enqueueResponse.ok || enqueueResult.success === false) {
+      console.error(
+        "RESUME ANALYSIS ENQUEUE FAILED =",
+        enqueueResult
+      );
+
+      await supabase.storage.from("resumes").remove([storagePath]);
+      await supabase
+        .from("resumes")
+        .delete()
+        .eq("id", insertedResumeId)
+        .eq("user_id", user.id);
+
+      resetResumeImport();
+
+      setResumeUploadError(
+        enqueueResult.message || "Failed to analyze resume."
+      );
+
+      return;
+    }
+
+    // Idempotent replay path - already succeeded (astronomically unlikely
+    // on a fresh upload, but the route supports it for safety).
+    if (enqueueResult.data) {
+      applyResumeAnalysisResult(file, enqueueResult.data);
+      return;
+    }
+
+    /*
+      6. 폴링 시작 - 서버가 보고하는 실제 stage/progress만 표시한다.
+      고정된 가짜 진행률 타이머는 더 이상 사용하지 않는다.
+    */
+    resumeAnalysisPollerRef.current = createDocAnalysisPoller({
+      url: `/api/resumes/${insertedResumeId}/analysis-status`,
+      onPending: (result) => {
+        setUploadProgress(Math.max(45, result.progress));
+        setImportMessage(describeResumeAnalysisStage(result.stage));
+      },
+      onSucceeded: (result) => {
+        resumeAnalysisPollerRef.current = null;
+        applyResumeAnalysisResult(file, result.data);
+      },
+      onFailed: (result) => {
+        resumeAnalysisPollerRef.current = null;
+        // The status route already deleted the row + storage object on
+        // first observing "failed" - nothing left to clean up here.
+        resetResumeImport();
+        setResumeUploadError(result.message);
+      },
+      onInvalid: () => {
+        resumeAnalysisPollerRef.current = null;
+        resetResumeImport();
+        setResumeUploadError(
+          "The resume could not be found. Please try uploading again."
+        );
+      },
+      onUnauthorized: () => {
+        resumeAnalysisPollerRef.current = null;
+        resetResumeImport();
+        setResumeUploadError(
+          "Your session may have expired. Please sign in again."
+        );
+      },
+      onTimeout: () => {
+        resumeAnalysisPollerRef.current = null;
+        // Analysis may still finish server-side after this point - only
+        // stop waiting for it here, never delete the row/storage.
+        resetResumeImport();
+        setResumeUploadError(
+          "This is taking longer than expected. Please check back in a moment, or try uploading again."
+        );
+      },
+    });
   } catch (error) {
     console.error(
       "RESUME UPLOAD ERROR =",
@@ -1370,6 +1424,14 @@ return;
     if (uploadProgressTimerRef.current) {
       clearInterval(uploadProgressTimerRef.current);
       uploadProgressTimerRef.current = null;
+    }
+
+    if (insertedResumeId) {
+      await supabase
+        .from("resumes")
+        .delete()
+        .eq("id", insertedResumeId)
+        .eq("user_id", user.id);
     }
 
     if (storagePath) {
@@ -1496,6 +1558,11 @@ async function processCoverLetterFile(file: File) {
 setCoverLetterUploadError("");
 
   function resetCoverLetterImport() {
+    if (coverLetterAnalysisPollerRef.current) {
+      coverLetterAnalysisPollerRef.current.stop();
+      coverLetterAnalysisPollerRef.current = null;
+    }
+
     setCoverLetterImportStage("idle");
     setCoverLetterImportMessage("");
     setCoverLetterUploadProgress(0);
@@ -1503,6 +1570,31 @@ setCoverLetterUploadError("");
     if (coverLetterInputRef.current) {
       coverLetterInputRef.current.value = "";
     }
+  }
+
+  function applyCoverLetterAnalysisResult(uploadedFile: File, data: any) {
+    setUploadedCoverLetterKind(guessFileKind(uploadedFile));
+    setUploadedCoverLetterUrl(URL.createObjectURL(uploadedFile));
+
+    setMemoryData((prev) => ({
+      ...prev,
+      uploadedCoverLetterName: uploadedFile.name,
+      uploadedCoverLetterText: data?.originalText || "",
+      coverLetterSource: "uploaded",
+      recipient: data?.recipient || "",
+      company: data?.company || "",
+      jobTitle: data?.jobTitle || "",
+      greeting: data?.greeting || "",
+      body: data?.body || "",
+      closing: data?.closing || "",
+      signature: data?.signature || "",
+      coverLetterTone: data?.tone || prev.coverLetterTone,
+    }));
+
+    setCoverLetterUploadProgress(100);
+    setCoverLetterUploadError("");
+    setCoverLetterImportStage("parsed");
+    setCoverLetterImportMessage("Cover Letter analyzed successfully.");
   }
 
   if (!user) {
@@ -1514,6 +1606,7 @@ setCoverLetterUploadError("");
 }
 
   let storagePath = "";
+  let insertedCoverLetterId = "";
 
   try {
     const { count, error: countError } =
@@ -1569,90 +1662,13 @@ return;
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
-
+    /*
+      resumes 테이블에 새 Cover Letter 추가 (분석 시작 전) - Resume 업로드
+      흐름(processResumeFile)과 동일한 이유로 분석 전에 row를 먼저 만든다.
+    */
     setCoverLetterImportStage("parsing");
-    setCoverLetterImportMessage(
-      "Career Élan is analyzing your cover letter..."
-    );
+    setCoverLetterImportMessage("Saving to your account");
     setCoverLetterUploadProgress(15);
-
-    const response = await fetch(
-      "/api/analyze-cover-letter",
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
-
-    setCoverLetterUploadProgress(60);
-
-    let result: any;
-
-    try {
-      result = await response.json();
-    } catch (jsonError) {
-      console.error(
-        "COVER LETTER JSON ERROR =",
-        jsonError
-      );
-
-      await supabase.storage
-        .from("cover-letters")
-        .remove([storagePath]);
-
-      resetCoverLetterImport();
-
-      setCoverLetterUploadError(
-  "The cover letter analysis server returned an invalid response. Please try again."
-);
-
-      return;
-    }
-
-    if (!response.ok || !result.success) {
-      console.error(
-        "COVER LETTER ANALYSIS FAILED =",
-        result
-      );
-
-      const { error: cleanupError } =
-        await supabase.storage
-          .from("cover-letters")
-          .remove([storagePath]);
-
-      if (cleanupError) {
-        console.error(
-          "COVER LETTER CLEANUP ERROR =",
-          cleanupError
-        );
-      }
-
-      resetCoverLetterImport();
-
-      setCoverLetterUploadError(
-  result.message ||
-    result.error ||
-    "Failed to analyze cover letter. Please try again."
-);
-
-      return;
-    }
-
-    if (!result.data) {
-      await supabase.storage
-        .from("cover-letters")
-        .remove([storagePath]);
-
-      resetCoverLetterImport();
-
-      setCoverLetterUploadError(
-  "The cover letter was analyzed, but no usable data was returned."
-);
-
-      return;
-    }
 
     const {
       data: coverLetterData,
@@ -1664,9 +1680,6 @@ return;
           user_id: user.id,
           file_name: file.name,
           storage_path: storagePath,
-          original_text:
-            result.data.originalText || "",
-          parsed_data: result.data,
 
           // 기본값 로직은 기존대로 유지
           is_default: true,
@@ -1675,6 +1688,7 @@ return;
           // 동일하게 "pending"에서 시작해 /api/process-cover-letter-design가
           // 비동기로 처리한다.
           conversion_status: "pending",
+          analysis_status: "pending",
         })
         .select();
 
@@ -1691,84 +1705,161 @@ return;
   resetCoverLetterImport();
 
   setCoverLetterUploadError(
-    `Your cover letter was analyzed, but could not be saved: ${saveError.message}`
+    `Your cover letter could not be saved: ${saveError.message}`
   );
 
   return;
 }
 
-    /*
-      원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음) -
-      app/career-memory/page.tsx의 이력서 업로드 흐름(processResumeFile)과
-      완전히 동일한 패턴: keepalive:true로 페이지 이동에도 요청이 살아남게
-      한다.
-    */
-    const newCoverLetterId = coverLetterData?.[0]?.id;
+    insertedCoverLetterId = coverLetterData?.[0]?.id || "";
 
-    if (newCoverLetterId) {
-      fetch("/api/process-cover-letter-design", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coverLetterId: newCoverLetterId }),
-        keepalive: true,
-      }).catch((designError) => {
-        console.error(
-          "PROCESS COVER LETTER DESIGN REQUEST ERROR =",
-          designError
-        );
-      });
+    if (!insertedCoverLetterId) {
+      await supabase.storage.from("cover-letters").remove([storagePath]);
+      resetCoverLetterImport();
+      setCoverLetterUploadError(
+        "Your cover letter was saved, but could not be found afterward. Please try again."
+      );
+      return;
     }
 
     /*
-      "Review your cover letter before saving" 원본 preview에 필요한
-      kind/URL 배선 - 이력서의 processResumeFile과 동일한 패턴(이전에는
-      uploadedCoverLetterKind/Url이 선언만 되고 어디서도 set되지 않아
-      renderUploadedCoverLetterOriginalPreview()가 항상 fallback으로
-      떨어졌다).
+      원본 디자인 보존 프리뷰 처리 (best-effort, 업로드 완료를 막지 않음) -
+      AI 텍스트 분석과 독립적이므로 분석 완료를 기다리지 않고 바로 실행한다.
     */
-    setUploadedCoverLetterKind(guessFileKind(file));
-    setUploadedCoverLetterUrl(URL.createObjectURL(file));
+    fetch("/api/process-cover-letter-design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coverLetterId: insertedCoverLetterId }),
+      keepalive: true,
+    }).catch((designError) => {
+      console.error(
+        "PROCESS COVER LETTER DESIGN REQUEST ERROR =",
+        designError
+      );
+    });
 
-setMemoryData((prev) => ({
-  ...prev,
+    /*
+      비동기 분석 시작 - claim + enqueue만 수행하고 202로 즉시 응답받는다.
+    */
+    setCoverLetterImportMessage(
+      "Career Élan is analyzing your cover letter..."
+    );
+    setCoverLetterUploadProgress(30);
 
-  uploadedCoverLetterName: file.name,
+    const enqueueResponse = await fetch("/api/analyze-cover-letter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coverLetterId: insertedCoverLetterId }),
+    });
 
-  uploadedCoverLetterText:
-    result.data.originalText || "",
+    let enqueueResult: any;
 
-  coverLetterSource: "uploaded",
+    try {
+      enqueueResult = await enqueueResponse.json();
+    } catch (jsonError) {
+      console.error(
+        "COVER LETTER ENQUEUE JSON ERROR =",
+        jsonError
+      );
 
-  recipient: result.data.recipient || "",
+      await supabase.storage.from("cover-letters").remove([storagePath]);
+      await supabase
+        .from("cover_letters")
+        .delete()
+        .eq("id", insertedCoverLetterId)
+        .eq("user_id", user.id);
 
-  company: result.data.company || "",
+      resetCoverLetterImport();
 
-  jobTitle: result.data.jobTitle || "",
+      setCoverLetterUploadError(
+        "The cover letter analysis server returned an invalid response. Please try again."
+      );
 
-  greeting: result.data.greeting || "",
+      return;
+    }
 
-  body: result.data.body || "",
+    if (!enqueueResponse.ok || enqueueResult.success === false) {
+      console.error(
+        "COVER LETTER ANALYSIS ENQUEUE FAILED =",
+        enqueueResult
+      );
 
-  closing: result.data.closing || "",
+      await supabase.storage.from("cover-letters").remove([storagePath]);
+      await supabase
+        .from("cover_letters")
+        .delete()
+        .eq("id", insertedCoverLetterId)
+        .eq("user_id", user.id);
 
-  signature: result.data.signature || "",
+      resetCoverLetterImport();
 
-  coverLetterTone:
-    result.data.tone ||
-    prev.coverLetterTone,
-}));
+      setCoverLetterUploadError(
+        enqueueResult.message ||
+          "Failed to analyze cover letter. Please try again."
+      );
 
-setCoverLetterUploadProgress(100);
-setCoverLetterUploadError("");
-setCoverLetterImportStage("parsed");
-setCoverLetterImportMessage(
-  "Cover Letter analyzed successfully."
-);
+      return;
+    }
+
+    if (enqueueResult.data) {
+      applyCoverLetterAnalysisResult(file, enqueueResult.data);
+      return;
+    }
+
+    coverLetterAnalysisPollerRef.current = createDocAnalysisPoller({
+      url: `/api/cover-letters/${insertedCoverLetterId}/analysis-status`,
+      onPending: (result) => {
+        setCoverLetterUploadProgress(Math.max(30, result.progress));
+        setCoverLetterImportMessage(
+          describeCoverLetterAnalysisStage(result.stage)
+        );
+      },
+      onSucceeded: (result) => {
+        coverLetterAnalysisPollerRef.current = null;
+        applyCoverLetterAnalysisResult(file, result.data);
+      },
+      onFailed: (result) => {
+        coverLetterAnalysisPollerRef.current = null;
+        // The status route already deleted the row + storage object on
+        // first observing "failed" - nothing left to clean up here.
+        resetCoverLetterImport();
+        setCoverLetterUploadError(result.message);
+      },
+      onInvalid: () => {
+        coverLetterAnalysisPollerRef.current = null;
+        resetCoverLetterImport();
+        setCoverLetterUploadError(
+          "The cover letter could not be found. Please try uploading again."
+        );
+      },
+      onUnauthorized: () => {
+        coverLetterAnalysisPollerRef.current = null;
+        resetCoverLetterImport();
+        setCoverLetterUploadError(
+          "Your session may have expired. Please sign in again."
+        );
+      },
+      onTimeout: () => {
+        coverLetterAnalysisPollerRef.current = null;
+        resetCoverLetterImport();
+        setCoverLetterUploadError(
+          "This is taking longer than expected. Please check back in a moment, or try uploading again."
+        );
+      },
+    });
   } catch (error) {
     console.error(
       "COVER LETTER UPLOAD ERROR =",
       error
     );
+
+    if (insertedCoverLetterId) {
+      await supabase
+        .from("cover_letters")
+        .delete()
+        .eq("id", insertedCoverLetterId)
+        .eq("user_id", user.id);
+    }
 
     if (storagePath) {
       const { error: cleanupError } =
