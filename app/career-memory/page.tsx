@@ -195,7 +195,7 @@ type ImportStage = "idle" | "uploaded" | "parsing" | "parsed" | "preview";
 type UploadedResumeKind = "none" | "pdf" | "txt" | "docx" | "other";
 
 export default function CareerMemoryPage() {
-  const { user, loading } = useLogin();
+  const { user, loading, refresh } = useLogin();
   const router = useRouter();
   const [mode, setMode] = useState<
     "start" | "import" | "importCoverLetter" | "build"
@@ -807,9 +807,22 @@ return true;
 }
 
   async function continueToDashboard() {
-  
+  const saved = await persistMemory();
 
-  await persistMemory();
+  if (!saved) {
+    return;
+  }
+
+  /*
+    Dashboard reads resumes/coverLetters/careerMemory from the shared
+    useLogin() context (lib/auth/LoginManager.tsx), which only fetches on
+    initial mount and on auth state changes - never on navigation. Without
+    this, the just-saved/uploaded data doesn't appear until a manual
+    browser refresh remounts that context from scratch. Awaited so the
+    context already holds fresh data before Dashboard's own component
+    mounts and reads it.
+  */
+  await refresh();
   router.replace("/dashboard");
 }
 function continueUploadedDashboard() {
@@ -861,6 +874,7 @@ function continueUploadedDashboard() {
     return;
   }
 
+  await refresh();
   router.replace("/dashboard");
 }
 
