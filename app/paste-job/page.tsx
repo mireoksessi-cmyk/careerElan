@@ -2,6 +2,10 @@
 
 
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
+import { exportPdfFromText } from "@/lib/brand/render/pdfDocumentExport";
+import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
+import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
+import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
 
 import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
@@ -57,6 +61,7 @@ type SavedApplicationMaterial = {
     name: string;
     text: string;
     resumeRow?: any;
+    resumeTemplateId?: string | null;
   };
 
   coverLetter: {
@@ -945,6 +950,44 @@ export default function PasteJobPage() {
     if (!user) return;
     setShowResumeRequiredModal(!hasResumeData);
   }, [loading, user, hasResumeData]);
+
+  /*
+    The user's current Career Memory template selection - single source
+    for every resume Preview/PDF/DOCX rendered on this page (Generate
+    Package review AND Apply with Saved Resume), per
+    lib/brand/render/templateId.ts. Fetched once per session rather than
+    on every render/download - Career Memory changes are expected to be
+    rare mid-session, and each Generate Package run already snapshots its
+    own resume_template_id server-side onto the created application row
+    regardless of this client-side value.
+  */
+  const [resumeTemplateId, setResumeTemplateId] = useState<string | null>(null);
+
+  /*
+    Resume tab only: "preview" shows the new DocumentIR-based, template-
+    aware A4DocumentPreview (read-only); "edit" shows the original
+    flat-text A4Preview with its per-page <textarea> editing. Cover
+    Letter/Email keep their existing single A4Preview/textarea, no
+    toggle - resume_text editing capability is fully preserved, just
+    moved behind an explicit switch instead of being the only view.
+  */
+  const [resumeViewMode, setResumeViewMode] = useState<"preview" | "edit">("preview");
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    supabase
+      .from("career_memory")
+      .select("resume_template")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setResumeTemplateId(normalizeResumeTemplateId(data?.resume_template));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const router = useRouter();
   const [activeMode, setActiveMode] = useState<PasteMode>("url");
@@ -2082,9 +2125,13 @@ async function loadSelectedApplicationMaterials() {
   */
   const { data: memory } = await supabase
     .from("career_memory")
-    .select("selected_cover_letter_id")
+    .select("selected_cover_letter_id, resume_template")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  if (selectedResumeMaterial.sourceType === "career_memory") {
+    selectedResumeMaterial.resumeTemplateId = normalizeResumeTemplateId(memory?.resume_template);
+  }
 
   let selectedCover = null;
 
@@ -2513,6 +2560,14 @@ David Kwak`,
   }
   
 async function downloadPdf() {
+  if (selectedPreview === "resume") {
+    await exportPdfFromText(
+      packageData[selectedPreview],
+      `${getFileBaseName()}_${selectedPreview}`,
+      resumeTemplateId
+    );
+    return;
+  }
   await exportPdf(
     packageData[selectedPreview],
     `${getFileBaseName()}_${selectedPreview}`
@@ -2521,6 +2576,14 @@ async function downloadPdf() {
 
 
 async function downloadDocx() {
+  if (selectedPreview === "resume") {
+    await exportDocxFromText(
+      packageData[selectedPreview],
+      `${getFileBaseName()}_${selectedPreview}`,
+      resumeTemplateId
+    );
+    return;
+  }
   await exportDocx(
     packageData[selectedPreview],
     `${getFileBaseName()}_${selectedPreview}`
@@ -2613,6 +2676,10 @@ async function downloadDocx() {
           savedApplicationMaterial?.resume.id ?? null,
         cover_letter_id:
           savedApplicationMaterial?.coverLetter.id ?? null,
+        resume_template_id:
+          savedApplicationMaterial?.resume.sourceType === "career_memory"
+            ? normalizeResumeTemplateId(savedApplicationMaterial.resume.resumeTemplateId)
+            : null,
         applied_date: new Date()
           .toISOString()
           .split("T")[0],
@@ -3904,9 +3971,41 @@ async function downloadDocx() {
                 </p>
               </div>
             </div>
+
+            {selectedPreview === "resume" && (
+              <div className="flex overflow-hidden rounded-lg border border-gray-200 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setResumeViewMode("preview")}
+                  className={`px-3 py-1.5 ${
+                    resumeViewMode === "preview"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-500 hover:bg-gray-50"
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResumeViewMode("edit")}
+                  className={`px-3 py-1.5 ${
+                    resumeViewMode === "edit"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-500 hover:bg-gray-50"
+                  }`}
+                >
+                  Edit
+                </button>
+              </div>
+            )}
           </div>
 
-          {selectedPreview ===
+          {selectedPreview === "resume" && resumeViewMode === "preview" ? (
+            <A4DocumentPreview
+              text={packageData.resume}
+              templateId={resumeTemplateId}
+            />
+          ) : selectedPreview ===
           "emailDraft" ? (
             <textarea
               value={

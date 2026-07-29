@@ -10,6 +10,8 @@ import Sidebar from "@/components/job-layout/Sidebar";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
+import { exportPdfFromText } from "@/lib/brand/render/pdfDocumentExport";
+import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import A4Preview from "./A4Preview";
 import { useLogin } from "@/lib/auth/LoginManager";
 import { stripCoverLetterContactBlock } from "@/lib/generatePackage/textCleanup";
@@ -333,14 +335,16 @@ async function downloadPackage(type: "docx" | "pdf") {
 
   if (selectedTab === "resume") {
     if (type === "docx") {
-      await exportDocx(
+      await exportDocxFromText(
         selectedApplication.resume_text || "",
-        `${baseName}_Resume`
+        `${baseName}_Resume`,
+        selectedApplication.resume_template_id
       );
     } else {
-      await exportPdf(
+      await exportPdfFromText(
         selectedApplication.resume_text || "",
-        `${baseName}_Resume`
+        `${baseName}_Resume`,
+        selectedApplication.resume_template_id
       );
     }
     return;

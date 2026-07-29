@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import A4Preview from "@/app/job-tracker/A4Preview";
+import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
 
 type Props = {
   selectedApplication: any;
@@ -326,11 +327,12 @@ export default function JobDetail({
 
       <div className="mt-8">
         {selectedTab === "resume" && (
-          <A4Preview
+          <A4DocumentPreview
             text={
               selectedApplication.resume_text ||
               ""
             }
+            templateId={selectedApplication.resume_template_id}
           />
         )}
 

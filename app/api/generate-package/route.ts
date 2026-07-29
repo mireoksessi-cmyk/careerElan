@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { logSafeError } from "@/lib/errors/publicError";
 import { buildCareerMemoryDraftText } from "@/lib/resume-builder";
+import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
 import {
   GENERATE_PACKAGE_LIFETIME_LIMIT,
   isNetlifyProductionRuntime,
@@ -627,6 +628,15 @@ export async function POST(req: Request) {
           resolvedResume.source === "uploaded"
             ? resolvedResume.resumeId
             : null,
+        /*
+          Snapshot of the template active in Career Memory at generation
+          time - reuses the `memory` row already fetched above (no extra
+          query). See lib/brand/render/templateId.ts: this is what keeps
+          Job Tracker Preview/PDF/DOCX rendering this application with the
+          template that was selected when it was generated, even if the
+          user later changes their Career Memory default.
+        */
+        resume_template_id: normalizeResumeTemplateId(memory?.resume_template),
         generation_input_resume_text: inputResumeText,
         generation_input_resume_name: resolvedResume.selectedName,
         generation_input_manifest_source: resolvedResume.previewData,
