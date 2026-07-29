@@ -39,6 +39,16 @@ import {
 
 const DISPATCH_FETCH_TIMEOUT_MS = 10 * 1000;
 
+// How stale a "processing" row (claimed by claim_resume_analysis_worker but
+// never reached succeeded/failed) has to be before a retry of this same
+// route is allowed to reclaim it, instead of reporting "processing"
+// forever. Sized off resumeAnalysisCore.ts's own OPENAI_CALL_TIMEOUT_MS
+// (120s) times its 3 sequential OpenAI calls (draft reconstruction, field
+// extraction, verification) = 360s worst case, plus margin for download/
+// text-extraction and worker cold start - same reclaim technique already
+// used by app/api/generate-package/route.ts's own WORKER_STALE_THRESHOLD_MS.
+const PROCESSING_STALE_THRESHOLD_MS = 8 * 60 * 1000;
+
 // [RESUME_TRACE] instrumentation-only - logs right before every return in
 // POST() below. Does not construct or alter the returned NextResponse.
 function traceResumeReturn(status: number, success: boolean, message?: string) {
@@ -125,7 +135,9 @@ export async function POST(req: NextRequest) {
 
     const { data: resume, error: fetchError } = await supabase
       .from("resumes")
-      .select("id, analysis_status, parsed_data, analysis_error_code, analysis_error_summary")
+      .select(
+        "id, analysis_status, parsed_data, analysis_error_code, analysis_error_summary, analysis_worker_claimed_at"
+      )
       .eq("id", resumeId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -162,16 +174,49 @@ export async function POST(req: NextRequest) {
     // (claim_resume_analysis_worker already flipped pending -> processing
     // and set analysis_worker_claimed_at/analysis_started_at, inside
     // runResumeAnalysis, unchanged) - report status instead of dispatching
-    // a second worker for the same row.
+    // a second worker for the same row, UNLESS that claim is stale.
     if (resume.analysis_status === "processing") {
-      traceResumeReturn(202, true, "processing");
-      return NextResponse.json(
-        { success: true, accepted: true, resumeId, analysisStatus: "processing" },
-        { status: 202 }
-      );
+      const claimedAtMs = resume.analysis_worker_claimed_at
+        ? new Date(resume.analysis_worker_claimed_at).getTime()
+        : 0;
+      const claimAgeMs = Date.now() - claimedAtMs;
+
+      if (claimAgeMs <= PROCESSING_STALE_THRESHOLD_MS) {
+        traceResumeReturn(202, true, "processing");
+        return NextResponse.json(
+          { success: true, accepted: true, resumeId, analysisStatus: "processing" },
+          { status: 202 }
+        );
+      }
+
+      // Stale claim - the worker that set this (Background Function that
+      // never started, was killed mid-run, or hit an uncaught error
+      // outside runResumeAnalysis's own try/catch) never reached
+      // succeeded/failed. claim_resume_analysis_worker's own WHERE clause
+      // only matches analysis_status = 'pending', so without this, a row
+      // stuck here can never be claimed again. Reclaim it back to
+      // 'pending' and fall through to the same dispatch path used for a
+      // fresh 'pending' row below - identical technique to
+      // app/api/generate-package/route.ts's own stale-pending reclaim.
+      logSafeError(new Error("Stale processing claim reclaimed."), {
+        requestId,
+        route: "/api/analyze-resume#reclaim",
+        userId: user.id,
+      });
+
+      await supabase
+        .from("resumes")
+        .update({
+          analysis_status: "pending",
+          analysis_worker_claimed_at: null,
+        })
+        .eq("id", resumeId)
+        .eq("user_id", user.id)
+        .eq("analysis_status", "processing");
     }
 
-    // status === "pending" - not yet claimed by any worker. Dispatch the
+    // status === "pending" (or a just-reclaimed stale "processing" row) -
+    // not yet claimed by any worker. Dispatch the
     // Background Function; runResumeAnalysis's own atomic claim RPC
     // (unchanged) is what actually guarantees only one worker ever runs
     // the analysis for this row, even if this dispatch call somehow
@@ -206,7 +251,11 @@ export async function POST(req: NextRequest) {
 
       traceResumeReturn(502, false, "Failed to start resume analysis.");
       return NextResponse.json(
-        { success: false, message: "Failed to start resume analysis. Please try again." },
+        {
+          success: false,
+          message: "Failed to start resume analysis. Please try again.",
+          code: "BACKGROUND_DISPATCH_FAILED",
+        },
         { status: 502 }
       );
     }
