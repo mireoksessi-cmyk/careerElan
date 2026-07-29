@@ -1,41 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { logSafeError } from "@/lib/errors/publicError";
-import { runResumeAnalysis } from "@/lib/documentAnalysis/resumeAnalysisCore";
+import {
+  resolveBackgroundFunctionSecret,
+  resolveNamedBackgroundFunctionUrl,
+} from "@/lib/generatePackage/backgroundTarget";
 
 /*
-  Synchronous again - reverted from the Background Function enqueue
-  pattern after production DB evidence (analysis_worker_claimed_at set,
-  analysis_error_code='MODULE_LOAD_FAILED' at the exact
-  `await import("pdf-parse-new")` line in resumeAnalysisCore.ts) proved
-  pdf-parse-new fails to load inside Netlify's classic Background Function
-  bundle (netlify/functions/*.ts), which - unlike this Next.js Route
-  Handler's own bundle (___netlify-server-handler) - is not covered by
-  next.config.js's `serverExternalPackages: ["pdf-parse-new", ...]`. The
-  same extraction/OpenAI logic (lib/documentAnalysis/resumeAnalysisCore.ts)
-  is reused verbatim, just invoked directly and awaited here instead of
-  enqueued to a separate function - this is exactly the runtime commit
-  cab8755 used, where pdf-parse-new was already proven to load correctly.
+  Async again - production reproduction (real /api/analyze-resume Netlify
+  Function log + Supabase row/RPC timeline, cross-referenced) proved the
+  synchronous version's own request took 30-40+ seconds for real-world
+  resumes, well past whatever intermediate layer sits in front of the
+  Next.js Runtime function and returns its own HTML response to the
+  browser before the origin function finishes - the origin function
+  itself always completed cleanly and within its own maxDuration=60
+  budget, so raising that number further would not have helped. This
+  route's own job shrinks back to what it briefly was before:
+  auth + ownership check + claim-by-enqueue, returning fast.
 
-  maxDuration=60 restored (present in e2d9ad5, removed when this route
-  became enqueue-only) - this route now does the same long-running
-  synchronous work cab8755 did, so the same per-route execution-limit
-  raise applies again. Real observed latency locally: ~15-30s for a
-  short resume; real-world documents may run longer, which is the same
-  timeout risk cab8755 always had - not a new regression introduced by
-  this revert.
+  The actual extraction/OpenAI work still runs in
+  lib/documentAnalysis/resumeAnalysisCore.ts (runResumeAnalysis),
+  completely unchanged, now executed by
+  netlify/functions/analyze-resume-background.ts (Production) or
+  app/api/internal/analyze-resume-worker/route.ts (local dev) - see
+  netlify.toml's own comment for why that Background Function should
+  actually load pdf-parse-new/mammoth correctly this time
+  (external_node_modules), unlike the earlier attempt at this same
+  architecture.
+
+  This route is deliberately NOT `runResumeAnalysis(resumeId); return
+  response;` (fire-and-forget from a plain Next.js Route Handler) -
+  nothing on this platform guarantees a dangling await here keeps running
+  after the response is sent. Dispatch instead goes to the Background
+  Function, whose "-background" filename suffix is Netlify's own
+  documented mechanism for "caller gets 202 immediately, handler keeps
+  running for up to 15 minutes regardless of the original connection."
 */
 
-export const maxDuration = 60;
-
-/*
-  The resumes row is still inserted client-side before this route is
-  called (unchanged - needed for Dashboard-immediate-refresh and the
-  content-hash duplicate check), so this route claims-and-runs rather than
-  claims-and-enqueues: it awaits the full analysis in-process and returns
-  the final {success, data} or {success, message, code} in one response,
-  matching the original synchronous contract client code expects.
-*/
+const DISPATCH_FETCH_TIMEOUT_MS = 10 * 1000;
 
 // [RESUME_TRACE] instrumentation-only - logs right before every return in
 // POST() below. Does not construct or alter the returned NextResponse.
@@ -47,6 +49,51 @@ function traceResumeReturn(status: number, success: boolean, message?: string) {
     timestamp: new Date().toISOString(),
     performanceNow: performance.now(),
   });
+}
+
+async function dispatchResumeAnalysisWorker(params: {
+  requestOrigin: string;
+  resumeId: string;
+}): Promise<void> {
+  const { requestOrigin, resumeId } = params;
+
+  const secret = resolveBackgroundFunctionSecret();
+
+  if (!secret) {
+    throw new Error("Background analysis is not configured.");
+  }
+
+  const { url: backgroundUrl } = resolveNamedBackgroundFunctionUrl(
+    requestOrigin,
+    "analyze-resume-background",
+    "/api/internal/analyze-resume-worker"
+  );
+
+  const timeoutSignal =
+    typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(DISPATCH_FETCH_TIMEOUT_MS)
+      : (() => {
+          const controller = new AbortController();
+          setTimeout(
+            () => controller.abort(new Error("Dispatch fetch timed out.")),
+            DISPATCH_FETCH_TIMEOUT_MS
+          );
+          return controller.signal;
+        })();
+
+  const res = await fetch(backgroundUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify({ resumeId }),
+    signal: timeoutSignal,
+  });
+
+  if (res.status !== 202) {
+    throw new Error(`Background function returned ${res.status}, expected 202.`);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -111,60 +158,64 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // [RESUME_TRACE] instrumentation-only.
-    const runResumeAnalysisStart = performance.now();
-    console.log("[RESUME_TRACE] RUN_RESUME_ANALYSIS_START", {
-      resumeId,
-      performanceNow: runResumeAnalysisStart,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Runs the full extraction + 3 sequential OpenAI calls in-process,
-    // writing analysis_status/parsed_data/original_text (or the failure
-    // fields) via runResumeAnalysis's own atomic claim + RPC writes -
-    // unchanged from the Background Function version, just awaited here
-    // instead of dispatched over HTTP.
-    await runResumeAnalysis(resumeId);
-
-    // [RESUME_TRACE] instrumentation-only.
-    const runResumeAnalysisEnd = performance.now();
-    console.log("[RESUME_TRACE] RUN_RESUME_ANALYSIS_END", {
-      resumeId,
-      performanceNow: runResumeAnalysisEnd,
-      timestamp: new Date().toISOString(),
-      totalMs: runResumeAnalysisEnd - runResumeAnalysisStart,
-    });
-
-    const { data: finalRow, error: finalError } = await supabase
-      .from("resumes")
-      .select("analysis_status, parsed_data, analysis_error_code, analysis_error_summary")
-      .eq("id", resumeId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (finalError || !finalRow) {
-      traceResumeReturn(500, false, "Failed to analyze resume. Please try again.");
+    // Already claimed by an in-flight background invocation
+    // (claim_resume_analysis_worker already flipped pending -> processing
+    // and set analysis_worker_claimed_at/analysis_started_at, inside
+    // runResumeAnalysis, unchanged) - report status instead of dispatching
+    // a second worker for the same row.
+    if (resume.analysis_status === "processing") {
+      traceResumeReturn(202, true, "processing");
       return NextResponse.json(
-        { success: false, message: "Failed to analyze resume. Please try again." },
-        { status: 500 }
+        { success: true, accepted: true, resumeId, analysisStatus: "processing" },
+        { status: 202 }
       );
     }
 
-    if (finalRow.analysis_status === "succeeded") {
-      traceResumeReturn(200, true);
-      return NextResponse.json({ success: true, data: finalRow.parsed_data });
+    // status === "pending" - not yet claimed by any worker. Dispatch the
+    // Background Function; runResumeAnalysis's own atomic claim RPC
+    // (unchanged) is what actually guarantees only one worker ever runs
+    // the analysis for this row, even if this dispatch call somehow
+    // duplicates.
+    try {
+      await dispatchResumeAnalysisWorker({
+        requestOrigin: new URL(req.url).origin,
+        resumeId,
+      });
+    } catch (dispatchError) {
+      logSafeError(dispatchError, {
+        requestId,
+        route: "/api/analyze-resume#dispatch",
+        userId: user.id,
+      });
+
+      // Dispatch itself is confirmed to have never reached the worker -
+      // this is a genuine terminal condition (no background job exists
+      // for this row), not an ambiguous gateway/parse error on the
+      // client's side of this same request, so recording it as a real
+      // failure here is correct and lets the client's existing terminal-
+      // failure handling apply.
+      await supabase
+        .from("resumes")
+        .update({
+          analysis_status: "failed",
+          analysis_error_code: "DISPATCH_FAILED",
+          analysis_error_summary: "Failed to start resume analysis.",
+        })
+        .eq("id", resumeId)
+        .eq("user_id", user.id);
+
+      traceResumeReturn(502, false, "Failed to start resume analysis.");
+      return NextResponse.json(
+        { success: false, message: "Failed to start resume analysis. Please try again." },
+        { status: 502 }
+      );
     }
 
-    traceResumeReturn(
-      200,
-      false,
-      finalRow.analysis_error_summary || "Failed to analyze resume."
+    traceResumeReturn(202, true, "pending");
+    return NextResponse.json(
+      { success: true, accepted: true, resumeId, analysisStatus: "pending" },
+      { status: 202 }
     );
-    return NextResponse.json({
-      success: false,
-      message: finalRow.analysis_error_summary || "Failed to analyze resume.",
-      code: finalRow.analysis_error_code || "UNKNOWN",
-    });
   } catch (error) {
     logSafeError(error, { requestId, route: "/api/analyze-resume" });
 

@@ -159,6 +159,45 @@ export function resolveBackgroundFunctionUrl(
 }
 
 /*
+  Generalized sibling of resolveBackgroundFunctionUrl() above, for other
+  Netlify Background Functions that need the exact same runtime-detection/
+  origin-resolution logic (currently: analyze-resume-background - see
+  lib/documentAnalysis/). Deliberately a separate function rather than a
+  refactor of resolveBackgroundFunctionUrl itself: that function's own
+  call site (app/api/generate-package/route.ts) is already verified in
+  Production, and this module's whole purpose is precisely to avoid ever
+  risking that path - see this file's own top docstring on why even its
+  zero-dependency design exists to be safe to import from more places,
+  not to be edited in place.
+*/
+export function resolveNamedBackgroundFunctionUrl(
+  requestOrigin: string,
+  netlifyFunctionName: string,
+  localWorkerRoutePath: string
+): BackgroundFunctionUrlResolution {
+  if (isNetlifyRuntime()) {
+    const netlifyOrigin = process.env.URL
+      ? normalizeToOrigin(process.env.URL)
+      : null;
+
+    return netlifyOrigin
+      ? {
+          url: `${netlifyOrigin}/.netlify/functions/${netlifyFunctionName}`,
+          originSource: "URL",
+        }
+      : {
+          url: `${requestOrigin}/.netlify/functions/${netlifyFunctionName}`,
+          originSource: "request_origin",
+        };
+  }
+
+  return {
+    url: `${requestOrigin}${localWorkerRoutePath}`,
+    originSource: "request_origin",
+  };
+}
+
+/*
   Diagnostics-only (see the "package worker runtime diagnostics"
   investigation) - never used for any control-flow decision, only for
   structured logging so a real Production request can be traced across

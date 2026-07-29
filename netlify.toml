@@ -11,5 +11,16 @@
 # silently ignored, meaning this repo's Background Function directory was
 # never actually being declared to Netlify's function bundler by this
 # file). [functions].directory is the documented key for this purpose.
+#
+# external_node_modules: production DB/log evidence (see project history)
+# proved analyze-resume-background.ts's earlier version failed with
+# MODULE_LOAD_FAILED because Netlify's classic Functions bundler
+# (zip-it-and-ship-it/esbuild) - a separate pipeline from the Next.js
+# Runtime - tried to statically bundle pdf-parse-new/mammoth and broke on
+# their internal dynamic requires/native bits. This flags them external so
+# the bundler leaves a plain require() in place instead of bundling them,
+# letting them resolve from node_modules at runtime. List limited to the
+# packages resumeAnalysisCore.ts actually dynamically imports.
 [functions]
   directory = "netlify/functions"
+  external_node_modules = ["pdf-parse-new", "mammoth"]

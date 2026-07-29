@@ -263,6 +263,13 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const uploadProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
+  // Cancels an in-flight Resume analysis-status poll loop when
+  // resetResumeImport() runs (e.g. the user starts a different upload) -
+  // does not touch the background job itself, only stops the client from
+  // scheduling another poll tick.
+  const resumePollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const [isUnlocked, setIsUnlocked] = useState(false);
  const [profileStrength, setProfileStrength] = useState(0);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
@@ -1016,6 +1023,11 @@ function continueUploadedDashboard() {
       uploadProgressTimerRef.current = null;
     }
 
+    if (resumePollTimeoutRef.current) {
+      clearTimeout(resumePollTimeoutRef.current);
+      resumePollTimeoutRef.current = null;
+    }
+
     setImportStage("idle");
     setImportMessage("");
     setUploadProgress(0);
@@ -1250,16 +1262,17 @@ return;
     });
 
     /*
-      5. 분석 실행 - Next.js Route 런타임에서 동기적으로 실행하고 최종
-      결과를 한 번에 응답받는다 (pdf-parse-new는 이 런타임의
-      serverExternalPackages 보호를 받으므로 여기서 정상 동작한다).
+      5. 분석 접수 - /api/analyze-resume는 인증/소유권 확인 후 신뢰
+      가능한 Background Function(analyze-resume-background, Netlify가
+      공식적으로 202 즉시 응답 + 최대 15분 실행을 보장)에 위임하고 빠르게
+      응답한다. 실제 텍스트 추출/OpenAI 호출은 여전히
+      lib/documentAnalysis/resumeAnalysisCore.ts(runResumeAnalysis, 무수정)가
+      수행하며, 이 요청의 실행 위치와 수명만 바뀐다.
     */
     setImportMessage("Extracting text and analyzing with AI");
     setUploadProgress(60);
 
-    // [RESUME_TRACE] instrumentation-only - logging added for production
-    // root-cause investigation. Does not change control flow, requests,
-    // parsing, or cleanup behavior.
+    // [RESUME_TRACE] instrumentation-only.
     resumeFetchStartTime = performance.now();
     console.log("[RESUME_TRACE] ANALYZE_RESUME_FETCH_START", {
       resumeId: insertedResumeId,
@@ -1298,10 +1311,7 @@ return;
     let analyzeResult: any;
 
     try {
-      // [RESUME_TRACE] instrumentation-only - read raw body via clone()
-      // purely for logging, before the existing analyzeResponse.json()
-      // call below runs unchanged. clone() ensures the original response
-      // stream is untouched, so parsing behavior is identical to before.
+      // [RESUME_TRACE] instrumentation-only.
       const rawResponseTextForTrace = await analyzeResponse.clone().text();
       console.log("[RESUME_TRACE] ANALYZE_RESUME_RAW_RESPONSE", {
         rawBody: rawResponseTextForTrace,
@@ -1315,6 +1325,15 @@ return;
         performanceNow: performance.now(),
       });
     } catch (jsonError) {
+      /*
+        접수 요청 자체가 비정상 응답(예: HTML 에러 페이지)을 반환했다 -
+        이 요청은 이제 인증/소유권 확인과 디스패치만 수행하는 짧은
+        요청이므로, 실제로 백그라운드 작업이 이미 시작되었는지 알 수
+        없다. 애매한 상태에서 Storage/DB를 삭제하면 이미 진행 중일 수
+        있는 분석 결과를 잃을 수 있으므로 삭제하지 않는다 - 사용자는
+        재시도할 수 있고, 서버는 재시도 시 analysis_status를 다시 확인해
+        멱등하게 처리한다.
+      */
       console.log("[RESUME_TRACE] ANALYZE_RESUME_JSON_ERROR", {
         name: jsonError instanceof Error ? jsonError.name : undefined,
         message: jsonError instanceof Error ? jsonError.message : String(jsonError),
@@ -1326,50 +1345,30 @@ return;
         jsonError
       );
 
-      // [RESUME_TRACE] instrumentation-only.
-      console.log("[RESUME_TRACE] ANALYZE_RESUME_CLEANUP_START", {
-        resumeId: insertedResumeId,
-        storagePath,
-        reason: "json_parse_error",
-      });
-
-      {
-        const storageDeleteStart = performance.now();
-        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
-          resumeId: insertedResumeId,
-          storagePath,
-        });
-        await supabase.storage.from("resumes").remove([storagePath]);
-        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
-          elapsedMs: performance.now() - storageDeleteStart,
-        });
-      }
-
-      {
-        const dbDeleteStart = performance.now();
-        console.log("[RESUME_TRACE] RESUME_DB_DELETE_START", {
-          resumeId: insertedResumeId,
-        });
-        await supabase
-          .from("resumes")
-          .delete()
-          .eq("id", insertedResumeId)
-          .eq("user_id", user.id);
-        console.log("[RESUME_TRACE] RESUME_DB_DELETE_DONE", {
-          elapsedMs: performance.now() - dbDeleteStart,
-        });
-      }
-
       resetResumeImport();
 
       setResumeUploadError(
-        "The resume analysis server returned an invalid response. Please try again."
+        "We couldn't confirm the analysis request. Please check back in a moment or try again."
       );
 
       return;
     }
 
-    if (!analyzeResponse.ok || !analyzeResult.success) {
+    // 즉시 succeeded로 재확인된 경우 (예: 재시도 요청) - 기존 동기 버전과
+    // 동일한 성공 처리.
+    if (analyzeResponse.ok && analyzeResult.success === true && analyzeResult.data) {
+      applyResumeAnalysisResult(file, analyzeResult.data);
+      return;
+    }
+
+    // 서버가 이미 terminal failed 상태를 확인하고 반환한 경우 (accepted가
+    // 아님 = 새로 디스패치하지 않고 기존에 기록된 진짜 실패를 그대로
+    // 재전달한 것) - 기존 delete+error 정책을 그대로 적용한다.
+    if (
+      analyzeResult.accepted !== true &&
+      analyzeResult.success === false &&
+      analyzeResult.code
+    ) {
       // [RESUME_TRACE] instrumentation-only.
       console.log("[RESUME_TRACE] ANALYZE_RESUME_RESPONSE_FAILED", {
         status: analyzeResponse.status,
@@ -1384,39 +1383,7 @@ return;
         analyzeResult
       );
 
-      // [RESUME_TRACE] instrumentation-only.
-      console.log("[RESUME_TRACE] ANALYZE_RESUME_CLEANUP_START", {
-        resumeId: insertedResumeId,
-        storagePath,
-        reason: "response_failed",
-      });
-
-      {
-        const storageDeleteStart = performance.now();
-        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
-          resumeId: insertedResumeId,
-          storagePath,
-        });
-        await supabase.storage.from("resumes").remove([storagePath]);
-        console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
-          elapsedMs: performance.now() - storageDeleteStart,
-        });
-      }
-
-      {
-        const dbDeleteStart = performance.now();
-        console.log("[RESUME_TRACE] RESUME_DB_DELETE_START", {
-          resumeId: insertedResumeId,
-        });
-        await supabase
-          .from("resumes")
-          .delete()
-          .eq("id", insertedResumeId)
-          .eq("user_id", user.id);
-        console.log("[RESUME_TRACE] RESUME_DB_DELETE_DONE", {
-          elapsedMs: performance.now() - dbDeleteStart,
-        });
-      }
+      await cleanupFailedResume("response_failed");
 
       resetResumeImport();
 
@@ -1427,8 +1394,41 @@ return;
       return;
     }
 
-    applyResumeAnalysisResult(file, analyzeResult.data);
+    // 정상 접수됨 (202, pending 또는 processing) - polling 시작.
+    if (analyzeResult.accepted === true) {
+      pollResumeAnalysisStatus(insertedResumeId, Date.now());
+      return;
+    }
+
+    /*
+      위 세 경우 중 어디에도 명확히 해당하지 않는 응답 - 401/404/500/502
+      등 접수 자체가 애매하게 실패한 상태. terminal failed로 확정되지
+      않았으므로 삭제하지 않는다.
+    */
+    // [RESUME_TRACE] instrumentation-only.
+    console.log("[RESUME_TRACE] ANALYZE_RESUME_RESPONSE_FAILED", {
+      status: analyzeResponse.status,
+      ok: analyzeResponse.ok,
+      parsedSuccess: analyzeResult?.success,
+      message: analyzeResult?.message,
+      parsedObject: analyzeResult,
+    });
+
+    console.error(
+      "RESUME ANALYSIS REQUEST FAILED =",
+      analyzeResult
+    );
+
+    resetResumeImport();
+
+    setResumeUploadError(
+      analyzeResult?.message || "Failed to analyze resume. Please try again."
+    );
   } catch (error) {
+    /*
+      접수 요청 자체가 네트워크 오류 등으로 완전히 실패했다 - 위
+      JSON parse error 분기와 동일한 이유로 삭제하지 않는다.
+    */
     // [RESUME_TRACE] instrumentation-only.
     console.log("[RESUME_TRACE] ANALYZE_RESUME_FETCH_EXCEPTION", {
       name: error instanceof Error ? error.name : undefined,
@@ -1444,19 +1444,113 @@ return;
       error
     );
 
-    if (uploadProgressTimerRef.current) {
-      clearInterval(uploadProgressTimerRef.current);
-      uploadProgressTimerRef.current = null;
-    }
+    resetResumeImport();
 
-    // [RESUME_TRACE] instrumentation-only.
+    setResumeUploadError(
+      "We couldn't reach the analysis server. Please check back in a moment or try again."
+    );
+  }
+
+  /*
+    /api/resumes/[id]/analysis-status를 주기적으로 확인한다. 서버가 이미
+    수행 중인(또는 곧 수행할) runResumeAnalysis의 결과만 읽으며, 분석/
+    디자인 생성 자체의 순서나 내용은 전혀 바꾸지 않는다.
+  */
+  async function pollResumeAnalysisStatus(resumeId: string, pollStartedAt: number) {
+    const RESUME_POLL_INTERVAL_MS = 2000;
+    const RESUME_POLL_MAX_MS = 5 * 60 * 1000;
+
+    resumePollTimeoutRef.current = setTimeout(async () => {
+      if (Date.now() - pollStartedAt > RESUME_POLL_MAX_MS) {
+        /*
+          Polling 최대 대기시간 도달 - 서버의 백그라운드 작업은 계속
+          완료될 수 있으므로 Storage/DB를 삭제하지 않는다.
+        */
+        resumePollTimeoutRef.current = null;
+        resetResumeImport();
+        setResumeUploadError(
+          "This is taking longer than expected. Please check back in a moment."
+        );
+        return;
+      }
+
+      let statusResponse: Response;
+
+      try {
+        statusResponse = await fetch(`/api/resumes/${resumeId}/analysis-status`);
+      } catch (networkError) {
+        // 일시적 네트워크 오류 - 삭제하지 않고 다음 tick에 재시도.
+        pollResumeAnalysisStatus(resumeId, pollStartedAt);
+        return;
+      }
+
+      let statusResult: any;
+
+      try {
+        statusResult = await statusResponse.json();
+      } catch (jsonError) {
+        // 일시적 파싱 오류 - 삭제하지 않고 다음 tick에 재시도.
+        pollResumeAnalysisStatus(resumeId, pollStartedAt);
+        return;
+      }
+
+      if (!statusResponse.ok) {
+        resumePollTimeoutRef.current = null;
+        resetResumeImport();
+        setResumeUploadError(
+          statusResult?.error ||
+            "The resume could not be found. Please try uploading again."
+        );
+        return;
+      }
+
+      if (statusResult.status === "succeeded") {
+        resumePollTimeoutRef.current = null;
+        applyResumeAnalysisResult(file, statusResult.data);
+        return;
+      }
+
+      if (statusResult.status === "failed") {
+        // 서버가 명시적으로 terminal failed 상태를 기록함 - 기존
+        // delete+error 정책을 그대로 적용한다.
+        resumePollTimeoutRef.current = null;
+        await cleanupFailedResume("response_failed");
+        resetResumeImport();
+        setResumeUploadError(
+          statusResult.message || "Failed to analyze resume."
+        );
+        return;
+      }
+
+      // pending/processing - 계속 polling.
+      pollResumeAnalysisStatus(resumeId, pollStartedAt);
+    }, RESUME_POLL_INTERVAL_MS);
+  }
+
+  // [RESUME_TRACE] instrumentation-only - shared by every branch that
+  // confirms a genuine terminal analysis failure (not an ambiguous
+  // request/network/parse error). Same Storage-then-DB order and same
+  // calls the previous synchronous version used.
+  async function cleanupFailedResume(reason: string) {
     console.log("[RESUME_TRACE] ANALYZE_RESUME_CLEANUP_START", {
       resumeId: insertedResumeId,
       storagePath,
-      reason: "exception",
+      reason,
     });
 
-    if (insertedResumeId) {
+    {
+      const storageDeleteStart = performance.now();
+      console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
+        resumeId: insertedResumeId,
+        storagePath,
+      });
+      await supabase.storage.from("resumes").remove([storagePath]);
+      console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
+        elapsedMs: performance.now() - storageDeleteStart,
+      });
+    }
+
+    {
       const dbDeleteStart = performance.now();
       console.log("[RESUME_TRACE] RESUME_DB_DELETE_START", {
         resumeId: insertedResumeId,
@@ -1470,38 +1564,6 @@ return;
         elapsedMs: performance.now() - dbDeleteStart,
       });
     }
-
-    if (storagePath) {
-      const storageDeleteStart = performance.now();
-      console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_START", {
-        resumeId: insertedResumeId,
-        storagePath,
-      });
-
-      const { error: cleanupError } =
-        await supabase.storage
-          .from("resumes")
-          .remove([storagePath]);
-
-      console.log("[RESUME_TRACE] RESUME_STORAGE_DELETE_DONE", {
-        elapsedMs: performance.now() - storageDeleteStart,
-      });
-
-      if (cleanupError) {
-        console.error(
-          "RESUME CLEANUP ERROR =",
-          cleanupError
-        );
-      }
-    }
-
-    resetResumeImport();
-
-    setResumeUploadError(
-  error instanceof Error
-    ? error.message
-    : "Failed to analyze resume. Please try again."
-);
   }
 }
 async function handleResumeUpload(
