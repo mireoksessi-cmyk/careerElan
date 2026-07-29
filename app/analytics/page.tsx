@@ -108,10 +108,14 @@ export default function AnalyticsPage() {
   }
 
   /*
-    package_generated까지 포함한
-    전체 추적 항목 수
+    package_generated까지 포함한 전체 추적 항목 수.
+    AI Usage 위젯(get_generate_package_usage RPC)과 동일한 기준 -
+    generation_status='failed'인 행만 제외. pending/processing/
+    succeeded, 그리고 AI 생성이 아닌 quick-apply 행(null)은 그대로 포함.
   */
-  const total = applications.length;
+  const total = applications.filter(
+    (application) => application.generation_status !== "failed"
+  ).length;
 
   const applied = applications.filter(
     (application) =>

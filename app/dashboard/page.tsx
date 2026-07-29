@@ -1971,6 +1971,7 @@ useEffect(() => {
     company,
     job_title,
     status,
+    generation_status,
     created_at,
     applied_date,
     interview_date
@@ -1998,10 +1999,13 @@ useEffect(() => {
 
     /*
       패키지 수:
-      현재 구조에서는 applications 행이
-      패키지를 생성할 때 만들어지므로 전체 행 수를 사용
+      AI Usage 위젯(get_generate_package_usage RPC)과 동일한 기준 -
+      generation_status='failed'인 행만 제외. pending/processing/
+      succeeded, 그리고 AI 생성이 아닌 quick-apply 행(null)은 그대로 포함.
     */
-    const packageRows = normalizedRows;
+    const packageRows = normalizedRows.filter(
+      (row) => row.generation_status !== "failed"
+    );
 
     /*
       실제 지원 수:
