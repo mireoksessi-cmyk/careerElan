@@ -29,16 +29,20 @@ const ISO_YEAR_MONTH = `(19|20)\\d{2}-(0[1-9]|1[0-2])`;
 const SINGLE_DATE_TOKEN = `(?:${ISO_YEAR_MONTH}|${MONTH_YEAR}|${YEAR}|present|current)`;
 const SINGLE_DATE_RE = new RegExp(SINGLE_DATE_TOKEN, "i");
 
-function looksLikeBulletLine(line: string): boolean {
+export function looksLikeBulletLine(line: string): boolean {
   return /^\s*[-•*]\s+/.test(line);
 }
 
-function extractDateRange(line: string): string | null {
+// Exported for reuse by lib/documentPreservation/executionEngine/
+// experienceRefinement.ts's multi-signal confidence model (a real
+// date-range-containing-header candidate signal) - not duplicated as a
+// second regex there.
+export function extractDateRange(line: string): string | null {
   const match = line.match(DATE_RANGE_RE);
   return match ? match[0].trim() : null;
 }
 
-function extractSingleDate(line: string): string | null {
+export function extractSingleDate(line: string): string | null {
   const match = line.match(SINGLE_DATE_RE);
   return match ? match[0].trim() : null;
 }

@@ -73,7 +73,17 @@ function normalizeHeadingCandidate(line: string): string {
     .toLowerCase();
 }
 
-function matchHeading(line: string): { key: SectionKey; headingText: string } | null {
+/*
+  Exported for lib/documentPreservation/contentBox's role classifier
+  (Phase 3 of the Document Preservation Engine effort) - it needs the
+  exact same "is this line a known resume section heading" check this
+  parser already uses, and reimplementing/copying HEADING_DICTIONARY
+  would duplicate a curated synonym list rather than reuse it. Purely
+  additive (same function, now also exported) - every existing caller of
+  this module (parseSections, and everything that calls it) is
+  unaffected.
+*/
+export function matchHeading(line: string): { key: SectionKey; headingText: string } | null {
   const trimmed = line.trim();
 
   // Real headings in AI-written resumes are always short, standalone

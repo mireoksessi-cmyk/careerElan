@@ -69,6 +69,19 @@ function SkillsList({ section, variant = "list" }: { section: ParsedSection; var
   );
 }
 
+/*
+  data-dpe-* attributes below (entry/unbreakable/bullet) are the minimal,
+  explicitly-authorized Renderer DOM metadata extension (Phase 2-4
+  hardening pass) - purely additive HTML attributes, no structural or
+  visual change. They exist so DPE's own headless-browser measurement
+  (browserMeasurement.ts) can read back which experience entry / bullet a
+  measured DOM element corresponds to, without any new Renderer or
+  Renderer Adapter. PDF/DOCX export (pdfDocumentExport.ts/
+  docxDocumentExport.ts) render DIRECTLY from DocumentIR, never touching
+  this React tree or its attributes, so this has zero effect on exported
+  files - confirmed by inspection, those modules do not import this
+  component.
+*/
 function ExperienceEntries({ section }: { section: ParsedSection }) {
   const entries = section.experienceEntries || [];
   if (entries.length === 0) return <Paragraph text={section.raw} />;
@@ -77,7 +90,7 @@ function ExperienceEntries({ section }: { section: ParsedSection }) {
     <>
       {entries.map((entry, index) =>
         entry.structured ? (
-          <div key={index} className="mb-3">
+          <div key={index} className="mb-3" data-dpe-entry={index} data-dpe-unbreakable={`${section.key}-entry-${index}`}>
             <div className="flex flex-wrap items-baseline justify-between gap-x-3">
               <h3 className="text-sm font-bold text-slate-900">{entry.jobTitle}</h3>
               <span className="text-xs text-slate-600">{entry.dates}</span>
@@ -90,13 +103,15 @@ function ExperienceEntries({ section }: { section: ParsedSection }) {
                   .map((line) => line.replace(/^[-•]\s*/, "").trim())
                   .filter(Boolean)
                   .map((line, lineIndex) => (
-                    <li key={lineIndex}>{line}</li>
+                    <li key={lineIndex} data-dpe-bullet={lineIndex} data-dpe-unbreakable={`${section.key}-entry-${index}`}>
+                      {line}
+                    </li>
                   ))}
               </ul>
             )}
           </div>
         ) : (
-          <div key={index} className="mb-3">
+          <div key={index} className="mb-3" data-dpe-entry={index}>
             <Paragraph text={entry.raw} />
           </div>
         )
@@ -113,10 +128,10 @@ function SectionBody({ section }: { section: ParsedSection }) {
 
 /* ---------- Classic: single flowing column, underlined headings ---------- */
 
-function ClassicSection({ title, children }: { title: string; children: ReactNode }) {
+function ClassicSection({ title, sectionKey, children }: { title: string; sectionKey?: SectionKey; children: ReactNode }) {
   return (
-    <section className="mt-5">
-      <h2 className="mb-2 border-b border-slate-400 pb-1 text-sm font-bold uppercase tracking-wide text-slate-900">
+    <section className="mt-5" data-dpe-section={sectionKey}>
+      <h2 className="mb-2 border-b border-slate-400 pb-1 text-sm font-bold uppercase tracking-wide text-slate-900" data-dpe-role="heading">
         {title}
       </h2>
       {children}
@@ -145,7 +160,7 @@ function ClassicLayout({ ir }: { ir: DocumentIR }) {
         </ClassicSection>
       )}
       {ir.sections.map((section) => (
-        <ClassicSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]}>
+        <ClassicSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]} sectionKey={section.key}>
           <SectionBody section={section} />
         </ClassicSection>
       ))}
@@ -157,12 +172,13 @@ function ClassicLayout({ ir }: { ir: DocumentIR }) {
 
 const SIDEBAR_KEYS: SectionKey[] = ["skills", "languages", "certifications"];
 
-function ProfessionalSection({ title, children }: { title: string; children: ReactNode }) {
+function ProfessionalSection({ title, sectionKey, children }: { title: string; sectionKey?: SectionKey; children: ReactNode }) {
   return (
-    <section className="mb-5">
+    <section className="mb-5" data-dpe-section={sectionKey}>
       <h2
         className="mb-2 border-b-2 pb-1 text-xs font-black uppercase tracking-[0.14em]"
         style={{ borderColor: ACCENTS.professional, color: ACCENTS.professional }}
+        data-dpe-role="heading"
       >
         {title}
       </h2>
@@ -185,16 +201,16 @@ function ProfessionalLayout({ ir }: { ir: DocumentIR }) {
         )}
       </div>
       <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-8 px-8 py-7">
-        <aside className="min-w-0 border-r pr-6" style={{ borderColor: ACCENTS.professional }}>
+        <aside className="min-w-0 border-r pr-6" style={{ borderColor: ACCENTS.professional }} data-dpe-region="sidebar">
           {sidebarSections.map((section) => (
-            <ProfessionalSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]}>
+            <ProfessionalSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]} sectionKey={section.key}>
               <SectionBody section={section} />
             </ProfessionalSection>
           ))}
         </aside>
-        <div className="min-w-0">
+        <div className="min-w-0" data-dpe-region="main">
           {mainSections.map((section) => (
-            <ProfessionalSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]}>
+            <ProfessionalSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]} sectionKey={section.key}>
               <SectionBody section={section} />
             </ProfessionalSection>
           ))}
@@ -206,10 +222,10 @@ function ProfessionalLayout({ ir }: { ir: DocumentIR }) {
 
 /* ---------- Creative: colored full-width header band, pill skills ---------- */
 
-function CreativeSection({ title, children }: { title: string; children: ReactNode }) {
+function CreativeSection({ title, sectionKey, children }: { title: string; sectionKey?: SectionKey; children: ReactNode }) {
   return (
-    <section className="mb-5">
-      <h2 className="mb-2 text-sm font-black uppercase tracking-wide" style={{ color: ACCENTS.creative }}>
+    <section className="mb-5" data-dpe-section={sectionKey}>
+      <h2 className="mb-2 text-sm font-black uppercase tracking-wide" style={{ color: ACCENTS.creative }} data-dpe-role="heading">
         {title}
       </h2>
       {children}
@@ -228,7 +244,7 @@ function CreativeLayout({ ir }: { ir: DocumentIR }) {
       </div>
       <div className="p-8">
         {ir.sections.map((section) => (
-          <CreativeSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]}>
+          <CreativeSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]} sectionKey={section.key}>
             {section.key === "skills" ? <SkillsList section={section} variant="pills" /> : <SectionBody section={section} />}
           </CreativeSection>
         ))}
@@ -239,12 +255,13 @@ function CreativeLayout({ ir }: { ir: DocumentIR }) {
 
 /* ---------- Modern: single column, colored left-rule headings, condensed ---------- */
 
-function ModernSection({ title, children }: { title: string; children: ReactNode }) {
+function ModernSection({ title, sectionKey, children }: { title: string; sectionKey?: SectionKey; children: ReactNode }) {
   return (
-    <section className="mb-4">
+    <section className="mb-4" data-dpe-section={sectionKey}>
       <h2
         className="mb-2 border-l-4 pl-3 text-sm font-bold uppercase tracking-wide text-slate-900"
         style={{ borderColor: ACCENTS.modern }}
+        data-dpe-role="heading"
       >
         {title}
       </h2>
@@ -268,7 +285,7 @@ function ModernLayout({ ir }: { ir: DocumentIR }) {
         <div className="mt-3 h-[2px] w-full" style={{ backgroundColor: ACCENTS.modern }} />
       </div>
       {ir.sections.map((section) => (
-        <ModernSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]}>
+        <ModernSection key={section.headingText + section.key} title={SECTION_HEADING_LABELS[section.key]} sectionKey={section.key}>
           <SectionBody section={section} />
         </ModernSection>
       ))}

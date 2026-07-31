@@ -24,6 +24,8 @@ import {
   fallbackPackage,
   safeResumeResolutionMessage,
   stripCoverLetterContactBlock,
+  type GenerationMode,
+  type LayoutConstraints,
 } from "@/lib/generatePackage/shared";
 
 /*
@@ -606,6 +608,25 @@ export async function POST(req: Request) {
     const appliedDate = new Date().toISOString().split("T")[0];
     const jobDescriptionNormalized = getFirstText(analysis.summary) || null;
 
+    /*
+      Document Preservation Engine (DPE) Phase 4B completion - optional
+      Layout Compression Request (see lib/generatePackage/shared.ts's own
+      GenerationMode/LayoutConstraints comment). Absent for every normal
+      Paste Job / Dashboard call (the ONLY caller today) - this route
+      never constructs these itself, it only forwards them if a caller
+      (the DPE's own compressionRetry.ts) provides them, so the normal
+      path's insert is byte-identical to before this phase whenever these
+      two fields are omitted.
+    */
+    const dpeMode: GenerationMode | null =
+      body.dpeMode === "layout_compression" ? "layout_compression" : null;
+    const dpeLayoutConstraints: LayoutConstraints | null =
+      dpeMode === "layout_compression" &&
+      body.dpeLayoutConstraints &&
+      typeof body.dpeLayoutConstraints === "object"
+        ? (body.dpeLayoutConstraints as LayoutConstraints)
+        : null;
+
     const { data: claimedRow, error: claimInsertError } = await supabase
       .from("applications")
       .insert({
@@ -641,6 +662,8 @@ export async function POST(req: Request) {
         generation_input_resume_name: resolvedResume.selectedName,
         generation_input_manifest_source: resolvedResume.previewData,
         generation_input_cover_letter_text: inputCoverLetterText,
+        dpe_generation_mode: dpeMode,
+        dpe_layout_constraints: dpeLayoutConstraints,
         applied_date: appliedDate,
         /*
           status intentionally left unset (null) here - it is the

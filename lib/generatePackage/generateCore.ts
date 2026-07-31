@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError } from "openai";
 import { supabaseAdmin } from "../supabaseAdmin";
 import { logSafeError } from "../errors/publicError";
 import {
@@ -21,8 +21,16 @@ import {
   validateAnalysisLogic,
   warnCardDifferences,
   classifyGenerationError,
+  shouldRetryOpenAiTimeout,
   logGenerationStage,
+  buildLayoutCompressionPromptBlock,
+  buildResumeAnalysisPrompt,
+  buildCoverLetterEmailPrompt,
+  type LayoutConstraints,
+  type ResumeAnalysisPackage,
+  type CoverLetterEmailPackage,
 } from "./shared";
+import { runDpePreservationForApplication } from "../documentPreservation/runForApplication";
 
 /*
   Deliberately relative imports throughout this file (and everything it
@@ -54,6 +62,28 @@ const client = new OpenAI({
   the background execution limit if something is genuinely hung.
 */
 const OPENAI_CALL_TIMEOUT_MS = 120_000;
+
+/*
+  Phase5 Beta stabilization - a single, narrowly-scoped retry for the
+  OpenAI call only, added because real production log evidence (this
+  session's own OPENAI_TIMEOUT investigation) showed the very next
+  attempt for a comparable request routinely succeeds in well under a
+  minute after a 120s timeout - i.e. the timeout is typically transient
+  OpenAI-side tail latency, not a structural problem with this specific
+  request. MAX_OPENAI_ATTEMPTS=2 means "1 original attempt + at most 1
+  retry", never more - this is NOT a generic backoff/retry system, and
+  is deliberately NOT implemented via the SDK's own `maxRetries` option
+  (which retries indiscriminately on any retryable-by-SDK-definition
+  error, including classes this phase was explicitly told never to
+  retry, like 429). The loop below only ever retries when the caught
+  error is `instanceof APIConnectionTimeoutError` - any other error
+  (RateLimitError/429, other APIError, SyntaxError from a malformed
+  response, etc.) is re-thrown immediately on the first attempt and
+  reaches the existing outer catch/classifyGenerationError path exactly
+  as before this phase, unchanged.
+*/
+const MAX_OPENAI_ATTEMPTS = 2;
+const OPENAI_TIMEOUT_RETRY_DELAY_MS = 2_000;
 
 type GenerationStage =
   | "claimed"
@@ -101,6 +131,105 @@ async function setStage(
       userId,
     });
   }
+}
+
+/*
+  Performance Optimization Round 4 - the single-retry OpenAI call loop
+  (previously inline, once, in runPackageGeneration) extracted verbatim so
+  both the Resume+Analysis call and the Cover Letter+Email call get the
+  exact same retry policy independently, with zero duplication between
+  the two call sites. Nothing about the policy itself changed: still
+  MAX_OPENAI_ATTEMPTS=2 ("1 original attempt + at most 1 retry"), still
+  only retries when shouldRetryOpenAiTimeout() (unchanged, imported from
+  ./shared) says the caught error is an APIConnectionTimeoutError and
+  attempts remain - any other error class is re-thrown on the first
+  attempt exactly as before, reaching the same outer catch/
+  classifyGenerationError path. `callLabel` is diagnostics-only (which of
+  the two calls this attempt belongs to), never affects control flow.
+*/
+async function callOpenAiWithRetry(
+  applicationId: string,
+  promptText: string,
+  resolvedModel: string,
+  callLabel: "resume_analysis" | "cover_letter_email"
+): Promise<OpenAI.Responses.Response> {
+  // Explicitly typed as the non-streaming Response (not
+  // ReturnType<typeof client.responses.create>, which resolves to the
+  // streaming|non-streaming union once the call is behind a generic
+  // helper rather than inline with a literal, stream-less args object) -
+  // this call never passes `stream`, so it always resolves to this shape,
+  // exactly as it did before this call was extracted into its own
+  // function.
+  let aiResponse: OpenAI.Responses.Response | null = null;
+
+  for (let attempt = 1; attempt <= MAX_OPENAI_ATTEMPTS; attempt++) {
+    const attemptStartedAt = Date.now();
+    try {
+      aiResponse = await client.responses.create(
+        {
+          model: resolvedModel,
+          input: promptText,
+        },
+        { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+      );
+      console.log(
+        JSON.stringify({
+          event: "generate_package_openai_attempt",
+          applicationId,
+          call: callLabel,
+          attempt,
+          maxAttempts: MAX_OPENAI_ATTEMPTS,
+          model: resolvedModel,
+          durationMs: Date.now() - attemptStartedAt,
+          outcome: "ok",
+        })
+      );
+      break;
+    } catch (attemptError) {
+      const isTimeout =
+        attemptError instanceof APIConnectionTimeoutError;
+      console.log(
+        JSON.stringify({
+          event: "generate_package_openai_attempt",
+          applicationId,
+          call: callLabel,
+          attempt,
+          maxAttempts: MAX_OPENAI_ATTEMPTS,
+          model: resolvedModel,
+          durationMs: Date.now() - attemptStartedAt,
+          outcome: isTimeout ? "timeout" : "error",
+          errorCode: isTimeout
+            ? "OPENAI_TIMEOUT"
+            : attemptError instanceof Error
+              ? attemptError.name
+              : "Unknown",
+        })
+      );
+
+      if (
+        !shouldRetryOpenAiTimeout(
+          attemptError,
+          attempt,
+          MAX_OPENAI_ATTEMPTS
+        )
+      ) {
+        throw attemptError;
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, OPENAI_TIMEOUT_RETRY_DELAY_MS)
+      );
+    }
+  }
+
+  if (!aiResponse) {
+    // Unreachable in practice (the loop above always either returns a
+    // response or throws), kept only so TypeScript can see aiResponse is
+    // non-null below without a non-null assertion.
+    throw new Error("OpenAI call produced no response and no error.");
+  }
+
+  return aiResponse;
 }
 
 /*
@@ -246,507 +375,32 @@ export async function runPackageGeneration(
     const resolvedModel =
       process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL;
 
-    const promptText = `
-You are Career Élan's Canadian resume strategist, ATS specialist, recruiter, and application writer.
-
-You must first analyze the complete job posting. Only after the job analysis is complete may you write the resume, cover letter, and application email.
-
-==================================================
-SINGLE FACTUAL SOURCE
-==================================================
-
-Resume source selected by the user:
-
-${resumeSource}
-
-The PRIMARY RESUME below is the only factual source.
-
-If the source is career_memory:
-- use only the Career Memory resume represented by the PRIMARY RESUME and SOURCE MANIFEST
-
-If the source is upload:
-- use only the selected uploaded resume represented by the PRIMARY RESUME and SOURCE MANIFEST
-
-The job posting is not evidence about the candidate.
-
-The existing cover letter is not a factual source. It may be used only as a tone and writing-style reference.
-
-Do not use unselected resumes or unrelated Career Memory information.
-
-Never invent:
-
-- companies
-- organizations
-- employers
-- job titles
-- employment dates
-- new responsibilities
-- new work experience
-- education
-- degrees
-- fields of study
-- certifications
-- licences
-- registrations
-- languages
-- language proficiency
-- software experience
-- equipment experience
-- technical experience
-- numerical achievements
-- citizenship
-- permanent residence
-- visas
-- work permits
-- work authorization
-- security clearances
-- regulated professional status
-
-You may professionally rewrite a responsibility that already exists.
-
-Example:
-
-Source:
-Answered phone inquiries.
-
-Allowed:
-Responded to client inquiries by phone and provided clear service guidance.
-
-Not allowed:
-Managed a national high-volume customer service centre.
-
-Do not add a number unless the number appears in the PRIMARY RESUME.
-
-==================================================
-CAREER MEMORY OPTIONAL SECTIONS
-==================================================
-
-The SOURCE MANIFEST determines which sections actually exist.
-
-A section exists only when its core identifying information is present.
-
-If sectionPresence.education is false:
-- do not create Education
-- do not create Academic Background
-- do not create Education and Training
-
-If sectionPresence.languages is false:
-- do not create Languages
-- do not create Language Skills
-- do not create Bilingual Skills
-
-If sectionPresence.certifications is false:
-- do not create Certifications
-- do not create Certificates
-- do not create Credentials
-- do not create Licences
-
-If sectionPresence.projects is false:
-- do not create Projects
-- do not create Project Experience
-
-If sectionPresence.careerGoals is false:
-- do not create Career Goals
-- do not create Career Objective
-- do not create Professional Objective
-- do not create Target Role
-
-If sectionPresence.volunteerExperience is false:
-- do not create a separate Volunteer Experience section
-
-A section may be partially completed.
-
-Include only fields actually entered by the user.
-
-Example:
-
-Education:
-- school: Seneca Polytechnic
-- program: Law Clerk
-- date: empty
-- GPA: empty
-- coursework: empty
-
-Allowed:
-Include Seneca Polytechnic and Law Clerk.
-
-Not allowed:
-Invent dates, GPA, coursework, awards, or graduation status.
-
-Do not treat these as valid sections:
-
-- Education containing only dates, GPA, or coursework with no school, program, degree, or field
-- Language containing only "Fluent" with no language name
-- Certification containing only issuer or date with no credential name
-- Project containing only dates with no project name or meaningful description
-
-A qualification mentioned by the user inside the source summary may remain in the summary.
-
-A summary mention alone does not authorize creating a new separate section.
-
-==================================================
-JOB POSTING ANALYSIS — DO THIS FIRST
-==================================================
-
-Before writing, analyze:
-
-- employer and sector
-- main business need
-- major responsibilities
-- mandatory requirements
-- preferred requirements
-- required years of experience
-- education and field-of-study requirements
-- certifications
-- licences
-- regulated professional status
-- security screening and clearance
-- bilingual or multilingual requirements
-- day shift
-- evening shift
-- night shift
-- rotating shift
-- weekend work
-- holiday work
-- driver's licence
-- travel or mobility requirements
-- required software
-- required equipment
-- technical skills
-- repeated ATS keywords
-
-Compare each important requirement to the PRIMARY RESUME and classify it as:
-
-- supported
-- partially_supported
-- not_supported
-- unclear
-
-Transferable experience is not direct proof of a mandatory technical or professional requirement.
-
-For supported or partially supported requirements:
-- sourceEvidence must be a short phrase appearing in the PRIMARY RESUME
-- source must be primary_resume
-
-For not_supported or unclear requirements:
-- sourceEvidence must be empty
-- source must be none
-
-==================================================
-DOCUMENT WRITING
-==================================================
-
-RESUME
-
-Return a complete plain-text resume.
-
-Preserve every existing:
-
-- applicant identity and contact information
-- company
-- organization
-- employer
-- job title
-- date
-- work-history entry
-- volunteer-history entry
-- education entry
-- certification
-- licence
-- language entry
-- project entry
-
-Preserve the order of work and volunteer history.
-
-You may:
-
-- tailor the Professional Summary
-- reorder skills
-- reorder bullets within the same role
-- rewrite existing work more professionally
-- use truthful ATS keywords
-- emphasize relevant duties
-- reduce emphasis on unrelated duties
-
-You may not:
-
-- delete factual history
-- move duties between employers
-- merge separate roles
-- change dates
-- change job titles
-- convert volunteer work into paid work
-- add missing qualifications
-- add missing shift experience
-- add missing software or equipment experience
-
-Do not output an empty section.
-
-COVER LETTER
-
-Write specifically for:
-
-Position: ${title}
-Company: ${company}
-
-Connect the employer's main requirements to supported candidate experience.
-
-When experience is transferable rather than direct, say so naturally.
-
-Do not present transferable experience as direct industry experience.
-
-Do not claim a missing mandatory qualification.
-
-Do not copy the resume paragraph by paragraph.
-
-EMAIL DRAFT
-
-Keep the email concise.
-
-Include:
-
-- subject line
-- greeting
-- exact position title
-- company name
-- expression of interest
-- reference to attached resume and cover letter
-- professional closing
-- applicant name
-
-Do not load the email with unnecessary career facts.
-
-==================================================
-CANADIAN SCOPE
-==================================================
-
-Career Élan supports:
-
-- Canadian private-sector postings
-- Canadian provincial-government postings
-- Canadian municipal or local-government postings
-
-It does not support Canadian federal-government applications.
-
-Classify the posting as:
-
-- private
-- provincial
-- municipal
-- federal
-- unknown
-
-If federal:
-- sector must be federal
-- supportedByCareerElan must be false
-
-==================================================
-REGULATED AND HIGH-RISK REQUIREMENTS
-==================================================
-
-Never state that the candidate has:
-
-- citizenship
-- permanent residence
-- a work permit
-- authorization to work
-- security clearance
-- professional registration
-- a regulated licence
-
-unless the PRIMARY RESUME explicitly supports it.
-
-If a mandatory regulated licence is missing:
-- licenceStatus must be missing
-- matchLevel must not be strong
-- applyRecommendation must not be recommended
-
-If mandatory bilingual ability is not fully supported:
-- do not call the candidate bilingual
-- matchLevel must not be strong
-
-If mandatory night, rotating, weekend, or holiday availability is required but the source does not confirm it:
-- scheduleRequirement.candidateStatus must be not_supported or unclear
-- include it in missingRequirements when important
-
-==================================================
-FOUR ANALYSIS CARDS
-==================================================
-
-Keep these four cards:
-
-1. keyChanges
-Explain the most meaningful tailoring changes.
-
-The wording does not need to be exactly identical to the final resume.
-
-2. mismatch
-Show important mandatory or preferred requirements not confirmed by the source.
-
-3. matches
-Separate direct matches from realistic transferable skills.
-
-4. recommendation
-State whether the candidate should apply and list practical next steps.
-
-Do not repeat the same point across every card.
-
-==================================================
-MATCH SCORE
-==================================================
-
-85–100:
-strong
-
-65–84:
-moderate
-
-40–64:
-low
-
-0–39:
-critical_mismatch
-
-Do not inflate the score.
-
-A missing core licence, legal qualification, essential degree, or central professional requirement should normally result in low or critical_mismatch.
-
-==================================================
-OUTPUT
-==================================================
-
-Return only valid JSON.
-
-Do not use markdown.
-Do not use code fences.
-
-Use exactly this structure:
-
-{
-  "resume": "Complete resume string",
-  "coverLetter": "Complete cover letter string",
-  "emailDraft": "Complete application email string",
-  "packageAnalysis": {
-    "overallMatch": 0,
-    "matchLevel": "strong | moderate | low | critical_mismatch",
-    "keyChanges": [
-      {
-        "section": "",
-        "original": "",
-        "revised": "",
-        "reason": ""
-      }
-    ],
-    "mismatch": {
-      "summary": "",
-      "missingRequirements": [],
-      "unsupportedClaims": []
-    },
-    "matches": {
-      "strongMatches": [],
-      "transferableSkills": []
-    },
-    "recommendation": {
-      "summary": "",
-      "applyRecommendation": "recommended | consider | not_recommended",
-      "nextSteps": []
-    },
-    "verification": {
-      "jobContext": {
-        "country": "Canada | Unknown",
-        "sector": "private | provincial | municipal | federal | unknown",
-        "province": "",
-        "municipality": "",
-        "supportedByCareerElan": true,
-        "classificationReason": ""
-      },
-      "requirements": [
-        {
-          "requirement": "",
-          "category": "mandatory | preferred | legal_or_regulated",
-          "evidenceStatus": "supported | partially_supported | not_supported | unclear",
-          "sourceEvidence": "",
-          "source": "primary_resume | none",
-          "regulated": false
-        }
-      ],
-      "regulatedRole": {
-        "isRegulated": false,
-        "profession": "",
-        "jurisdiction": "",
-        "requiredLicence": "",
-        "licenceEvidence": "",
-        "licenceStatus": "verified | missing | not_required | unclear"
-      },
-      "bilingualRequirement": {
-        "level": "mandatory | preferred | not_required | unclear",
-        "languages": [],
-        "evidence": "",
-        "status": "verified | partially_verified | missing | not_required | unclear"
-      },
-      "scheduleRequirement": {
-        "dayShift": false,
-        "eveningShift": false,
-        "nightShift": false,
-        "rotatingShift": false,
-        "weekendWork": false,
-        "holidayWork": false,
-        "requirementLevel": "mandatory | preferred | not_required | unclear",
-        "candidateStatus": "supported | partially_supported | not_supported | unclear",
-        "explanation": ""
-      }
-    }
-  }
-}
-
-Limits:
-
-- keyChanges: maximum 4
-- missingRequirements: maximum 5
-- unsupportedClaims: maximum 4
-- strongMatches: maximum 5
-- transferableSkills: maximum 4
-- nextSteps: maximum 3
-- requirements: maximum 20
-
-==================================================
-SOURCE MANIFEST
-==================================================
-
-${JSON.stringify(
-  manifest,
-  null,
-  2
-)}
-
-==================================================
-PRIMARY RESUME — ONLY FACTUAL SOURCE
-==================================================
-
-${resumeText}
-
-==================================================
-EXISTING COVER LETTER — STYLE REFERENCE ONLY
-==================================================
-
-${existingCoverLetter}
-
-==================================================
-PREVIOUS JOB ANALYSIS — REFERENCE ONLY
-==================================================
-
-${JSON.stringify(
-  analysis,
-  null,
-  2
-)}
-
-==================================================
-COMPLETE JOB DESCRIPTION
-==================================================
-
-${jobText}
-`;
+    /*
+      Document Preservation Engine (DPE) Phase 4B completion - optional
+      Layout Compression Request (see shared.ts's own comment on
+      GenerationMode/LayoutConstraints/buildLayoutCompressionPromptBlock).
+      NULL/"standard" (every row before this phase, and every row from a
+      caller that never sets these columns) produces layoutCompressionBlock
+      = "" - the prompt below is then BYTE-IDENTICAL to before this phase,
+      preserving the normal Generate Package path exactly.
+    */
+    const dpeGenerationMode: string | null = row.dpe_generation_mode || null;
+    const dpeLayoutConstraints: LayoutConstraints | null =
+      dpeGenerationMode === "layout_compression" && row.dpe_layout_constraints
+        ? (row.dpe_layout_constraints as LayoutConstraints)
+        : null;
+    const layoutCompressionBlock = dpeLayoutConstraints
+      ? `\n${buildLayoutCompressionPromptBlock(dpeLayoutConstraints)}\n`
+      : "";
+
+    const resumeAnalysisPrompt = buildResumeAnalysisPrompt({
+      resumeSource,
+      manifest,
+      resumeText,
+      analysis,
+      jobText,
+      layoutCompressionBlock,
+    });
 
     logGenerationStage({
       applicationId,
@@ -755,50 +409,187 @@ ${jobText}
     });
 
     console.log(
-      `GP WORKER OPENAI START workerRequestId=${workerRequestId} applicationId=${applicationId}`
+      `GP WORKER OPENAI START (call1: resume+analysis) workerRequestId=${workerRequestId} applicationId=${applicationId}`
     );
-    const openaiStartedAt = Date.now();
+    const call1StartedAt = Date.now();
     await setStage(applicationId, userId, "generating", workerRequestId);
 
-    const aiResponse = await client.responses.create(
-      {
-        model: resolvedModel,
-        input: promptText,
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+    const call1Response = await callOpenAiWithRetry(
+      applicationId,
+      resumeAnalysisPrompt,
+      resolvedModel,
+      "resume_analysis"
     );
+
     console.log(
-      `GP WORKER OPENAI END workerRequestId=${workerRequestId} applicationId=${applicationId}`
+      `GP WORKER OPENAI END (call1: resume+analysis) workerRequestId=${workerRequestId} applicationId=${applicationId}`
     );
 
     logGenerationStage({
       applicationId,
-      stage: "openai",
-      durationMs: Date.now() - openaiStartedAt,
+      stage: "call1_openai",
+      durationMs: Date.now() - call1StartedAt,
       model: resolvedModel,
-      inputTokens: aiResponse.usage?.input_tokens,
-      outputTokens: aiResponse.usage?.output_tokens,
+      inputTokens: call1Response.usage?.input_tokens,
+      outputTokens: call1Response.usage?.output_tokens,
       cachedTokens:
-        aiResponse.usage?.input_tokens_details?.cached_tokens,
+        call1Response.usage?.input_tokens_details?.cached_tokens,
       status: "ok",
     });
 
-    const validateStartedAt = Date.now();
+    const call1ValidateStartedAt = Date.now();
     await setStage(applicationId, userId, "validating", workerRequestId);
 
-    const rawPackage = extractJson(aiResponse.output_text);
+    const rawResumeAnalysis = extractJson<ResumeAnalysisPackage>(
+      call1Response.output_text
+    );
+
+    if (typeof rawResumeAnalysis.resume !== "string") {
+      throw new Error(
+        "The AI returned the resume in an invalid format."
+      );
+    }
+
+    const resume = cleanDocumentText(rawResumeAnalysis.resume);
+
+    validateDocumentQuality("Resume", resume);
+
+    const packageAnalysis = normalizePackageAnalysis(
+      rawResumeAnalysis.packageAnalysis
+    );
+
+    /*
+      선택한 원본만 검증 기준으로 사용한다.
+    */
+    const sourceText = manifest.originalText;
+
+    validateSourceIntegrity(resume, manifest);
+    validateCanadianScope(packageAnalysis.verification);
+    validateRequirementEvidence(packageAnalysis.verification, sourceText);
+    validateAnalysisLogic(packageAnalysis);
+    warnCardDifferences(packageAnalysis);
+
+    logGenerationStage({
+      applicationId,
+      stage: "call1_validating",
+      durationMs: Date.now() - call1ValidateStartedAt,
+    });
+
+    /*
+      Document Preservation Engine (DPE) - Phase 1 completion (Phase 1-4
+      roadmap-closure effort). The official Generate Package -> DPE ->
+      Renderer execution path, run AFTER every one of Generate Package's
+      own validators above already passed on `resume` unchanged - DPE
+      never sees unvalidated text, and never bypasses any of those
+      checks. Only ever OPTIONALLY re-expresses the ALREADY-VALIDATED
+      resume text through the original uploaded file's own Content Boxes
+      when doing so is confirmed (by real measurement/validation) to
+      preserve the original layout - see runForApplication.ts's own
+      comment for the full applicability boundary and why this never
+      calls OpenAI or bypasses Protected Claims/Validation. Never throws:
+      any failure here keeps `resume` (Generate Package's own AI output)
+      completely unchanged, exactly this route's behavior before this
+      pass.
+    */
+    // storage_path/original_file_type come from the SAME real
+    // resumes-row snapshot buildUploadedResumeManifest() already reads
+    // above (generation_input_manifest_source) - taken via the original
+    // request's real authenticated user session at claim time. Passed
+    // directly rather than having runDpePreservationForApplication
+    // re-read the resumes table itself as service_role, which a real E2E
+    // run confirmed always fails ("permission denied for table resumes" -
+    // service_role has no SELECT grant there, only
+    // REFERENCES/TRIGGER/TRUNCATE/MAINTAIN - see runForApplication.ts's
+    // own comment on this fix).
+    const uploadedResumeSnapshot = row.generation_input_manifest_source as
+      | { storage_path?: string | null; original_file_type?: string | null }
+      | null
+      | undefined;
+
+    const dpeStartedAt = Date.now();
+
+    const dpeOutcome = await runDpePreservationForApplication({
+      applicationId,
+      resumeSource: row.resume_source ?? null,
+      resumeId: row.resume_id ?? null,
+      storagePath: uploadedResumeSnapshot?.storage_path ?? null,
+      originalFileType: uploadedResumeSnapshot?.original_file_type ?? null,
+      aiGeneratedResumeText: resume,
+      templateId: row.resume_template_id || "classic",
+    });
+
+    logGenerationStage({
+      applicationId,
+      stage: "dpe",
+      durationMs: Date.now() - dpeStartedAt,
+      status: dpeOutcome.status,
+    });
+
+    const finalResumeText = dpeOutcome.applied && dpeOutcome.finalResumeText
+      ? dpeOutcome.finalResumeText
+      : resume;
+
+    /*
+      Performance Optimization Round 4 - Call 2 (Cover Letter + Email
+      only). Deliberately does NOT receive packageAnalysis or the
+      SourceManifest (per this round's explicit instruction and Round 3's
+      dependency analysis, which found neither used by Cover Letter/Email
+      writing logic) - only the finalized Resume text, the job posting,
+      title/company, and the existing cover letter style reference.
+    */
+    const coverLetterEmailPrompt = buildCoverLetterEmailPrompt({
+      title,
+      company,
+      finalResumeText,
+      jobText,
+      existingCoverLetter,
+    });
+
+    console.log(
+      `GP WORKER OPENAI START (call2: cover letter+email) workerRequestId=${workerRequestId} applicationId=${applicationId}`
+    );
+    const call2StartedAt = Date.now();
+    await setStage(applicationId, userId, "generating", workerRequestId);
+
+    const call2Response = await callOpenAiWithRetry(
+      applicationId,
+      coverLetterEmailPrompt,
+      resolvedModel,
+      "cover_letter_email"
+    );
+
+    console.log(
+      `GP WORKER OPENAI END (call2: cover letter+email) workerRequestId=${workerRequestId} applicationId=${applicationId}`
+    );
+
+    logGenerationStage({
+      applicationId,
+      stage: "call2_openai",
+      durationMs: Date.now() - call2StartedAt,
+      model: resolvedModel,
+      inputTokens: call2Response.usage?.input_tokens,
+      outputTokens: call2Response.usage?.output_tokens,
+      cachedTokens:
+        call2Response.usage?.input_tokens_details?.cached_tokens,
+      status: "ok",
+    });
+
+    const call2ValidateStartedAt = Date.now();
+    await setStage(applicationId, userId, "validating", workerRequestId);
+
+    const rawCoverLetterEmail = extractJson<CoverLetterEmailPackage>(
+      call2Response.output_text
+    );
 
     if (
-      typeof rawPackage.resume !== "string" ||
-      typeof rawPackage.coverLetter !== "string" ||
-      typeof rawPackage.emailDraft !== "string"
+      typeof rawCoverLetterEmail.coverLetter !== "string" ||
+      typeof rawCoverLetterEmail.emailDraft !== "string"
     ) {
       throw new Error(
         "The AI returned one or more documents in an invalid format."
       );
     }
 
-    const resume = cleanDocumentText(rawPackage.resume);
     /*
       Resume contact info is untouched (out of scope) -
       stripCoverLetterContactBlock only ever removes the applicant's own
@@ -807,7 +598,7 @@ ${jobText}
       down or anything mentioned in the body.
     */
     const coverLetter = stripCoverLetterContactBlock(
-      cleanDocumentText(rawPackage.coverLetter)
+      cleanDocumentText(rawCoverLetterEmail.coverLetter)
     );
     /*
       stripEmailSignatureContact only ever removes a trailing phone/email
@@ -815,35 +606,27 @@ ${jobText}
       mentioned earlier in the email body.
     */
     const emailDraft = stripEmailSignatureContact(
-      cleanDocumentText(rawPackage.emailDraft)
+      cleanDocumentText(rawCoverLetterEmail.emailDraft)
     );
 
-    validateDocumentQuality("Resume", resume);
     validateDocumentQuality("Cover Letter", coverLetter);
     validateDocumentQuality("Email Draft", emailDraft);
 
-    const packageAnalysis = normalizePackageAnalysis(
-      rawPackage.packageAnalysis
-    );
-
+    /*
+      Uses the pre-DPE `resume` (Call 1's cleaned AI output), not
+      `finalResumeText` - byte-identical to this validator's original
+      timing/target (it ran before DPE in the single-call pipeline too).
+      Only the wall-clock position moved (now after Call 2), never the
+      text it checks.
+    */
     const documents = { resume, coverLetter, emailDraft };
 
-    /*
-      선택한 원본만 검증 기준으로 사용한다.
-    */
-    const sourceText = manifest.originalText;
-
-    validateSourceIntegrity(resume, manifest);
     validateProtectedClaims(documents, sourceText);
-    validateCanadianScope(packageAnalysis.verification);
-    validateRequirementEvidence(packageAnalysis.verification, sourceText);
-    validateAnalysisLogic(packageAnalysis);
-    warnCardDifferences(packageAnalysis);
 
     logGenerationStage({
       applicationId,
-      stage: "validating",
-      durationMs: Date.now() - validateStartedAt,
+      stage: "call2_validating",
+      durationMs: Date.now() - call2ValidateStartedAt,
     });
 
     console.log(
@@ -859,12 +642,14 @@ ${jobText}
       {
         p_application_id: applicationId,
         p_user_id: userId,
-        p_resume_text: resume,
+        p_resume_text: finalResumeText,
         p_cover_letter_text: coverLetter,
         p_email_draft: emailDraft,
         p_ai_insight: packageAnalysis,
         p_generation_model: resolvedModel,
         p_prompt_version: PACKAGE_PROMPT_VERSION,
+        p_dpe_status: dpeOutcome.status,
+        p_dpe_reason: dpeOutcome.reason,
       }
     );
 
