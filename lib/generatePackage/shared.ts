@@ -187,6 +187,23 @@ export type GeneratedPackage = {
     PackageAnalysis;
 };
 
+/*
+  Performance Optimization Round 4 - the two-call split's own response
+  shapes. Each is just the relevant subset of the original GeneratedPackage
+  fields (no field was redefined) - Call 1 never produces coverLetter/
+  emailDraft, Call 2 never produces resume/packageAnalysis.
+*/
+export type ResumeAnalysisPackage = {
+  resume: string;
+  packageAnalysis:
+    PackageAnalysis;
+};
+
+export type CoverLetterEmailPackage = {
+  coverLetter: string;
+  emailDraft: string;
+};
+
 export type ResumeFact = {
   employer: string;
   title: string;
@@ -234,6 +251,9 @@ export type SourceManifest = {
     EducationFact[];
 
   requiredCertificationFacts:
+    string[];
+
+  requiredSkillsFacts:
     string[];
 
   requiredLanguageFacts:
@@ -321,6 +341,182 @@ function includesLoose(
   );
 }
 
+/*
+  Phase5 Beta stabilization - dedicated applicant-name normalization,
+  scoped ONLY to validateSourceIntegrity's name check (never applied to
+  email/phone, which keep using includesLoose/normalizeForComparison
+  above unchanged, and never applied to any other validator or Protected
+  Claims text). normalizeForComparison() (above) is deliberately left
+  untouched - it is shared by other checks in this file, and this phase's
+  own instruction is to add a narrow, name-only helper rather than change
+  that shared behavior.
+
+  Real problem this solves: a real hyphenated name (e.g. a romanized
+  Korean given name) can legitimately be re-typeset by the AI as
+  space-separated or run-together ("Kim-Lee" / "Kim Lee" / "KimLee"),
+  none of which involve any factual change - but normalizeForComparison's
+  own hyphen-preserving normalization treats "-" as a literal, required
+  character, so a plain string a in the resume that only spells it a
+  different way fails a strict substring check. This produced a real,
+  evidenced false-positive risk (see the RC investigation's own report).
+
+  Design: normalize to a SPACE-separated form first (every separator
+  variant - hyphen/en dash/em dash/apostrophe/whitespace runs - folded to
+  a single space), then derive a SECOND, fully compact form (spaces also
+  removed) used for the actual equality/substring comparison. Comparing
+  on the compact form is what makes "Kim Lee" (two words) and "KimLee"
+  (one word, no separator at all in the source text) equal, while still
+  rejecting a genuinely different name: "Kim Lee" vs "Kim Park" and
+  "Ann Lee" vs "Anna Lee" differ by a real letter, not merely a
+  separator, so their compact forms never match. Unicode letters/digits
+  are kept (never force-stripped to ASCII) so an accented or non-Latin
+  name is compared on its own real characters, not silently discarded -
+  this is deliberately looser than normalizeForComparison's own
+  ASCII-only allowlist, but only for names, and only regarding
+  separator/diacritic-mark punctuation, never regarding which letters are
+  present.
+
+  RC follow-up (Known Limitation fix): the version of this comment above
+  this line originally described a fully-compacted (all-whitespace-
+  removed) substring comparison. That was confirmed, via a dedicated
+  test added afterward, to have a real false-positive: compacting "Ann A
+  Lee" (a genuine middle initial) removes the space on both sides of the
+  "A", producing "annalee" - byte-identical to compact("Anna Lee"), a
+  DIFFERENT person's name, because the middle initial's own letter
+  happens to complete "Ann" into "Anna" once every separator is
+  discarded. The compact-substring design is gone; matching is now
+  token-array based (see tokenizeApplicantName/containsApplicantNameTokens
+  below) - a middle initial becomes its own counted token
+  ("ann","a","lee" - 3 tokens), never silently absorbed into a
+  neighboring word, so it can no longer be mistaken for a shorter name
+  that happens to share the same letters.
+
+  normalizeApplicantName() itself is UNCHANGED by this fix - still NFKC
+  normalization, lowercasing, apostrophe/hyphen normalization to a single
+  space, and Unicode letters/digits kept (never force-stripped to
+  ASCII/never dropping a real letter). Only what happens AFTER
+  normalization (compacting vs. tokenizing) changed.
+*/
+export function normalizeApplicantName(
+  value: string
+): string {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[’‘‚‛`´]/g, "'")
+    .replace(/['’]/g, "")
+    .replace(/[‐-‒–—―－]/g, "-")
+    .replace(/[-\s]+/g, " ")
+    .replace(/[^\p{L}\p{N} ]+/gu, "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/*
+  Splits normalizeApplicantName()'s own space-separated output into real
+  word tokens, in order. Token COUNT is the whole point of this fix -
+  "Kim-Lee"/"Kim Lee" both become ["kim","lee"] (2 tokens: the separator
+  is real, so it stays a real word boundary), while "KimLee" becomes
+  ["kimlee"] (1 token: there was never a separator there to begin with,
+  in the actual source text). Nothing here decides whether two token
+  arrays "match" - that is containsApplicantNameTokens's job below.
+*/
+function tokenizeApplicantName(
+  value: string
+): string[] {
+  return normalizeApplicantName(value)
+    .split(" ")
+    .filter(Boolean);
+}
+
+/*
+  Searches for `expectedTokens` (the applicant's real name, tokenized)
+  anywhere inside `fullTextTokens` (a full generated resume, tokenized
+  the same way). Two shapes are checked:
+
+  1. An exact, same-order, same-COUNT run of tokens anywhere in the
+     document. This is the common case and the one that actually
+     enforces the fix: a 3-token source name ("Ann A Lee") can only
+     match another exact 3-token run - it is never compared against a
+     2-token run ("Anna Lee") by first collapsing away the token
+     boundary, which is exactly what the old compact-substring
+     comparison did. Different token counts are simply never the same
+     person, UNLESS shape 2 below applies.
+
+  2. A narrow, deliberate bridge for the ONE real case where a genuine
+     separator/no-separator difference legitimately changes the token
+     count: when the applicant's name has 2+ tokens but the resume
+     writes it as a single run-together word ("Kim-Lee" -> "KimLee"), or
+     the reverse (source is a single word, resume adds a space/hyphen).
+     This only ever fires when exactly ONE side is a single token and
+     that single token is character-for-character equal to the OTHER
+     side's tokens concatenated with no separator - it can never trigger
+     when both sides already have 2+ tokens (that shape is precisely the
+     middle-initial collision this fix closes, so it is deliberately
+     excluded, not just accidentally missed).
+*/
+function containsApplicantNameTokens(
+  fullTextTokens: string[],
+  expectedTokens: string[]
+): boolean {
+  if (expectedTokens.length === 0) {
+    return true;
+  }
+
+  if (expectedTokens.length > 1) {
+    for (
+      let start = 0;
+      start + expectedTokens.length <= fullTextTokens.length;
+      start++
+    ) {
+      if (
+        expectedTokens.every(
+          (token, offset) => fullTextTokens[start + offset] === token
+        )
+      ) {
+        return true;
+      }
+    }
+
+    // Bridge: the resume ran the whole name together with no separator.
+    const joinedExpected = expectedTokens.join("");
+    return fullTextTokens.some((token) => token === joinedExpected);
+  }
+
+  // expectedTokens.length === 1 - the reverse bridge: the resume may
+  // spell a single-word source name as a short run of separated tokens
+  // ("KimLee" -> "Kim Lee"). Bounded by the target token's own character
+  // length (never an unbounded/arbitrary window), so this stays cheap
+  // even on a long resume.
+  const target = expectedTokens[0];
+  for (let start = 0; start < fullTextTokens.length; start++) {
+    let joined = "";
+    for (let end = start; end < fullTextTokens.length; end++) {
+      joined += fullTextTokens[end];
+      if (joined.length > target.length) {
+        break;
+      }
+      if (joined === target) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function includesApplicantName(
+  fullText: string,
+  expectedName: string
+): boolean {
+  const expectedTokens = tokenizeApplicantName(expectedName);
+  if (expectedTokens.length === 0) {
+    return true;
+  }
+
+  const fullTextTokens = tokenizeApplicantName(fullText);
+  return containsApplicantNameTokens(fullTextTokens, expectedTokens);
+}
+
 function hasSectionHeading(
   document: string,
   headings: string[]
@@ -353,9 +549,119 @@ function hasSectionHeading(
   );
 }
 
-export function extractJson(
+/*
+  Section headings this exact resume format can produce (per the
+  "OUTPUT FORMAT" and "CAREER MEMORY OPTIONAL SECTIONS" rules in
+  generateCore.ts's own prompt) - used only to find where the SKILLS
+  section ends. Deliberately a small fixed whitelist rather than a
+  generic "line is fully uppercase" heuristic: an all-caps acronym
+  skill on its own line (e.g. "SQL", "AWS") would otherwise be
+  misdetected as the start of the next section.
+*/
+const KNOWN_RESUME_SECTION_HEADINGS = new Set([
+  "PROFESSIONAL SUMMARY",
+  "SKILLS",
+  "PROFESSIONAL EXPERIENCE",
+  "EDUCATION",
+  "CERTIFICATIONS",
+  "LANGUAGES",
+  "PROJECTS",
+  "VOLUNTEER EXPERIENCE",
+  "CAREER GOALS",
+  "REFERENCES",
+]);
+
+/*
+  Returns the non-empty lines between the "SKILLS" heading and the next
+  known section heading (or end of document) - i.e. the individual skill
+  entries as the AI actually rendered them. Used only to check skill
+  preservation below; not a general-purpose section parser (that lives
+  in lib/brand/sectionParser.ts, untouched by this generatePackage code).
+*/
+function extractSkillsSectionLines(
+  resume: string
+): string[] {
+  const lines = resume.split(/\r?\n/);
+  const headingIndex = lines.findIndex(
+    (line) => line.trim() === "SKILLS"
+  );
+
+  if (headingIndex === -1) {
+    return [];
+  }
+
+  const entries: string[] = [];
+
+  for (
+    let i = headingIndex + 1;
+    i < lines.length;
+    i++
+  ) {
+    const trimmed = lines[i].trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    if (
+      KNOWN_RESUME_SECTION_HEADINGS.has(
+        trimmed
+      )
+    ) {
+      break;
+    }
+
+    entries.push(trimmed);
+  }
+
+  return entries;
+}
+
+/*
+  Case-folds and trims only - deliberately does NOT strip "/", "&", "+",
+  "-", ".", parentheses, or collapse internal whitespace the way
+  normalizeForComparison() above does. Those characters can be part of a
+  skill's actual identity (e.g. "Excel/Google Sheets", "R&D", "C++"), so
+  stripping them would make two genuinely different skill strings compare
+  as equal and defeat the whole point of this check.
+*/
+function normalizeSkillEntry(
+  value: string
+): string {
+  return value.trim().toLowerCase();
+}
+
+/*
+  Exact-entry match only (never substring/includes) - a skill fact is
+  "preserved" only if some single line in the SKILLS section equals it
+  exactly (case-insensitive). This is what makes "SQL" not match a line
+  that says "NoSQL", and what makes "Excel/Google Sheets" split across
+  two lines ("Excel" / "Google Sheets") correctly fail rather than
+  loosely pass.
+*/
+function skillEntryPreserved(
+  skillLines: string[],
+  requiredSkill: string
+): boolean {
+  const target = normalizeSkillEntry(requiredSkill);
+
+  return skillLines.some(
+    (line) => normalizeSkillEntry(line) === target
+  );
+}
+
+/*
+  Performance Optimization Round 4 - generic-ized so the same brace-slice
+  parsing algorithm (unchanged) can be reused for both the Resume+Analysis
+  call's response shape (ResumeAnalysisPackage) and the Cover Letter+Email
+  call's response shape (CoverLetterEmailPackage), not just the original
+  combined GeneratedPackage shape. Defaulting the type parameter to
+  GeneratedPackage keeps every pre-existing call site (which never passed
+  a type argument) byte-identical in behavior.
+*/
+export function extractJson<T = GeneratedPackage>(
   text: string
-): GeneratedPackage {
+): T {
   const cleaned = String(
     text || ""
   )
@@ -384,7 +690,7 @@ export function extractJson(
       first,
       last + 1
     )
-  ) as GeneratedPackage;
+  ) as T;
 }
 
 /* =========================================================
@@ -984,6 +1290,15 @@ export function buildCareerMemoryManifest(
         })
         .filter(Boolean),
 
+    /*
+      entries.skills (from getCareerMemoryEntries) is already the
+      career_memory skills array with only trim()/empty-filter applied -
+      no splitting or rewriting - so it can be used verbatim as the
+      atomic fact list the AI must preserve one-per-line in SKILLS.
+    */
+    requiredSkillsFacts:
+      entries.skills,
+
     requiredLanguageFacts:
       entries.languages
         .map((item: any) => {
@@ -1441,6 +1756,23 @@ export function buildUploadedResumeManifest(
         ]
       ),
 
+    /*
+      Only populated when parsedSkills is actually an array of strings -
+      same shape parsedSkills is expected to have for skillsExist above.
+      A non-array value (e.g. a raw comma string) has no reliable
+      per-item boundary to split on, so it's left empty rather than
+      guessed at.
+    */
+    requiredSkillsFacts:
+      Array.isArray(parsedSkills)
+        ? parsedSkills
+            .filter(
+              (item: unknown): item is string =>
+                typeof item === "string" && item.trim().length > 0
+            )
+            .map((item: string) => item.trim())
+        : [],
+
     requiredLanguageFacts:
       languages
         .map((item: any) => {
@@ -1495,6 +1827,67 @@ export function buildUploadedResumeManifest(
    SOURCE STRUCTURE VALIDATION
 ========================================================= */
 
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/*
+  Protected Claims date-range policy (real, evidenced bug - see the
+  session's own root-cause report): a source resume's own date range
+  (e.g. "Mar 2021 to Present") and GPT's generated rewrite of the SAME
+  range (e.g. "Mar 2021 - Present"/"Mar 2021 – Present"/"Mar 2021 —
+  Present") describe the identical period - only the separator's WORD
+  vs SYMBOL form differs, confirmed via real instrumented Generate
+  Package runs where GPT consistently rewrites "to" as a dash while
+  never changing the month/year/Present token on either side.
+  includesLoose()/normalizeForComparison() above already unify dash
+  VARIANTS (‐-‒–—―－ -> "-") but never unify the WORD "to" with a dash -
+  that gap is this function's only job, and ONLY for `item.dates` (see
+  validateFactEntry below); employer/title/name/email/phone/school/
+  program/skills checks all keep calling includesLoose() directly,
+  completely unchanged.
+
+  Deliberately NOT a blanket "strip any separator and compare halves"
+  relaxation (would let a genuinely different date range wrongly pass,
+  e.g. by matching the wrong half against the wrong token) - only the
+  two tokens on either side of the ORIGINAL fact's own separator are
+  extracted (via DATE_RANGE_PATTERN, restricted to real month-name/
+  4-digit-year/"present"/"current" tokens so it never mis-splits on an
+  unrelated hyphen inside other text), then searched for verbatim,
+  joined by EITHER separator form, in the generated text. A changed
+  month, changed year, or "Present" swapped for a real end year fails to
+  match on the token itself and is still correctly rejected exactly as
+  before - this only widens what counts as an equivalent SEPARATOR
+  between two otherwise-unchanged date tokens.
+*/
+const DATE_RANGE_MONTH = "jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec";
+const DATE_RANGE_TOKEN = `(?:(?:${DATE_RANGE_MONTH})\\.?\\s*\\d{4}|\\d{4}|present|current)`;
+const DATE_RANGE_PATTERN = new RegExp(`^(${DATE_RANGE_TOKEN})\\s*(?:to|-)\\s*(${DATE_RANGE_TOKEN})$`);
+const DATE_RANGE_SEPARATOR_ALTERNATION = "(?:to|-)";
+
+function datesMatchLoosely(
+  resume: string,
+  expectedDateRange: string
+): boolean {
+  if (includesLoose(resume, expectedDateRange)) {
+    return true;
+  }
+
+  const normalizedExpected = normalizeForComparison(expectedDateRange);
+  const rangeMatch = normalizedExpected.match(DATE_RANGE_PATTERN);
+  if (!rangeMatch) {
+    return false;
+  }
+
+  const [, start, end] = rangeMatch;
+  const normalizedResume = normalizeForComparison(resume);
+  const equivalentRangePattern = new RegExp(
+    `${escapeRegExpLiteral(start)}\\s*${DATE_RANGE_SEPARATOR_ALTERNATION}\\s*${escapeRegExpLiteral(end)}`
+  );
+
+  return equivalentRangePattern.test(normalizedResume);
+}
+
 function validateFactEntry(
   resume: string,
   item: ResumeFact,
@@ -1528,7 +1921,7 @@ function validateFactEntry(
 
   if (
     item.dates &&
-    !includesLoose(
+    !datesMatchLoosely(
       resume,
       item.dates
     )
@@ -1549,15 +1942,26 @@ export function validateSourceIntegrity(
     manifest.sourceType ===
     "upload"
   ) {
+    /*
+      Phase5 Beta stabilization - name matching now uses the dedicated
+      includesApplicantName()/normalizeApplicantName() helpers (defined
+      above, near includesLoose()) instead of includesLoose() directly,
+      so a real hyphen/space/no-separator variant of the same name (e.g.
+      a romanized name written "Kim-Lee"/"Kim Lee"/"KimLee") is no longer
+      a false-positive failure - see those helpers' own comment for the
+      real, evidenced case this fixes. Email/phone below are deliberately
+      left on includesLoose() unchanged, per this phase's own instruction
+      not to apply name-only normalization to non-name fields.
+    */
     if (
       manifest.applicant.name &&
-      !includesLoose(
+      !includesApplicantName(
         resume,
         manifest.applicant.name
       )
     ) {
       errors.push(
-        `Applicant name is missing: ${manifest.applicant.name}`
+        "Applicant name is missing from generated resume."
       );
     }
 
@@ -1569,7 +1973,7 @@ export function validateSourceIntegrity(
       )
     ) {
       errors.push(
-        `Applicant email is missing: ${manifest.applicant.email}`
+        "Applicant email is missing from generated resume."
       );
     }
 
@@ -1581,7 +1985,7 @@ export function validateSourceIntegrity(
       )
     ) {
       errors.push(
-        `Applicant phone is missing: ${manifest.applicant.phone}`
+        "Applicant phone is missing from generated resume."
       );
     }
   }
@@ -1636,7 +2040,7 @@ export function validateSourceIntegrity(
 
       if (
         item.dates &&
-        !includesLoose(
+        !datesMatchLoosely(
           resume,
           item.dates
         )
@@ -1687,6 +2091,33 @@ export function validateSourceIntegrity(
       ) {
         errors.push(
           `Certification is missing: ${item}`
+        );
+      }
+    }
+  );
+
+  /*
+    Skill atomicity: each requiredSkillsFacts entry is one career_memory
+    array element and must appear as exactly one line inside the SKILLS
+    section - not split across two lines, not merged with another skill,
+    not paraphrased. Checked within the SKILLS section only (via
+    extractSkillsSectionLines) so a skill word appearing incidentally in
+    the Summary or Experience text can't cause a false pass.
+  */
+  const skillSectionEntries =
+    extractSkillsSectionLines(resume);
+
+  manifest.requiredSkillsFacts.forEach(
+    (skill) => {
+      if (
+        skill &&
+        !skillEntryPreserved(
+          skillSectionEntries,
+          skill
+        )
+      ) {
+        errors.push(
+          `Required skill fact was not preserved exactly: ${skill}`
         );
       }
     }
@@ -1869,7 +2300,9 @@ export function validateSourceIntegrity(
   );
 
   if (errors.length > 0) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "SOURCE_INTEGRITY_FAILED",
+      "validateSourceIntegrity",
       `Source-integrity validation failed:\n${errors.join(
         "\n"
       )}`
@@ -2028,7 +2461,9 @@ export function validateProtectedClaims(
   );
 
   if (errors.length > 0) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "PROTECTED_CLAIMS_FAILED",
+      "validateProtectedClaims",
       `High-risk claim validation failed:\n${errors.join(
         "\n"
       )}`
@@ -2088,13 +2523,17 @@ export function validateDocumentQuality(
   if (
     typeof text !== "string"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "DOCUMENT_QUALITY_FAILED",
+      "validateDocumentQuality",
       `${name} is not a string.`
     );
   }
 
   if (!text.trim()) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "DOCUMENT_QUALITY_FAILED",
+      "validateDocumentQuality",
       `${name} is empty.`
     );
   }
@@ -2271,7 +2710,9 @@ export function validateDocumentQuality(
   }
 
   if (errors.length > 0) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "DOCUMENT_QUALITY_FAILED",
+      "validateDocumentQuality",
       `${name} quality validation failed:\n${errors.join(
         "\n"
       )}`
@@ -2762,7 +3203,9 @@ export function validateCanadianScope(
     context.country !==
     "Canada"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "CANADIAN_SCOPE_FAILED",
+      "validateCanadianScope",
       "Career Élan currently supports Canadian job postings only."
     );
   }
@@ -2771,7 +3214,9 @@ export function validateCanadianScope(
     context.sector ===
     "federal"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "CANADIAN_SCOPE_FAILED",
+      "validateCanadianScope",
       "Canadian federal government applications are not currently supported."
     );
   }
@@ -2785,7 +3230,9 @@ export function validateCanadianScope(
       context.sector
     )
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "CANADIAN_SCOPE_FAILED",
+      "validateCanadianScope",
       "The job posting could not be classified as a supported Canadian private, provincial, or municipal posting."
     );
   }
@@ -2794,7 +3241,9 @@ export function validateCanadianScope(
     context.supportedByCareerElan !==
     true
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "CANADIAN_SCOPE_FAILED",
+      "validateCanadianScope",
       "This job posting is outside Career Élan's supported scope."
     );
   }
@@ -2882,7 +3331,32 @@ export function validateAnalysisLogic(
   const verification =
     analysis.verification;
 
+  /*
+    Phase5 Gate Blocker 1 root-cause fix (real, evidenced - see the
+    session's own investigation): this used to fire from `requirements`
+    ALONE, with no gate on whether the role is actually regulated -
+    inconsistent with `missingLicence` right below it, which correctly
+    gates on `regulatedRole.isRegulated === true`. Real instrumented
+    output (standard_pdf's Operations Analyst run) showed the AI's own
+    `verification.requirements` routinely includes two generic
+    boilerplate entries - "Licences or regulated professional status"
+    and "Security screening or clearance" - marked "not_supported" for
+    completely ordinary, non-regulated private-sector jobs (the source
+    resume simply never mentions a licence/clearance, because the job
+    never asked for one), while the SAME analysis call's own
+    `regulatedRole.isRegulated` correctly says `false` for that exact
+    job. Without this gate, those two boilerplate entries alone were
+    enough to block ANY "strong" match rating for most ordinary jobs -
+    not a real regulated-qualification gap. Gating on `isRegulated`
+    (the AI's own dedicated, purpose-built signal for "is this role
+    actually regulated") makes this check fire only for genuinely
+    regulated roles, exactly matching `missingLicence`'s existing,
+    already-correct semantics - never loosened for a role the AI itself
+    marked regulated.
+  */
   const missingLegalRequirement =
+    verification.regulatedRole
+      .isRegulated === true &&
     verification.requirements.some(
       (item) =>
         item.category ===
@@ -2925,7 +3399,9 @@ export function validateAnalysisLogic(
       .applyRecommendation ===
       "recommended"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "ANALYSIS_LOGIC_FAILED",
+      "validateAnalysisLogic",
       "A critical mismatch cannot have a recommended application decision."
     );
   }
@@ -2938,7 +3414,9 @@ export function validateAnalysisLogic(
     analysis.matchLevel ===
       "strong"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "ANALYSIS_LOGIC_FAILED",
+      "validateAnalysisLogic",
       "The application cannot be rated strong while a mandatory regulated qualification is missing."
     );
   }
@@ -2949,7 +3427,9 @@ export function validateAnalysisLogic(
       .applyRecommendation ===
       "recommended"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "ANALYSIS_LOGIC_FAILED",
+      "validateAnalysisLogic",
       "A regulated role with a missing required licence cannot be recommended."
     );
   }
@@ -2959,7 +3439,9 @@ export function validateAnalysisLogic(
     analysis.matchLevel ===
       "strong"
   ) {
-    throw new Error(
+    throw new GenerationValidationError(
+      "ANALYSIS_LOGIC_FAILED",
+      "validateAnalysisLogic",
       "The application cannot be rated strong while a mandatory bilingual requirement is not fully verified."
     );
   }
@@ -3046,13 +3528,93 @@ export function safeResumeResolutionMessage(
   }
 }
 
+/*
+  Phase5 Beta stabilization - per-validator error codes. Previously every
+  validator in this file threw a plain Error, and classifyGenerationError
+  below collapsed all of them into one generic VALIDATION_FAILED code/
+  summary - real operational logs could not tell which validator actually
+  fired without reading raw server console output. ValidatorErrorCode is
+  the closed set of codes a validator throw can now carry; ValidatorName
+  is the fixed label recorded alongside it purely for server-side
+  logSafeError() output (never sent to the client, never stored in the
+  DB - see GenerationValidationError's own comment).
+
+  REQUIREMENT_EVIDENCE_FAILED exists in this set for completeness with
+  the other five validators, but is currently unreachable:
+  validateRequirementEvidence() (below) only ever pushes to a warnings
+  array and self-corrects the affected field - it has no throw path
+  today. Disclosed here rather than silently omitted, and not changed by
+  this phase (changing that function's behavior is out of this phase's
+  scope).
+*/
+export type ValidatorErrorCode =
+  | "SOURCE_INTEGRITY_FAILED"
+  | "PROTECTED_CLAIMS_FAILED"
+  | "CANADIAN_SCOPE_FAILED"
+  | "REQUIREMENT_EVIDENCE_FAILED"
+  | "ANALYSIS_LOGIC_FAILED"
+  | "DOCUMENT_QUALITY_FAILED";
+
+/*
+  Typed validation error carrying a stable, validator-specific code.
+  `internalReason` becomes this Error's own `.message` - the ONLY place a
+  validator's descriptive text (which may reference resume facts, e.g. a
+  school name) is kept. That message reaches the server console ONLY via
+  the existing logSafeError() call in generateCore.ts's catch block
+  (unchanged by this phase) - it is never persisted to the applications
+  table and never returned to the client. The DB/client only ever see
+  `code`, mapped through the fixed `summaries` table in
+  classifyGenerationError() below - the same safety guarantee that
+  function's own original comment already documented for the generic
+  case, now preserved per-validator instead of collapsed into one bucket.
+*/
+export class GenerationValidationError extends Error {
+  readonly code: ValidatorErrorCode;
+  readonly validator: string;
+
+  constructor(
+    code: ValidatorErrorCode,
+    validator: string,
+    internalReason: string
+  ) {
+    super(internalReason);
+    this.name = "GenerationValidationError";
+    this.code = code;
+    this.validator = validator;
+  }
+}
+
 export type GenerationErrorCode =
   | "OPENAI_TIMEOUT"
   | "OPENAI_RATE_LIMITED"
   | "OPENAI_ERROR"
   | "VALIDATION_FAILED"
   | "MALFORMED_AI_RESPONSE"
-  | "UNKNOWN";
+  | "UNKNOWN"
+  | ValidatorErrorCode;
+
+/*
+  Phase5 Beta stabilization - the single-retry decision for generateCore.ts's
+  OpenAI call, factored out as a pure predicate purely so it can be unit
+  tested directly (generateCore.ts's own OpenAI client is a module-level
+  singleton, not easily mocked) without duplicating the policy in a test
+  file. Retries ONLY on a genuine `APIConnectionTimeoutError` (never
+  RateLimitError/429, never any other APIError, never a JSON parse
+  failure), and only while `attempt` is still below `maxAttempts` - see
+  generateCore.ts's own MAX_OPENAI_ATTEMPTS/OPENAI_TIMEOUT_RETRY_DELAY_MS
+  comment for why this is a single fixed-delay retry, not a backoff
+  system.
+*/
+export function shouldRetryOpenAiTimeout(
+  error: unknown,
+  attempt: number,
+  maxAttempts: number
+): boolean {
+  return (
+    error instanceof APIConnectionTimeoutError &&
+    attempt < maxAttempts
+  );
+}
 
 /*
   Maps a caught error to a small closed code + a summary drawn only from the
@@ -3062,15 +3624,16 @@ export type GenerationErrorCode =
   a stack trace, or AI/prompt content into these two columns.
 
   Ordering matters: APIConnectionTimeoutError and RateLimitError are both
-  subclasses of APIError, so they're checked first. Every validator in this
-  file (validateSourceIntegrity, validateProtectedClaims,
-  validateDocumentQuality, validateCanadianScope,
-  validateRequirementEvidence, validateAnalysisLogic) throws a plain Error
-  with its own message text with no shared keyword, so rather than
-  string-matching each one, anything that reaches this function as a plain
-  Error (not an OpenAI SDK error, not a JSON parse failure) is - by this
-  route's own structure, since it only runs after the OpenAI call already
-  succeeded - definitionally one of those content-quality checks.
+  subclasses of APIError, so they're checked first, and GenerationValidationError
+  (a validator's own typed throw) is checked before the generic
+  `instanceof Error` fallback so a validator's specific code always wins
+  over the generic VALIDATION_FAILED bucket. Any OTHER plain Error this
+  route's own structure can still produce (e.g. the AI-response
+  shape/required-field check in generateCore.ts, which throws a plain
+  Error rather than a GenerationValidationError) still falls through to
+  the original generic VALIDATION_FAILED code/summary, unchanged from
+  before this phase - only the six validators above were asked to be
+  differentiated, nothing else in this classification was widened.
 */
 export function classifyGenerationError(error: unknown): {
   code: GenerationErrorCode;
@@ -3086,6 +3649,8 @@ export function classifyGenerationError(error: unknown): {
     code = "OPENAI_ERROR";
   } else if (error instanceof SyntaxError) {
     code = "MALFORMED_AI_RESPONSE";
+  } else if (error instanceof GenerationValidationError) {
+    code = error.code;
   } else if (error instanceof Error) {
     code = "VALIDATION_FAILED";
   }
@@ -3103,6 +3668,18 @@ export function classifyGenerationError(error: unknown): {
       "The AI response could not be parsed into a valid package.",
     UNKNOWN:
       "An unexpected error occurred while generating the package.",
+    SOURCE_INTEGRITY_FAILED:
+      "The generated resume did not preserve required applicant details. Please try again.",
+    PROTECTED_CLAIMS_FAILED:
+      "The generated package changed protected resume facts and was stopped.",
+    CANADIAN_SCOPE_FAILED:
+      "The generated package did not meet the required job-scope rules.",
+    REQUIREMENT_EVIDENCE_FAILED:
+      "The generated package included unsupported requirement claims.",
+    ANALYSIS_LOGIC_FAILED:
+      "The generated package failed an analysis consistency check.",
+    DOCUMENT_QUALITY_FAILED:
+      "The generated document did not pass the final quality check.",
   };
 
   return { code, summary: summaries[code] };
@@ -3237,4 +3814,946 @@ export function fallbackPackage(
         defaultVerification(),
     },
   };
+}
+
+/*
+  Document Preservation Engine (DPE) Phase 4B completion - minimal, official
+  public contract extension for a Layout Compression Request. This is DATA
+  the Document Preservation Engine hands to Generate Package; it is never
+  assembled into a prompt string by the DPE itself (forbidden - "DPE는
+  Prompt를 조합하지 않는다"). Only generateCore.ts's own
+  buildLayoutCompressionPromptBlock() below turns it into instruction text,
+  and only as an ADDITIONAL block appended to the existing, unchanged
+  prompt - never replacing SourceManifest/Protected Claims/Never-invent/
+  Preserve rules, all of which appear earlier in the same prompt regardless
+  of this block's presence.
+*/
+export type GenerationMode = "standard" | "layout_compression";
+
+export type LayoutConstraints = {
+  targetPageCount?: number;
+  maxRenderedHeightBySection?: Record<string, number>;
+  maxBulletCountByExperience?: number;
+  overflowSections?: string[];
+  sectionCharacterBudgets?: Record<string, number>;
+  preserveProtectedClaims?: boolean;
+};
+
+/*
+  Every instruction below stays inside the SAME rewrite freedoms already
+  granted earlier in the prompt ("tailor the Professional Summary, reorder
+  bullets, rewrite existing work more professionally... dedupe, trim
+  non-essential modifiers, tighten long bullets, merge similar bullets, cut
+  unnecessary sentence structure") - this block never grants a new freedom
+  (e.g. it never says "you may delete a job" or "you may omit a
+  certification"), it only asks that those SAME existing freedoms be
+  applied more aggressively, in priority order, to fit a page/height/bullet
+  budget. Every "Never invent"/"Preserve"/Protected Claims rule stated
+  earlier in the prompt still applies unchanged and is explicitly restated
+  as non-negotiable here.
+*/
+export function buildLayoutCompressionPromptBlock(
+  constraints: LayoutConstraints
+): string {
+  const lines: string[] = [
+    "==================================================",
+    "LAYOUT COMPRESSION REQUEST",
+    "==================================================",
+    "",
+    "The previous attempt to render this resume did not fit the required layout.",
+    "Rewrite the resume more concisely so it fits, using ONLY the rewriting",
+    "freedoms already described above (tailor the summary, reorder bullets,",
+    "rewrite existing work more professionally, use truthful ATS keywords).",
+    "This section adds a stricter LENGTH budget on top of those same rules -",
+    "it grants no new freedom to delete, merge employers, or omit a",
+    "qualification.",
+    "",
+    "Apply these techniques, in this priority order, only as far as needed to",
+    "fit the budget below:",
+    "1. Remove duplicated or redundant phrasing across bullets.",
+    "2. Trim non-essential adjectives/adverbs that do not carry a fact.",
+    "3. Tighten long bullets into a single concise sentence.",
+    "4. Merge two bullets describing closely related work into one, only",
+    "   when doing so loses no distinct fact, employer, date, or number.",
+    "5. Reduce unnecessary sentence structure (e.g. redundant lead-in",
+    "   phrases) while keeping every fact intact.",
+    "",
+    "Do NOT, under any circumstance, as a way to save space:",
+    "- delete an employer, job title, employment date, education entry,",
+    "  certification, licence, or quantified achievement",
+    "- remove a skill listed in requiredSkillsFacts",
+    "- shorten a company name, job title, or date range",
+    "- omit a section that has real content",
+    "",
+  ];
+
+  if (constraints.targetPageCount) {
+    lines.push(
+      `Target: the resume should fit within approximately ${constraints.targetPageCount} page(s) when rendered.`
+    );
+  }
+
+  if (constraints.maxBulletCountByExperience) {
+    lines.push(
+      `Where reasonable without losing a fact, keep each PROFESSIONAL EXPERIENCE entry to at most ${constraints.maxBulletCountByExperience} bullets by merging closely related bullets (rule 4 above) - never by deleting a bullet's underlying fact.`
+    );
+  }
+
+  if (constraints.overflowSections && constraints.overflowSections.length > 0) {
+    lines.push(
+      `These sections specifically overflowed the available space and most need tightening: ${constraints.overflowSections.join(", ")}.`
+    );
+  }
+
+  if (
+    constraints.sectionCharacterBudgets &&
+    Object.keys(constraints.sectionCharacterBudgets).length > 0
+  ) {
+    lines.push("Approximate character budgets per section (guidance, not a hard cutoff that may drop facts):");
+    for (const [section, budget] of Object.entries(constraints.sectionCharacterBudgets)) {
+      lines.push(`- ${section}: ~${budget} characters`);
+    }
+  }
+
+  if (
+    constraints.maxRenderedHeightBySection &&
+    Object.keys(constraints.maxRenderedHeightBySection).length > 0
+  ) {
+    lines.push("Approximate rendered-height budgets per section (guidance only, from real measured layout):");
+    for (const [section, height] of Object.entries(constraints.maxRenderedHeightBySection)) {
+      lines.push(`- ${section}: ~${Math.round(height)}px`);
+    }
+  }
+
+  lines.push(
+    "",
+    "Every rule stated earlier in this prompt (Never invent, Preserve every",
+    "existing employer/job title/date/education/certification/quantified",
+    "achievement, Protected Claims) remains fully in force and takes priority",
+    "over fitting this length budget. If the two conflict, preserving the",
+    "facts wins and the document may remain longer than requested."
+  );
+
+  return lines.join("\n");
+}
+
+/* =========================================================
+   TWO-CALL GENERATION PROMPTS (Performance Optimization Round 4)
+
+   Splits the single combined prompt that used to live inline in
+   generateCore.ts (Resume + Cover Letter + Email Draft + PackageAnalysis,
+   one OpenAI call) into two independent prompts, so Resume + Analysis can
+   finish, validate, and go through DPE before Cover Letter + Email are
+   generated in a second call. Every instructional sentence below is
+   copied verbatim from that original single-call prompt - no wording was
+   reworded or improved. A section is included only where it is copied
+   whole (never spliced mid-sentence); a section is omitted entirely
+   (never partially reworded) when it only concerns a document/field the
+   given call does not produce:
+   - Call 2 omits CAREER MEMORY OPTIONAL SECTIONS, JOB POSTING ANALYSIS,
+     FOUR ANALYSIS CARDS, MATCH SCORE, and CANADIAN SCOPE (all
+     PackageAnalysis-only, and Call 2 never receives or produces
+     PackageAnalysis, per this round's explicit instruction).
+   - Call 2's REGULATED AND HIGH-RISK REQUIREMENTS keeps only its first
+     paragraph (the "never state X unless the PRIMARY RESUME supports it"
+     rule, which applies to any document); the licenceStatus/matchLevel/
+     applyRecommendation/scheduleRequirement paragraphs are omitted
+     wholesale since those fields don't exist in Call 2's output.
+   - Call 2's SINGLE FACTUAL SOURCE drops only the "Resume source selected
+     by the user: ${resumeSource}" line and the two "If the source is
+     career_memory/upload: ... SOURCE MANIFEST" bullets, because Call 2
+     has no resumeSource/SourceManifest concept at all (Round 3's
+     dependency analysis found SOURCE MANIFEST unused by Cover Letter/
+     Email logic) - every other sentence in that block is unchanged.
+   - The shared role header's second sentence ("You must first analyze...
+     before you write the resume, cover letter, and application email") is
+     dropped for Call 2 only, because it no longer describes Call 2's
+     actual task (Call 2 never analyzes and never writes the resume) -
+     keeping it would misdirect the model into expecting an output slot
+     that doesn't exist in Call 2's schema. This is the one line that does
+     not appear verbatim-in-full in both prompts; every other line either
+     appears in full or is omitted in full.
+   - The OUTPUT JSON shape is trimmed to only the fields each call
+     actually produces (structural necessity of the split itself, not a
+     wording change to any instruction) - the "packageAnalysis" nested
+     object and the Resume writing/formatting rules are byte-identical to
+     the original prompt wherever they appear.
+*/
+
+export function buildResumeAnalysisPrompt(params: {
+  resumeSource: "career_memory" | "upload";
+  manifest: SourceManifest;
+  resumeText: string;
+  analysis: unknown;
+  jobText: string;
+  layoutCompressionBlock: string;
+}): string {
+  const {
+    resumeSource,
+    manifest,
+    resumeText,
+    analysis,
+    jobText,
+    layoutCompressionBlock,
+  } = params;
+
+  return `
+You are Career Élan's Canadian resume strategist, ATS specialist, recruiter, and application writer.
+
+You must first analyze the complete job posting. Only after the job analysis is complete may you write the resume, cover letter, and application email.
+
+==================================================
+SINGLE FACTUAL SOURCE
+==================================================
+
+Resume source selected by the user:
+
+${resumeSource}
+
+The PRIMARY RESUME below is the only factual source.
+
+If the source is career_memory:
+- use only the Career Memory resume represented by the PRIMARY RESUME and SOURCE MANIFEST
+
+If the source is upload:
+- use only the selected uploaded resume represented by the PRIMARY RESUME and SOURCE MANIFEST
+
+The job posting is not evidence about the candidate.
+
+The existing cover letter is not a factual source. It may be used only as a tone and writing-style reference.
+
+Do not use unselected resumes or unrelated Career Memory information.
+
+Never invent:
+
+- companies
+- organizations
+- employers
+- job titles
+- employment dates
+- new responsibilities
+- new work experience
+- education
+- degrees
+- fields of study
+- certifications
+- licences
+- registrations
+- languages
+- language proficiency
+- software experience
+- equipment experience
+- technical experience
+- numerical achievements
+- citizenship
+- permanent residence
+- visas
+- work permits
+- work authorization
+- security clearances
+- regulated professional status
+
+You may professionally rewrite a responsibility that already exists.
+
+Example:
+
+Source:
+Answered phone inquiries.
+
+Allowed:
+Responded to client inquiries by phone and provided clear service guidance.
+
+Not allowed:
+Managed a national high-volume customer service centre.
+
+Do not add a number unless the number appears in the PRIMARY RESUME.
+
+==================================================
+CAREER MEMORY OPTIONAL SECTIONS
+==================================================
+
+The SOURCE MANIFEST determines which sections actually exist.
+
+A section exists only when its core identifying information is present.
+
+If sectionPresence.education is false:
+- do not create Education
+- do not create Academic Background
+- do not create Education and Training
+
+If sectionPresence.languages is false:
+- do not create Languages
+- do not create Language Skills
+- do not create Bilingual Skills
+
+If sectionPresence.certifications is false:
+- do not create Certifications
+- do not create Certificates
+- do not create Credentials
+- do not create Licences
+
+If sectionPresence.projects is false:
+- do not create Projects
+- do not create Project Experience
+
+If sectionPresence.careerGoals is false:
+- do not create Career Goals
+- do not create Career Objective
+- do not create Professional Objective
+- do not create Target Role
+
+If sectionPresence.volunteerExperience is false:
+- do not create a separate Volunteer Experience section
+
+A section may be partially completed.
+
+Include only fields actually entered by the user.
+
+Example:
+
+Education:
+- school: Seneca Polytechnic
+- program: Law Clerk
+- date: empty
+- GPA: empty
+- coursework: empty
+
+Allowed:
+Include Seneca Polytechnic and Law Clerk.
+
+Not allowed:
+Invent dates, GPA, coursework, awards, or graduation status.
+
+Do not treat these as valid sections:
+
+- Education containing only dates, GPA, or coursework with no school, program, degree, or field
+- Language containing only "Fluent" with no language name
+- Certification containing only issuer or date with no credential name
+- Project containing only dates with no project name or meaningful description
+
+A qualification mentioned by the user inside the source summary may remain in the summary.
+
+A summary mention alone does not authorize creating a new separate section.
+
+==================================================
+JOB POSTING ANALYSIS — DO THIS FIRST
+==================================================
+
+Before writing, analyze:
+
+- employer and sector
+- main business need
+- major responsibilities
+- mandatory requirements
+- preferred requirements
+- required years of experience
+- education and field-of-study requirements
+- certifications
+- licences
+- regulated professional status
+- security screening and clearance
+- bilingual or multilingual requirements
+- day shift
+- evening shift
+- night shift
+- rotating shift
+- weekend work
+- holiday work
+- driver's licence
+- travel or mobility requirements
+- required software
+- required equipment
+- technical skills
+- repeated ATS keywords
+
+Compare each important requirement to the PRIMARY RESUME and classify it as:
+
+- supported
+- partially_supported
+- not_supported
+- unclear
+
+Transferable experience is not direct proof of a mandatory technical or professional requirement.
+
+For supported or partially supported requirements:
+- sourceEvidence must be a short phrase appearing in the PRIMARY RESUME
+- source must be primary_resume
+
+For not_supported or unclear requirements:
+- sourceEvidence must be empty
+- source must be none
+
+==================================================
+DOCUMENT WRITING
+==================================================
+
+RESUME
+
+Return a complete plain-text resume.
+
+Preserve every existing:
+
+- applicant identity and contact information
+- company
+- organization
+- employer
+- job title
+- date
+- work-history entry
+- volunteer-history entry
+- education entry
+- certification
+- licence
+- language entry
+- project entry
+
+Preserve the order of work and volunteer history.
+
+You may:
+
+- tailor the Professional Summary
+- reorder skills
+- reorder bullets within the same role
+- rewrite existing work more professionally
+- use truthful ATS keywords
+- emphasize relevant duties
+- reduce emphasis on unrelated duties
+
+You may not:
+
+- delete factual history
+- move duties between employers
+- merge separate roles
+- change dates
+- change job titles
+- convert volunteer work into paid work
+- add missing qualifications
+- add missing shift experience
+- add missing software or equipment experience
+
+Do not output an empty section.
+
+==================================================
+OUTPUT FORMAT — FOUR RESUME SECTIONS
+==================================================
+
+The following formatting rules apply ONLY to the PROFESSIONAL EXPERIENCE,
+SKILLS, EDUCATION, and CERTIFICATIONS sections. They control formatting
+only - they never authorize inventing, dropping, or reordering a fact. If
+a date, school, employer, or issuer is missing from the PRIMARY RESUME,
+leave it out rather than inventing a placeholder.
+
+PROFESSIONAL EXPERIENCE
+
+Section heading must be exactly:
+PROFESSIONAL EXPERIENCE
+
+Each entry must use exactly this structure, in this order:
+
+Company Name
+Job Title | StartDate - EndDate
+- Bullet
+- Bullet
+
+- Line 1 is always the company/employer name.
+- Line 2 is always the job title, then " | " (space-pipe-space), then the
+  date range.
+- Never swap company and job title. Never guess which value is which.
+- Never put company and job title on the same line.
+- Never put the date on its own separate line.
+- Never use an em dash or hyphen between company and job title.
+- The separator before the date range is exactly " | ".
+- The separator inside the date range is exactly " - " (space-hyphen-space).
+- Use "Present" as the end date only when the source material actually
+  indicates the role is current or ongoing. If only a single date is
+  available with no such indication, output only that one date - do not
+  invent an end date or "Present".
+- Every description line must be a bullet starting with "- " (hyphen,
+  space). Never write plain prose lines with no bullet marker, and never
+  use "•", "*", or numbered lists.
+- No blank line directly after the Company/Title/Date header, before the
+  first bullet.
+- Exactly one blank line between two different experience entries.
+
+Example:
+
+PROFESSIONAL EXPERIENCE
+
+Northbridge Analytics
+Senior Business Analyst | 2021-02 - Present
+- Built executive dashboards that improved reporting visibility.
+- Led requirements gathering across business and engineering teams.
+
+SKILLS
+
+Section heading must be exactly:
+SKILLS
+
+Never use "CORE SKILLS" or any other heading variant.
+
+List exactly one skill per line. Do not use "|", ",", or ";" as
+separators. Do not use category labels such as "Technical Skills:",
+"Tools:", or "Programming:". Do not use bullet markers or numbers. Do not
+repeat the same skill twice. Do not output a blank skill line.
+
+Each entry in requiredSkillsFacts (see SOURCE MANIFEST) is a single
+atomic skill exactly as stored in Career Memory. Preserve it exactly, one
+line per entry. Do not treat "/", "&", "+", "-", ".", parentheses, or
+spaces inside a skill string as a delimiter to split it. Do not merge,
+abbreviate, expand, or rewrite a skill name, including for ATS
+optimization. For example, "Excel/Google Sheets" is one line, never
+"Excel" and "Google Sheets" on separate lines. "Agile/Scrum" is one line,
+never "Agile" and "Scrum" on separate lines.
+
+Example:
+
+SKILLS
+
+SQL
+Python
+AWS
+
+EDUCATION
+
+Section heading must be exactly:
+EDUCATION
+
+Each entry must use exactly this structure, in this order:
+
+School Name
+Degree or Program | StartDate - EndDate
+
+- Line 1 is always the school name.
+- Line 2 is always the degree/program, then " | ", then the date range.
+- Never swap school and degree/program.
+- Never split the date onto a third line.
+- Never combine school and degree on one line.
+- Exactly one blank line between two different education entries.
+- Never use bullets in this section.
+- If only one of the start/end dates is available, keep that one date and
+  do not invent the missing one.
+- If no date is available at all, omit the " | " and the date entirely -
+  output only the school name and degree/program.
+
+Example (with dates):
+
+EDUCATION
+
+University of Toronto
+Bachelor of Commerce, Business Analytics | 2014-09 - 2018-05
+
+Example (no dates available):
+
+EDUCATION
+
+University of Toronto
+Bachelor of Commerce, Business Analytics
+
+CERTIFICATIONS
+
+Section heading must be exactly:
+CERTIFICATIONS
+
+Each certification is exactly one line:
+
+Certification Name - Issuer, Year
+
+- The separator is exactly " - " using an ASCII hyphen. Never use an em
+  dash (—) or en dash (–).
+- If an issuer and a year are both available, put exactly ", " between
+  them.
+- One certification per line, no bullets, no blank line between entries.
+- If part of the information is missing, use only what is available:
+  - name and issuer only: Certification Name - Issuer
+  - name and year only: Certification Name, Year
+  - name only: Certification Name
+
+Example:
+
+CERTIFICATIONS
+
+Certified Business Analysis Professional - IIBA, 2023
+${layoutCompressionBlock}
+==================================================
+CANADIAN SCOPE
+==================================================
+
+Career Élan supports:
+
+- Canadian private-sector postings
+- Canadian provincial-government postings
+- Canadian municipal or local-government postings
+
+It does not support Canadian federal-government applications.
+
+Classify the posting as:
+
+- private
+- provincial
+- municipal
+- federal
+- unknown
+
+If federal:
+- sector must be federal
+- supportedByCareerElan must be false
+
+==================================================
+REGULATED AND HIGH-RISK REQUIREMENTS
+==================================================
+
+Never state that the candidate has:
+
+- citizenship
+- permanent residence
+- a work permit
+- authorization to work
+- security clearance
+- professional registration
+- a regulated licence
+
+unless the PRIMARY RESUME explicitly supports it.
+
+If a mandatory regulated licence is missing:
+- licenceStatus must be missing
+- matchLevel must not be strong
+- applyRecommendation must not be recommended
+
+If mandatory bilingual ability is not fully supported:
+- do not call the candidate bilingual
+- matchLevel must not be strong
+
+If mandatory night, rotating, weekend, or holiday availability is required but the source does not confirm it:
+- scheduleRequirement.candidateStatus must be not_supported or unclear
+- include it in missingRequirements when important
+
+==================================================
+FOUR ANALYSIS CARDS
+==================================================
+
+Keep these four cards:
+
+1. keyChanges
+Explain the most meaningful tailoring changes.
+
+The wording does not need to be exactly identical to the final resume.
+
+2. mismatch
+Show important mandatory or preferred requirements not confirmed by the source.
+
+3. matches
+Separate direct matches from realistic transferable skills.
+
+4. recommendation
+State whether the candidate should apply and list practical next steps.
+
+Do not repeat the same point across every card.
+
+==================================================
+MATCH SCORE
+==================================================
+
+85–100:
+strong
+
+65–84:
+moderate
+
+40–64:
+low
+
+0–39:
+critical_mismatch
+
+Do not inflate the score.
+
+A missing core licence, legal qualification, essential degree, or central professional requirement should normally result in low or critical_mismatch.
+
+==================================================
+OUTPUT
+==================================================
+
+Return only valid JSON.
+
+Do not use markdown.
+Do not use code fences.
+
+Use exactly this structure:
+
+{
+  "resume": "Complete resume string",
+  "packageAnalysis": {
+    "overallMatch": 0,
+    "matchLevel": "strong | moderate | low | critical_mismatch",
+    "keyChanges": [
+      {
+        "section": "",
+        "original": "",
+        "revised": "",
+        "reason": ""
+      }
+    ],
+    "mismatch": {
+      "summary": "",
+      "missingRequirements": [],
+      "unsupportedClaims": []
+    },
+    "matches": {
+      "strongMatches": [],
+      "transferableSkills": []
+    },
+    "recommendation": {
+      "summary": "",
+      "applyRecommendation": "recommended | consider | not_recommended",
+      "nextSteps": []
+    },
+    "verification": {
+      "jobContext": {
+        "country": "Canada | Unknown",
+        "sector": "private | provincial | municipal | federal | unknown",
+        "province": "",
+        "municipality": "",
+        "supportedByCareerElan": true,
+        "classificationReason": ""
+      },
+      "requirements": [
+        {
+          "requirement": "",
+          "category": "mandatory | preferred | legal_or_regulated",
+          "evidenceStatus": "supported | partially_supported | not_supported | unclear",
+          "sourceEvidence": "",
+          "source": "primary_resume | none",
+          "regulated": false
+        }
+      ],
+      "regulatedRole": {
+        "isRegulated": false,
+        "profession": "",
+        "jurisdiction": "",
+        "requiredLicence": "",
+        "licenceEvidence": "",
+        "licenceStatus": "verified | missing | not_required | unclear"
+      },
+      "bilingualRequirement": {
+        "level": "mandatory | preferred | not_required | unclear",
+        "languages": [],
+        "evidence": "",
+        "status": "verified | partially_verified | missing | not_required | unclear"
+      },
+      "scheduleRequirement": {
+        "dayShift": false,
+        "eveningShift": false,
+        "nightShift": false,
+        "rotatingShift": false,
+        "weekendWork": false,
+        "holidayWork": false,
+        "requirementLevel": "mandatory | preferred | not_required | unclear",
+        "candidateStatus": "supported | partially_supported | not_supported | unclear",
+        "explanation": ""
+      }
+    }
+  }
+}
+
+Limits:
+
+- keyChanges: maximum 4
+- missingRequirements: maximum 5
+- unsupportedClaims: maximum 4
+- strongMatches: maximum 5
+- transferableSkills: maximum 4
+- nextSteps: maximum 3
+- requirements: maximum 20
+
+==================================================
+SOURCE MANIFEST
+==================================================
+
+${JSON.stringify(
+  manifest,
+  null,
+  2
+)}
+
+==================================================
+PRIMARY RESUME — ONLY FACTUAL SOURCE
+==================================================
+
+${resumeText}
+
+==================================================
+PREVIOUS JOB ANALYSIS — REFERENCE ONLY
+==================================================
+
+${JSON.stringify(
+  analysis,
+  null,
+  2
+)}
+
+==================================================
+COMPLETE JOB DESCRIPTION
+==================================================
+
+${jobText}
+`;
+}
+
+export function buildCoverLetterEmailPrompt(params: {
+  title: string;
+  company: string;
+  finalResumeText: string;
+  jobText: string;
+  existingCoverLetter: string;
+}): string {
+  const { title, company, finalResumeText, jobText, existingCoverLetter } =
+    params;
+
+  return `
+You are Career Élan's Canadian resume strategist, ATS specialist, recruiter, and application writer.
+
+==================================================
+SINGLE FACTUAL SOURCE
+==================================================
+
+The PRIMARY RESUME below is the only factual source.
+
+The job posting is not evidence about the candidate.
+
+The existing cover letter is not a factual source. It may be used only as a tone and writing-style reference.
+
+Do not use unselected resumes or unrelated Career Memory information.
+
+Never invent:
+
+- companies
+- organizations
+- employers
+- job titles
+- employment dates
+- new responsibilities
+- new work experience
+- education
+- degrees
+- fields of study
+- certifications
+- licences
+- registrations
+- languages
+- language proficiency
+- software experience
+- equipment experience
+- technical experience
+- numerical achievements
+- citizenship
+- permanent residence
+- visas
+- work permits
+- work authorization
+- security clearances
+- regulated professional status
+
+You may professionally rewrite a responsibility that already exists.
+
+Example:
+
+Source:
+Answered phone inquiries.
+
+Allowed:
+Responded to client inquiries by phone and provided clear service guidance.
+
+Not allowed:
+Managed a national high-volume customer service centre.
+
+Do not add a number unless the number appears in the PRIMARY RESUME.
+
+==================================================
+DOCUMENT WRITING
+==================================================
+
+COVER LETTER
+
+Write specifically for:
+
+Position: ${title}
+Company: ${company}
+
+Connect the employer's main requirements to supported candidate experience.
+
+When experience is transferable rather than direct, say so naturally.
+
+Do not present transferable experience as direct industry experience.
+
+Do not claim a missing mandatory qualification.
+
+Do not copy the resume paragraph by paragraph.
+
+EMAIL DRAFT
+
+Keep the email concise.
+
+Include:
+
+- subject line
+- greeting
+- exact position title
+- company name
+- expression of interest
+- reference to attached resume and cover letter
+- professional closing
+- applicant name
+
+Do not load the email with unnecessary career facts.
+
+==================================================
+REGULATED AND HIGH-RISK REQUIREMENTS
+==================================================
+
+Never state that the candidate has:
+
+- citizenship
+- permanent residence
+- a work permit
+- authorization to work
+- security clearance
+- professional registration
+- a regulated licence
+
+unless the PRIMARY RESUME explicitly supports it.
+
+==================================================
+OUTPUT
+==================================================
+
+Return only valid JSON.
+
+Do not use markdown.
+Do not use code fences.
+
+Use exactly this structure:
+
+{
+  "coverLetter": "Complete cover letter string",
+  "emailDraft": "Complete application email string"
+}
+
+==================================================
+PRIMARY RESUME — ONLY FACTUAL SOURCE
+==================================================
+
+${finalResumeText}
+
+==================================================
+EXISTING COVER LETTER — STYLE REFERENCE ONLY
+==================================================
+
+${existingCoverLetter}
+
+==================================================
+COMPLETE JOB DESCRIPTION
+==================================================
+
+${jobText}
+`;
 }
