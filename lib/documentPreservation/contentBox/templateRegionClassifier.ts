@@ -201,7 +201,25 @@ function classifySidebar(
     // Same reasoning as classifyRepeatingRegions: a sidebar's own boxes
     // may be "unknown" (never matched a heading) just as easily as
     // "editable" - only already-"template" boxes are excluded.
-    if (box.layer === "template" || !box.boundingBox) continue;
+    //
+    // D안 Phase 1-Fix root-cause finding: a "table" box is also excluded
+    // here. detectPdfTableCandidates() (pdfLayoutAnalyzer.ts) can produce
+    // a real false-positive table candidate spanning most of the page
+    // when a genuine two-column document's real text happens to satisfy
+    // its >=3-row/>=2-shared-x-bucket heuristic (a real, disclosed
+    // limitation of that heuristic, confirmed via a real
+    // pdfDocumentExport.ts "professional"-template fixture: a table box
+    // was synthesized at x=43..543/y=43..481, i.e. nearly the full
+    // content area). Column-clustering below groups any two boxes whose
+    // x-ranges overlap into the same column - a box that wide overlaps
+    // BOTH real columns' x-ranges simultaneously, bridging them into one
+    // merged "column" and making `columns.length < 2` fail before any
+    // real sidebar is ever considered. A genuine table region is not
+    // itself a text column candidate either way, so excluding
+    // `type === "table"` here is correct independent of this bug - it
+    // only ever removes a box that could never legitimately BE the
+    // narrow or wide column in the first place.
+    if (box.layer === "template" || box.type === "table" || !box.boundingBox) continue;
     if (!byPage.has(box.page)) byPage.set(box.page, []);
     byPage.get(box.page)!.push(box);
   }
@@ -217,6 +235,21 @@ function classifySidebar(
     // Cluster into columns by real x-range overlap (same technique
     // pdfContentBoxGenerator.ts already uses for line/block grouping,
     // reused here for column grouping - not a new geometric idea).
+    //
+    // D안 Phase 1-Fix root-cause finding: a plain "any positive overlap"
+    // test lets a box that merely GRAZES a second column (e.g. a
+    // page-wide name/contact header box whose measured text width
+    // happens to extend slightly past where a real narrow column ends)
+    // transitively bridge two genuinely separate columns into one -
+    // confirmed via a real pdfDocumentExport.ts "professional"-template
+    // fixture, where the header box's real width overlapped the real
+    // main column by ~19-25% of either box's own width. Requiring the
+    // overlap to cover at least half of the NARROWER of the two boxes'
+    // widths distinguishes real containment/adjacency (a short sidebar
+    // line genuinely sitting inside a wider box's span) from marginal
+    // grazing (two boxes that merely touch at their edges) - a general
+    // geometric rule, not tuned to this one fixture's coordinates.
+    const MIN_OVERLAP_RATIO_OF_NARROWER_BOX = 0.5;
     const columns: ContentBox[][] = [];
     for (const box of sorted) {
       const left = box.boundingBox!.x;
@@ -225,7 +258,9 @@ function classifySidebar(
         col.some((member) => {
           const mLeft = member.boundingBox!.x;
           const mRight = mLeft + member.boundingBox!.width;
-          return Math.min(right, mRight) - Math.max(left, mLeft) > 0;
+          const overlap = Math.min(right, mRight) - Math.max(left, mLeft);
+          const narrowerWidth = Math.min(right - left, mRight - mLeft);
+          return overlap > 0 && narrowerWidth > 0 && overlap >= narrowerWidth * MIN_OVERLAP_RATIO_OF_NARROWER_BOX;
         })
       );
       if (column) column.push(box);
