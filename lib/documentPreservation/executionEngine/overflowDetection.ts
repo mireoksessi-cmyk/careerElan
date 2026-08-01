@@ -32,14 +32,25 @@ export function detectOverflow(measurement: LayoutMeasurementResult): OverflowRe
     signal a human inspecting the real rendered page would see.
   */
   for (const pageWindow of measurement.pageWindows) {
-    if (pageWindow.clipped) {
-      findings.push({
-        contentBoxId: "*",
-        page: pageWindow.pageIndex + 1,
-        verdict: pageWindow.scrollHeight > pageWindow.clientHeight ? "vertical_overflow" : "horizontal_overflow",
-        detail: `Page ${pageWindow.pageIndex + 1} window: scrollWidth=${pageWindow.scrollWidth} clientWidth=${pageWindow.clientWidth}, scrollHeight=${pageWindow.scrollHeight} clientHeight=${pageWindow.clientHeight} - real overflow:hidden clipping.`,
-      });
-    }
+    if (!pageWindow.clipped) continue;
+
+    const isLastPageWindow = pageWindow.pageIndex === measurement.pageWindows.length - 1;
+    const verdict = pageWindow.scrollHeight > pageWindow.clientHeight ? "vertical_overflow" : "horizontal_overflow";
+
+    // A non-last page window's own scrollHeight always exceeds its
+    // clientHeight, because A4DocumentPreview renders the full document
+    // inside every page window, shifted by pageIndex - that is the
+    // windowing technique itself, not real overflow. Only the LAST
+    // window's vertical clipping means content didn't fit within the
+    // Renderer's own computed page count.
+    if (verdict === "vertical_overflow" && !isLastPageWindow) continue;
+
+    findings.push({
+      contentBoxId: "*",
+      page: pageWindow.pageIndex + 1,
+      verdict,
+      detail: `Page ${pageWindow.pageIndex + 1} window: scrollWidth=${pageWindow.scrollWidth} clientWidth=${pageWindow.clientWidth}, scrollHeight=${pageWindow.scrollHeight} clientHeight=${pageWindow.clientHeight} - real overflow:hidden clipping.`,
+    });
   }
 
   /*

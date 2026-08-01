@@ -651,7 +651,7 @@ export function validateFinalDocument(
   }
 
   const overflowDerivedErrors: ValidationIssue[] = overflow.findings
-    .filter((f) => f.verdict !== "fits")
+    .filter((f) => f.verdict !== "fits" && f.verdict !== "overflow")
     .map((f): ValidationIssue => {
       const typeMap: Record<string, ValidationIssue["type"]> = {
         overflow: "page_overflow",
