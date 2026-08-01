@@ -177,6 +177,28 @@ export type PackageAnalysis = {
 
   verification:
     PackageVerification;
+
+  /*
+    D안 Phase 1 (Original Visual Tree) - optional, additive. Set only
+    when the upload-source pipeline built a usable tree/rendered a
+    usable node-text map (generateCore.ts) - undefined for every
+    career_memory generation and every upload generation where the
+    tree path didn't apply. Rides inside the EXISTING ai_insight jsonb
+    column (no new column/migration) and flows to the client verbatim
+    via app/api/applications/[id]/status/route.ts's own
+    `packageAnalysis: row.ai_insight` passthrough - paste-job/page.tsx
+    reads this same field to decide whether to render the Preview/
+    Download PDF via originalLayoutRenderer.ts instead of the existing
+    CareerElan pdfDocumentExport.ts path.
+  */
+  dpeOriginalLayout?: DpeOriginalLayoutPayload;
+};
+
+export type DpeOriginalLayoutPayload = {
+  version: 1;
+  tree: import("../documentPreservation/visualTree/types").OriginalVisualTree;
+  designTokens: import("../documentPreservation/visualTree/types").DesignTokens;
+  nodeTexts: Record<string, string>;
 };
 
 export type GeneratedPackage = {
@@ -197,6 +219,17 @@ export type ResumeAnalysisPackage = {
   resume: string;
   packageAnalysis:
     PackageAnalysis;
+  /*
+    D안 Phase 1 (Original Visual Tree) - optional, additive. Only ever
+    requested when originalLayoutPromptBlock (see
+    buildOriginalLayoutPromptBlock below) was non-empty, i.e. only for
+    an "upload" source whose Original Visual Tree build succeeded. A
+    career_memory generation, or any upload generation where the tree
+    build failed/was skipped, never asks for this field, and the AI
+    response is parsed exactly as before this field existed - `resume`
+    (the flat text) stays mandatory and is always present regardless.
+  */
+  layoutNodes?: { nodeId: string; text: string }[];
 };
 
 export type CoverLetterEmailPackage = {
@@ -3937,6 +3970,79 @@ export function buildLayoutCompressionPromptBlock(
   return lines.join("\n");
 }
 
+/*
+  D안 Phase 1 (Original Visual Tree) - additive Call1 prompt extension.
+  Empty string ("") whenever the tree build was skipped or failed, or
+  the source is career_memory - buildResumeAnalysisPrompt's own prompt
+  stays byte-identical to before this Phase in every such case (see
+  this function's own call site in generateCore.ts). Deliberately sends
+  only the compressed, per-leaf STRUCTURE (page/column/section/budget) -
+  never raw x/y/width/height pixel coordinates, per this Phase's own
+  "AI에게 raw x/y 픽셀 전체를 보내지 않는다" rule; only the Renderer
+  (originalLayoutRenderer.ts) ever reads real bounds.
+*/
+export function buildOriginalLayoutPromptBlock(
+  plan: import("../documentPreservation/visualTree/buildLayoutPlan").LayoutGenerationPlan
+): string {
+  const lines: string[] = [
+    "==================================================",
+    "ORIGINAL LAYOUT PLAN",
+    "==================================================",
+    "",
+    "The candidate's ORIGINAL uploaded resume file has a real page/column",
+    "layout. Write the resume so it fits this SAME structure as closely as",
+    "possible, using ONLY the rewriting freedoms already described above -",
+    "this section adds no new freedom to invent, omit, or reorder facts.",
+    "",
+    `Original page count: approximately ${plan.targetPageCount} page(s).`,
+    `Section order in the original document: ${plan.sectionOrder.join(", ") || "(none detected)"}.`,
+  ];
+
+  if (plan.sidebarSectionKeys.length > 0) {
+    lines.push(
+      `These sections sit in a narrow SIDEBAR column in the original document and should stay concise: ${plan.sidebarSectionKeys.join(", ")}.`
+    );
+  }
+  if (plan.mainColumnSectionKeys.length > 0) {
+    lines.push(
+      `These sections sit in the main column: ${plan.mainColumnSectionKeys.join(", ")}.`
+    );
+  }
+
+  lines.push(
+    "",
+    "Approximate per-section character budgets (from the original document's",
+    "own real layout - APPROXIMATE guidance, not a hard cutoff that may drop",
+    "a fact; exact pixel fit is verified afterward by a separate Renderer",
+    "step, not by you):"
+  );
+  for (const leaf of plan.leaves) {
+    if (!leaf.sectionKey) continue;
+    const bulletNote = leaf.maxBullets ? `, at most ~${leaf.maxBullets} bullets` : "";
+    lines.push(`- [${leaf.nodeId}] ${leaf.sectionKey}: ~${leaf.characterBudget} characters${bulletNote}`);
+  }
+
+  lines.push(
+    "",
+    "OUTPUT ADDITION for this document only: in addition to the normal",
+    '"resume" field, also include a top-level "layoutNodes" array, one entry',
+    "per node id listed above, in this exact shape:",
+    "",
+    '"layoutNodes": [ { "nodeId": "node-...", "text": "..." } ]',
+    "",
+    "- Use the EXACT nodeId values listed above, never invented ones.",
+    "- Each entry's text must be the same content that appears in the",
+    '  "resume" field for that section, not different content - "resume"',
+    "  stays the complete, authoritative document either way.",
+    "- Every rule stated earlier in this prompt (Never invent, Preserve every",
+    "  existing employer/job title/date/education/certification/quantified",
+    "  achievement, Protected Claims) remains fully in force and takes",
+    "  priority over fitting these budgets."
+  );
+
+  return lines.join("\n");
+}
+
 /* =========================================================
    TWO-CALL GENERATION PROMPTS (Performance Optimization Round 4)
 
@@ -3987,6 +4093,13 @@ export function buildResumeAnalysisPrompt(params: {
   analysis: unknown;
   jobText: string;
   layoutCompressionBlock: string;
+  /*
+    D안 Phase 1 - defaults to "" at every existing call site until a
+    caller explicitly builds one via buildOriginalLayoutPromptBlock().
+    "" produces a byte-identical prompt to before this field existed
+    (same additive convention as layoutCompressionBlock above).
+  */
+  originalLayoutPromptBlock?: string;
 }): string {
   const {
     resumeSource,
@@ -3995,6 +4108,7 @@ export function buildResumeAnalysisPrompt(params: {
     analysis,
     jobText,
     layoutCompressionBlock,
+    originalLayoutPromptBlock = "",
   } = params;
 
   return `
@@ -4468,7 +4582,7 @@ critical_mismatch
 Do not inflate the score.
 
 A missing core licence, legal qualification, essential degree, or central professional requirement should normally result in low or critical_mismatch.
-
+${originalLayoutPromptBlock}
 ==================================================
 OUTPUT
 ==================================================

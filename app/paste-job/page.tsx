@@ -5,6 +5,17 @@ import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import { exportPdfFromText, buildPdfBlob } from "@/lib/brand/render/pdfDocumentExport";
 import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
+/*
+  D안 Phase 1 (Original Visual Tree) - buildOriginalLayoutPdfBlob is a
+  pure client-safe jsPDF builder (same runtime shape as buildPdfBlob
+  above), used only when packageData.packageAnalysis.dpeOriginalLayout
+  is present (see ensureResumePdf() below). DpeOriginalLayoutPayload is
+  a type-only import (erased at build time, zero bundle impact) shared
+  with lib/generatePackage/shared.ts/generateCore.ts so the client and
+  server agree on this payload's shape without redeclaring it.
+*/
+import { buildOriginalLayoutPdfBlob } from "@/lib/brand/render/originalLayoutRenderer";
+import type { DpeOriginalLayoutPayload } from "@/lib/generatePackage/shared";
 
 import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
@@ -280,6 +291,17 @@ type PackageAnalysis = {
         | "not_required";
     };
   };
+
+  /*
+    D안 Phase 1 (Original Visual Tree) - optional, additive, undefined
+    for every career_memory generation and every upload generation the
+    tree path didn't apply to. Mirrors lib/generatePackage/shared.ts's
+    own PackageAnalysis.dpeOriginalLayout field exactly (see that
+    file's comment) - this file keeps its own local PackageAnalysis
+    type rather than importing the server one, so this field is added
+    here too, type-only.
+  */
+  dpeOriginalLayout?: DpeOriginalLayoutPayload;
 };
 
 type GeneratedPackage = {
@@ -1099,7 +1121,23 @@ const [
   const resumePdfKeyRef = useRef<string | null>(null);
   const resumePdfUrlRef = useRef<string | null>(null);
 
+  /*
+    D안 Phase 1 (Original Visual Tree) - when the server produced a
+    usable dpeOriginalLayout payload (upload source, feature flag on),
+    the Original Layout Renderer draws the Preview/Download PDF from
+    that payload's own real geometry instead of the flat resume text
+    through CareerElan's 4 fixed templates. Falls back to the existing
+    buildPdfBlob() path (unchanged) whenever the payload is absent -
+    every career_memory generation, and every upload generation the
+    tree path didn't apply to, renders exactly as it did before this
+    Phase. The key includes the node-text content so a Leaf Retry
+    changing even one section still invalidates the cached Blob.
+  */
   function resumePdfKey() {
+    const layout = packageData.packageAnalysis?.dpeOriginalLayout;
+    if (layout) {
+      return `tree::${resumeTemplateId}::${JSON.stringify(layout.nodeTexts)}`;
+    }
     return `${resumeTemplateId}::${packageData.resume}`;
   }
 
@@ -1109,7 +1147,10 @@ const [
       return resumePdfBlob;
     }
 
-    const blob = await buildPdfBlob(packageData.resume, resumeTemplateId);
+    const layout = packageData.packageAnalysis?.dpeOriginalLayout;
+    const blob = layout
+      ? await buildOriginalLayoutPdfBlob({ tree: layout.tree, designTokens: layout.designTokens, nodeTexts: layout.nodeTexts })
+      : await buildPdfBlob(packageData.resume, resumeTemplateId);
     const url = URL.createObjectURL(blob);
 
     if (resumePdfUrlRef.current) {
@@ -1145,7 +1186,7 @@ const [
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPreview, resumeViewMode, packageData.resume, resumeTemplateId]);
+  }, [selectedPreview, resumeViewMode, packageData.resume, packageData.packageAnalysis, resumeTemplateId]);
 
   useEffect(() => {
     return () => {

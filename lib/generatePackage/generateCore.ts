@@ -24,13 +24,33 @@ import {
   shouldRetryOpenAiTimeout,
   logGenerationStage,
   buildLayoutCompressionPromptBlock,
+  buildOriginalLayoutPromptBlock,
   buildResumeAnalysisPrompt,
   buildCoverLetterEmailPrompt,
   type LayoutConstraints,
   type ResumeAnalysisPackage,
   type CoverLetterEmailPackage,
+  type PackageAnalysis,
+  type DpeOriginalLayoutPayload,
 } from "./shared";
 import { runDpePreservationForApplication } from "../documentPreservation/runForApplication";
+/*
+  D안 Phase 1 (Original Visual Tree) - feature-flagged (isVisualTreeEnabled,
+  default OFF), upload-only, additive. Every import below is used ONLY
+  inside the `if (isVisualTreeEnabled() && resumeSource === "upload")`
+  block further down - when the flag is off, none of this module graph
+  is ever executed, and this generation's behavior is byte-for-byte what
+  it was before this Phase existed.
+*/
+import { analyzeDocument } from "../documentPreservation/layoutAnalysis";
+import type { LayoutSourceFormat } from "../documentPreservation/layoutAnalysis/types";
+import { generateContentBoxes } from "../documentPreservation/contentBox";
+import { buildOriginalVisualTree } from "../documentPreservation/visualTree/buildVisualTree";
+import { buildDesignTokens } from "../documentPreservation/visualTree/designTokens";
+import { buildLayoutPlan } from "../documentPreservation/visualTree/buildLayoutPlan";
+import { isVisualTreeEnabled } from "../documentPreservation/visualTree/types";
+import { resolveNodeTexts, validateTree } from "../documentPreservation/treeExecution/treeValidation";
+import { retryOverflowingLeaves } from "../documentPreservation/treeExecution/treeRetry";
 
 /*
   Deliberately relative imports throughout this file (and everything it
@@ -84,6 +104,58 @@ const OPENAI_CALL_TIMEOUT_MS = 120_000;
 */
 const MAX_OPENAI_ATTEMPTS = 2;
 const OPENAI_TIMEOUT_RETRY_DELAY_MS = 2_000;
+
+/*
+  D안 Phase 1 (Original Visual Tree) - Leaf Retry's protected-claims
+  guard (treeRetry.ts's ProtectedClaimsCheckFn). Deliberately NOT a call
+  into shared.ts's validateProtectedClaims() - that function is designed
+  around a FULL three-document context (resume+coverLetter+emailDraft)
+  and throws rather than returning a boolean; calling it with two empty
+  placeholder documents to check one short section fragment risks false
+  positives/negatives outside the context it was built for. This is a
+  narrower, Phase-1-scoped heuristic: a rewrite is rejected whenever it
+  drops a number that was present before (dates, percentages, dollar
+  amounts, years of experience - the concrete facts most likely to be
+  silently lost by a "make this shorter" rewrite). Prose-level fact
+  preservation (employer names, job titles) is still governed by the
+  prompt's own "Never invent/omit" rules (buildLeafRewritePrompt), same
+  as every other rewrite freedom already granted elsewhere in this
+  pipeline.
+*/
+function looksSafeAfterLeafRewrite(originalText: string, rewrittenText: string): boolean {
+  const numberPattern = /\d[\d,.]*/g;
+  const originalNumbers = new Set(originalText.match(numberPattern) ?? []);
+  const rewrittenNumbers = new Set(rewrittenText.match(numberPattern) ?? []);
+  for (const value of originalNumbers) {
+    if (!rewrittenNumbers.has(value)) return false;
+  }
+  return true;
+}
+
+/*
+  D안 Phase 1 - post-implementation audit finding: OriginalVisualNode.
+  originalText exists purely as an in-request fallback source for
+  resolveNodeTexts() (treeValidation.ts) when the AI's layoutNodes
+  response omits a leaf - it is never read by the Renderer
+  (originalLayoutRenderer.ts reads only the separate `nodeTexts` map).
+  Stripped here before the tree is embedded in dpeOriginalLayoutPayload
+  (persisted to ai_insight, and returned to the client) so the full
+  original resume text is not silently duplicated a second time in that
+  payload. Every other field (bounds/style/sectionKey/table/divider/
+  children) is preserved unchanged - this only nulls one field, at every
+  depth.
+*/
+function stripOriginalTextForStorage(
+  tree: import("../documentPreservation/visualTree/types").OriginalVisualTree
+): import("../documentPreservation/visualTree/types").OriginalVisualTree {
+  type Node = typeof tree.root;
+  const stripNode = (node: Node): Node => ({
+    ...node,
+    originalText: null,
+    children: node.children.map(stripNode),
+  });
+  return { ...tree, root: stripNode(tree.root) };
+}
 
 type GenerationStage =
   | "claimed"
@@ -393,12 +465,74 @@ export async function runPackageGeneration(
       ? `\n${buildLayoutCompressionPromptBlock(dpeLayoutConstraints)}\n`
       : "";
 
+    /*
+      D안 Phase 1 (Original Visual Tree) - built BEFORE Call1, same
+      applicability boundary as the existing DPE (uploaded resumes
+      only, real PDF/DOCX in Storage) - see runForApplication.ts's own
+      comment for why career_memory has no original file to preserve.
+      Read once here and reused both for this tree build and for the
+      existing DPE call further below, so a successful tree build never
+      causes the SAME original file to be downloaded/parsed twice.
+    */
+    const uploadedResumeSnapshot = row.generation_input_manifest_source as
+      | { storage_path?: string | null; original_file_type?: string | null }
+      | null
+      | undefined;
+
+    let visualTree: import("../documentPreservation/visualTree/types").OriginalVisualTree | null = null;
+    let visualDesignTokens: import("../documentPreservation/visualTree/types").DesignTokens | null = null;
+    let visualLayoutPlan: import("../documentPreservation/visualTree/buildLayoutPlan").LayoutGenerationPlan | null = null;
+    let originalLayoutPromptBlock = "";
+
+    if (isVisualTreeEnabled() && resumeSource === "upload") {
+      try {
+        const storagePath = uploadedResumeSnapshot?.storage_path ?? null;
+        const sourceFormat = uploadedResumeSnapshot?.original_file_type ?? null;
+
+        if (storagePath && (sourceFormat === "pdf" || sourceFormat === "docx")) {
+          const { data: fileBlob, error: downloadError } = await supabaseAdmin.storage
+            .from("resumes")
+            .download(storagePath);
+
+          if (!downloadError && fileBlob) {
+            const buffer = Buffer.from(await fileBlob.arrayBuffer());
+            const layoutResult = await analyzeDocument("resume", sourceFormat as LayoutSourceFormat, buffer);
+            const layerModel = generateContentBoxes("resume", layoutResult);
+            const tree = buildOriginalVisualTree(layerModel, layoutResult);
+
+            if (tree.fallbackPolicy !== "flat_text_only") {
+              const tokens = buildDesignTokens(layerModel, layoutResult);
+              const plan = buildLayoutPlan(tree, tokens);
+              visualTree = tree;
+              visualDesignTokens = tokens;
+              visualLayoutPlan = plan;
+              originalLayoutPromptBlock = `\n${buildOriginalLayoutPromptBlock(plan)}\n`;
+            }
+          }
+        }
+      } catch (treeBuildError) {
+        // Never blocks Generate Package - the same "a DPE failure keeps
+        // Generate Package's own AI text unchanged" principle
+        // runDpePreservationForApplication() already follows. Only a
+        // safe status code is logged, never the caught error's own
+        // message/stack (which could echo file/document content).
+        console.log(
+          JSON.stringify({
+            event: "dpe_visual_tree_build_failed",
+            applicationId,
+            status: treeBuildError instanceof Error ? treeBuildError.name : "UnknownError",
+          })
+        );
+      }
+    }
+
     const resumeAnalysisPrompt = buildResumeAnalysisPrompt({
       resumeSource,
       manifest,
       resumeText,
       analysis,
       jobText,
+      originalLayoutPromptBlock,
       layoutCompressionBlock,
     });
 
@@ -491,32 +625,115 @@ export async function runPackageGeneration(
       completely unchanged, exactly this route's behavior before this
       pass.
     */
-    // storage_path/original_file_type come from the SAME real
-    // resumes-row snapshot buildUploadedResumeManifest() already reads
-    // above (generation_input_manifest_source) - taken via the original
-    // request's real authenticated user session at claim time. Passed
-    // directly rather than having runDpePreservationForApplication
-    // re-read the resumes table itself as service_role, which a real E2E
-    // run confirmed always fails ("permission denied for table resumes" -
-    // service_role has no SELECT grant there, only
-    // REFERENCES/TRIGGER/TRUNCATE/MAINTAIN - see runForApplication.ts's
-    // own comment on this fix).
-    const uploadedResumeSnapshot = row.generation_input_manifest_source as
-      | { storage_path?: string | null; original_file_type?: string | null }
-      | null
-      | undefined;
+    /*
+      D안 Phase 1 (Original Visual Tree) - Call1 output handling. Only
+      ever runs when the pre-Call1 tree build above (visualTree) already
+      succeeded. `resume` (the flat text validated above) is NEVER
+      altered by this block - Cover Letter/Email and the DB's own
+      `resume_text` column keep receiving exactly the same flat text
+      regardless of whether this block runs, per this Phase's own
+      "Cover Letter와 Email은... Layout Profile을 전달하지 않는다" rule.
+      This block only ever produces a SEPARATE `dpeOriginalLayoutPayload`
+      (tree + tokens + per-node text) used exclusively for rendering the
+      Preview/Download PDF (paste-job/page.tsx) - see this Phase's final
+      report for the disclosed trade-off this implies (a retried leaf's
+      rendered text can differ slightly from the flat `resume` field).
+    */
+    let dpeOriginalLayoutPayload: DpeOriginalLayoutPayload | null = null;
+    let visualTreeStatus: string | null = null;
+    let visualTreeReason: string | null = null;
+
+    if (visualTree && visualDesignTokens && visualLayoutPlan) {
+      try {
+        const rawLayoutNodes = Array.isArray(rawResumeAnalysis.layoutNodes) ? rawResumeAnalysis.layoutNodes : [];
+        const layoutNodesInput = rawLayoutNodes.filter(
+          (n): n is { nodeId: string; text: string } => !!n && typeof n.nodeId === "string" && typeof n.text === "string"
+        );
+
+        if (layoutNodesInput.length > 0) {
+          let { nodeTexts } = resolveNodeTexts(visualTree, layoutNodesInput);
+          let report = validateTree(visualTree, visualDesignTokens, visualLayoutPlan, layoutNodesInput);
+
+          const nonOverflowErrors = report.errors.filter((e) => e.type !== "clipping" && e.type !== "page_overflow");
+          const overflowNodeIds = [
+            ...new Set(
+              report.errors
+                .filter((e) => (e.type === "clipping" || e.type === "page_overflow") && e.contentBoxId)
+                .map((e) => e.contentBoxId as string)
+            ),
+          ];
+
+          if (nonOverflowErrors.length === 0 && overflowNodeIds.length > 0) {
+            const retryResult = await retryOverflowingLeaves({
+              tree: visualTree,
+              plan: visualLayoutPlan,
+              nodeTexts,
+              overflowingNodeIds: overflowNodeIds,
+              overflowMmByNodeId: {},
+              rewriteLeaf: async (prompt) => {
+                const response = await callOpenAiWithRetry(applicationId, prompt, resolvedModel, "resume_analysis");
+                return response.output_text ?? "";
+              },
+              isSafeAgainstProtectedClaims: looksSafeAfterLeafRewrite,
+            });
+            nodeTexts = retryResult.nodeTexts;
+            report = validateTree(
+              visualTree,
+              visualDesignTokens,
+              visualLayoutPlan,
+              Object.entries(nodeTexts).map(([nodeId, text]) => ({ nodeId, text }))
+            );
+          }
+
+          if (report.errors.filter((e) => e.type !== "clipping" && e.type !== "page_overflow").length === 0 && !report.errors.some((e) => e.type === "broken_mapping")) {
+            // Sanitize before persisting/transmitting - originalText only
+            // ever needed the (already-consumed, above) resolveNodeTexts()
+            // fallback during THIS request. The client-side Renderer
+            // (originalLayoutRenderer.ts) reads exclusively from
+            // nodeTexts, never from tree node.originalText - persisting it
+            // anyway would silently duplicate the full original resume
+            // text a second time inside ai_insight, growing that column
+            // and the client's API response for no functional benefit
+            // (found during this Phase's post-implementation audit).
+            dpeOriginalLayoutPayload = { version: 1, tree: stripOriginalTextForStorage(visualTree), designTokens: visualDesignTokens, nodeTexts };
+            visualTreeStatus = report.valid ? "VISUAL_TREE_APPLIED" : "VISUAL_TREE_APPLIED_WITH_WARNINGS";
+            visualTreeReason = `D안 Phase 1 Original Visual Tree applied - ${Object.keys(nodeTexts).length} node(s) rendered from the original document's own layout (${report.errors.length} unresolved overflow finding(s)).`;
+          } else {
+            visualTreeStatus = "VISUAL_TREE_REJECTED";
+            visualTreeReason = `D안 Phase 1 Original Visual Tree validation failed non-overflow checks (${report.errors.map((e) => e.type).join(", ")}) - falling back to the existing Renderer path.`;
+          }
+        }
+      } catch (treeOutputError) {
+        console.log(
+          JSON.stringify({
+            event: "dpe_visual_tree_output_failed",
+            applicationId,
+            status: treeOutputError instanceof Error ? treeOutputError.name : "UnknownError",
+          })
+        );
+      }
+    }
 
     const dpeStartedAt = Date.now();
 
-    const dpeOutcome = await runDpePreservationForApplication({
-      applicationId,
-      resumeSource: row.resume_source ?? null,
-      resumeId: row.resume_id ?? null,
-      storagePath: uploadedResumeSnapshot?.storage_path ?? null,
-      originalFileType: uploadedResumeSnapshot?.original_file_type ?? null,
-      aiGeneratedResumeText: resume,
-      templateId: row.resume_template_id || "classic",
-    });
+    // The existing DPE (text-reconstruction through CareerElan's own
+    // Renderer) only runs when the Visual Tree path above did NOT
+    // already produce a usable result - mutually exclusive by
+    // construction, so the original file is never parsed twice on any
+    // single successful path (Visual Tree parses once and this is
+    // skipped, or Visual Tree was skipped/failed and this parses once,
+    // exactly as it always has).
+    const dpeOutcome = dpeOriginalLayoutPayload
+      ? { applied: false, finalResumeText: null, status: visualTreeStatus ?? "VISUAL_TREE_APPLIED", reason: visualTreeReason ?? "" }
+      : await runDpePreservationForApplication({
+          applicationId,
+          resumeSource: row.resume_source ?? null,
+          resumeId: row.resume_id ?? null,
+          storagePath: uploadedResumeSnapshot?.storage_path ?? null,
+          originalFileType: uploadedResumeSnapshot?.original_file_type ?? null,
+          aiGeneratedResumeText: resume,
+          templateId: row.resume_template_id || "classic",
+        });
 
     logGenerationStage({
       applicationId,
@@ -635,6 +852,22 @@ export async function runPackageGeneration(
     const saveStartedAt = Date.now();
     await setStage(applicationId, userId, "saving", workerRequestId);
 
+    /*
+      D안 Phase 1 (Original Visual Tree) - the tree/tokens/node-texts
+      payload rides inside the EXISTING ai_insight jsonb column (no new
+      column, no migration - "DB migration 금지"), as an additive key
+      alongside the normal PackageAnalysis fields. This is exactly the
+      same column app/api/applications/[id]/status/route.ts already
+      returns to the client verbatim as `packageAnalysis` (confirmed by
+      reading that route) - paste-job/page.tsx's existing
+      packageData.packageAnalysis state picks up the new key with zero
+      changes to how that value is fetched/stored, only to how the PDF
+      preview/download effect reads it (see that file's own changes).
+    */
+    const aiInsightPayload: PackageAnalysis = dpeOriginalLayoutPayload
+      ? { ...packageAnalysis, dpeOriginalLayout: dpeOriginalLayoutPayload }
+      : packageAnalysis;
+
     // Via RPC - see claim_generate_package_worker's migration comment for
     // why service_role cannot write applications directly.
     const { error: completeWriteError } = await supabaseAdmin.rpc(
@@ -645,7 +878,7 @@ export async function runPackageGeneration(
         p_resume_text: finalResumeText,
         p_cover_letter_text: coverLetter,
         p_email_draft: emailDraft,
-        p_ai_insight: packageAnalysis,
+        p_ai_insight: aiInsightPayload,
         p_generation_model: resolvedModel,
         p_prompt_version: PACKAGE_PROMPT_VERSION,
         p_dpe_status: dpeOutcome.status,
