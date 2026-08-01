@@ -2,10 +2,9 @@
 
 
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
-import { exportPdfFromText } from "@/lib/brand/render/pdfDocumentExport";
+import { exportPdfFromText, buildPdfBlob } from "@/lib/brand/render/pdfDocumentExport";
 import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
-import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
 
 import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
@@ -1081,6 +1080,80 @@ const [
   emailDraft: "",
   packageAnalysis: null,
 });
+
+  /*
+    Preview/PDF parity - the Resume Preview tab now shows the SAME PDF
+    Download PDF produces (lib/brand/render/pdfDocumentExport.ts's
+    buildPdfBlob), instead of the separate A4DocumentPreview React/CSS
+    renderer (that component stays wired into DPE's own measurement
+    harness, app/dev/dpe-measure, untouched). resumePdfKeyRef tracks
+    which (templateId, resume text) pair the current Blob/url were built
+    from, so a stale Blob is never reused across an edit - and
+    downloadPdf() below can reuse the exact same Blob when it's still
+    fresh, guaranteeing byte-identical Preview/Download output.
+  */
+  const [resumePdfUrl, setResumePdfUrl] = useState<string | null>(null);
+  const [resumePdfBlob, setResumePdfBlob] = useState<Blob | null>(null);
+  const [resumePdfLoading, setResumePdfLoading] = useState(false);
+  const [resumePdfError, setResumePdfError] = useState<string | null>(null);
+  const resumePdfKeyRef = useRef<string | null>(null);
+  const resumePdfUrlRef = useRef<string | null>(null);
+
+  function resumePdfKey() {
+    return `${resumeTemplateId}::${packageData.resume}`;
+  }
+
+  async function ensureResumePdf(): Promise<Blob> {
+    const key = resumePdfKey();
+    if (resumePdfKeyRef.current === key && resumePdfBlob) {
+      return resumePdfBlob;
+    }
+
+    const blob = await buildPdfBlob(packageData.resume, resumeTemplateId);
+    const url = URL.createObjectURL(blob);
+
+    if (resumePdfUrlRef.current) {
+      URL.revokeObjectURL(resumePdfUrlRef.current);
+    }
+    resumePdfUrlRef.current = url;
+    resumePdfKeyRef.current = key;
+
+    setResumePdfBlob(blob);
+    setResumePdfUrl(url);
+
+    return blob;
+  }
+
+  useEffect(() => {
+    if (!(selectedPreview === "resume" && resumeViewMode === "preview")) return;
+    if (!packageData.resume) return;
+    if (resumePdfKeyRef.current === resumePdfKey() && resumePdfUrl) return;
+
+    let cancelled = false;
+    setResumePdfLoading(true);
+    setResumePdfError(null);
+
+    ensureResumePdf()
+      .catch(() => {
+        if (!cancelled) setResumePdfError("Could not generate the PDF preview.");
+      })
+      .finally(() => {
+        if (!cancelled) setResumePdfLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPreview, resumeViewMode, packageData.resume, resumeTemplateId]);
+
+  useEffect(() => {
+    return () => {
+      if (resumePdfUrlRef.current) {
+        URL.revokeObjectURL(resumePdfUrlRef.current);
+      }
+    };
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const autoAnalyzeStartedRef = useRef(false);
@@ -2561,11 +2634,18 @@ David Kwak`,
   
 async function downloadPdf() {
   if (selectedPreview === "resume") {
-    await exportPdfFromText(
-      packageData[selectedPreview],
-      `${getFileBaseName()}_${selectedPreview}`,
-      resumeTemplateId
-    );
+    // Reuses the exact Blob already shown in the Preview tab when it's
+    // still fresh for the current (templateId, resume text) - only
+    // regenerates (via ensureResumePdf, same buildPdfBlob call the
+    // Preview effect uses) when the user downloads without having
+    // opened Preview first, or after an edit invalidated it.
+    const blob = await ensureResumePdf();
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = `${getFileBaseName()}_${selectedPreview}.pdf`;
+    link.click();
+    URL.revokeObjectURL(downloadUrl);
     return;
   }
   await exportPdf(
@@ -4001,10 +4081,21 @@ async function downloadDocx() {
           </div>
 
           {selectedPreview === "resume" && resumeViewMode === "preview" ? (
-            <A4DocumentPreview
-              text={packageData.resume}
-              templateId={resumeTemplateId}
-            />
+            resumePdfError ? (
+              <div className="rounded-2xl border border-red-100 bg-red-50 p-5 shadow-sm">
+                <p className="text-sm font-semibold text-red-700">
+                  {resumePdfError}
+                </p>
+              </div>
+            ) : resumePdfUrl ? (
+              <iframe
+                src={resumePdfUrl}
+                title="Resume PDF preview"
+                className="h-[900px] w-full rounded-2xl border border-gray-100 bg-white shadow-sm"
+              />
+            ) : (
+              <div className="h-[900px] w-full animate-pulse rounded-2xl border border-gray-100 bg-slate-50" />
+            )
           ) : selectedPreview ===
           "emailDraft" ? (
             <textarea

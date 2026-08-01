@@ -228,7 +228,16 @@ const PDF_RENDERERS: Record<ResumeTemplateId, (pdf: jsPDF, doc: RenderDocument) 
   modern: renderModernPdf,
 };
 
-export async function exportPdfFromText(text: string, fileName: string, templateId?: string | null) {
+/*
+  Preview/Download parity - factored out so both the download-file path
+  (exportPdfFromText, unchanged below) and the Preview tab (paste-job/
+  page.tsx) build the PDF through the exact same render call, never two
+  slightly-diverging code paths. Returns the jsPDF document's own Blob
+  (pdf.output("blob")) rather than triggering a save-as-file prompt - the
+  caller decides what to do with the bytes (object URL for an iframe,
+  or a synthetic <a download> click for the actual download).
+*/
+function renderPdf(text: string, templateId?: string | null): jsPDF {
   const ir = buildDocumentIRFromText(text);
   const doc = buildRenderDocument(ir);
   const resolvedId = normalizeResumeTemplateId(templateId);
@@ -239,5 +248,13 @@ export async function exportPdfFromText(text: string, fileName: string, template
 
   PDF_RENDERERS[resolvedId](pdf, doc);
 
-  pdf.save(`${fileName}.pdf`);
+  return pdf;
+}
+
+export async function buildPdfBlob(text: string, templateId?: string | null): Promise<Blob> {
+  return renderPdf(text, templateId).output("blob");
+}
+
+export async function exportPdfFromText(text: string, fileName: string, templateId?: string | null) {
+  renderPdf(text, templateId).save(`${fileName}.pdf`);
 }
