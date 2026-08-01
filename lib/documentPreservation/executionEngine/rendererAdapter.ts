@@ -24,8 +24,34 @@
   verbatim, preserving whatever heading wording the source document
   actually used.
 */
+import { matchHeading } from "@/lib/brand/sectionParser";
 import type { ContentBox } from "../contentBox/types";
 import type { ExperienceRefinementResult } from "./types";
+
+/*
+  Two adjacent boxes sharing a role that both received the SAME
+  section-block unit (resumeMapping.ts's mapSectionBlock 1:N fan-out)
+  normally end up with byte-identical text, which the dedup check below
+  already skips. But when Content Box Generation split one logical
+  section across an original source-document page boundary into two
+  boxes, and exactly one of them bundles its own heading line
+  (replacementEngine.ts's "bundled heading+body" case), that box's
+  replaced text gets its ORIGINAL heading line prefixed onto the SAME
+  generated unit text the other box received unprefixed - the two texts
+  then differ by exactly that heading line, so a plain equality check no
+  longer recognizes them as the same fan-out and both get emitted,
+  duplicating the whole generated section. Stripping a leading
+  heading-line match (the SAME matchHeading() replacementEngine.ts
+  itself already uses to decide whether to add that prefix) before
+  comparing restores the dedup's original intent without touching how
+  the plan assigns units.
+*/
+function stripLeadingHeadingLine(text: string): string {
+  const newlineIndex = text.indexOf("\n");
+  const firstLine = newlineIndex === -1 ? text : text.slice(0, newlineIndex);
+  if (matchHeading(firstLine) === null) return text;
+  return newlineIndex === -1 ? "" : text.slice(newlineIndex + 1);
+}
 
 function entryText(entry: ExperienceRefinementResult["entries"][number]): string {
   const lines: string[] = [];
@@ -111,13 +137,14 @@ export function renderBoxesToResumeText(
       }
     }
 
-    if (box.role === lastEmittedRole && box.text === lastEmittedText) {
+    const normalizedText = stripLeadingHeadingLine(box.text ?? "");
+    if (box.role === lastEmittedRole && normalizedText === lastEmittedText) {
       continue;
     }
 
     lines.push(box.text ?? "");
     lastEmittedRole = box.role;
-    lastEmittedText = box.text ?? null;
+    lastEmittedText = normalizedText;
   }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
