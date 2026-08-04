@@ -1,3 +1,18 @@
+-- RECOVERY NOTE: this file's original name/timestamp on the remote
+-- project was 20260728100037, but its original migration file was never
+-- committed to this repository and could not be recovered from git
+-- history, any branch, or the git stash. This file is the local
+-- migration that was later authored (under the timestamp 20260730010000)
+-- to add the same async document-analysis tracking - verified via a
+-- read-only schema-only dump of the linked remote project
+-- (`supabase db dump --linked --schema public`) to define byte-identical
+-- functions (claim/update/complete/fail for both resumes and
+-- cover_letters) and the same analysis_status/analysis_stage/etc.
+-- columns already present on remote under 20260728100037. Renamed here
+-- (SQL contents otherwise unchanged) so local migration history has
+-- exactly one copy of this logic, filed under the timestamp that
+-- actually matches when it was applied to remote.
+
 -- Adds async analysis tracking to resumes and cover_letters, mirroring the
 -- applications table's generation_status/generation_stage pattern
 -- (20260721000000-era migration) so Resume/Cover Letter text extraction +
