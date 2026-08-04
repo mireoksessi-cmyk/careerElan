@@ -221,13 +221,6 @@ type PackageAnalysis = {
         | "not_supported";
 
       sourceEvidence: string;
-
-      source:
-        | "primary_resume"
-        | "career_memory"
-        | "none";
-
-      regulated: boolean;
     }[];
 
     documentClaims: {

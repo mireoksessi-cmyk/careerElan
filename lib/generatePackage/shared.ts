@@ -52,40 +52,11 @@ export type ApplyRecommendation =
   | "consider"
   | "not_recommended";
 
-export type RequirementSource =
-  | "primary_resume"
-  | "none";
-
 export type JobRequirementEvidence = {
   requirement: string;
   category: RequirementCategory;
   evidenceStatus: EvidenceStatus;
   sourceEvidence: string;
-  source: RequirementSource;
-  regulated: boolean;
-};
-
-export type ScheduleRequirement = {
-  dayShift: boolean;
-  eveningShift: boolean;
-  nightShift: boolean;
-  rotatingShift: boolean;
-  weekendWork: boolean;
-  holidayWork: boolean;
-
-  requirementLevel:
-    | "mandatory"
-    | "preferred"
-    | "not_required"
-    | "unclear";
-
-  candidateStatus:
-    | "supported"
-    | "partially_supported"
-    | "not_supported"
-    | "unclear";
-
-  explanation: string;
 };
 
 export type PackageVerification = {
@@ -135,9 +106,6 @@ export type PackageVerification = {
       | "not_required"
       | "unclear";
   };
-
-  scheduleRequirement:
-    ScheduleRequirement;
 };
 
 export type PackageAnalysis = {
@@ -1936,7 +1904,7 @@ function validateFactEntry(
     )
   ) {
     errors.push(
-      `${label} ${index + 1} organization is missing: ${item.employer}`
+      `${label} ${index + 1} organization is missing.`
     );
   }
 
@@ -1948,7 +1916,7 @@ function validateFactEntry(
     )
   ) {
     errors.push(
-      `${label} ${index + 1} title is missing: ${item.title}`
+      `${label} ${index + 1} title is missing.`
     );
   }
 
@@ -1960,7 +1928,7 @@ function validateFactEntry(
     )
   ) {
     errors.push(
-      `${label} ${index + 1} dates are missing: ${item.dates}`
+      `${label} ${index + 1} dates are missing.`
     );
   }
 }
@@ -2055,7 +2023,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Education ${index + 1} school is missing: ${item.school}`
+          `Education ${index + 1} school is missing.`
         );
       }
 
@@ -2067,7 +2035,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Education ${index + 1} program is missing: ${item.program}`
+          `Education ${index + 1} program is missing.`
         );
       }
 
@@ -2079,7 +2047,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Education ${index + 1} dates are missing: ${item.dates}`
+          `Education ${index + 1} dates are missing.`
         );
       }
 
@@ -2095,7 +2063,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Education ${index + 1} GPA is missing: ${item.gpa}`
+          `Education ${index + 1} GPA is missing.`
         );
       }
 
@@ -2107,7 +2075,14 @@ export function validateSourceIntegrity(
         )
       ) {
         console.warn(
-          `Education coursework may have been paraphrased or shortened: ${item.coursework}`
+          "[generate-package] Education coursework may have been paraphrased or shortened",
+          {
+            educationIndex: index + 1,
+            characterCount:
+              typeof item.coursework === "string"
+                ? item.coursework.length
+                : 0,
+          }
         );
       }
     }
@@ -2123,7 +2098,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Certification is missing: ${item}`
+          "A required certification is missing."
         );
       }
     }
@@ -2150,7 +2125,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Required skill fact was not preserved exactly: ${skill}`
+          "A required skill fact was not preserved exactly."
         );
       }
     }
@@ -2187,7 +2162,7 @@ export function validateSourceIntegrity(
 
         if (!partsExist) {
           errors.push(
-            `Language is missing: ${item}`
+            "A required language is missing."
           );
         }
       }
@@ -2204,7 +2179,7 @@ export function validateSourceIntegrity(
         )
       ) {
         errors.push(
-          `Project is missing: ${item}`
+          "A required project is missing."
         );
       }
     }
@@ -2789,20 +2764,6 @@ function defaultVerification():
       evidence: "",
       status: "unclear",
     },
-
-    scheduleRequirement: {
-      dayShift: false,
-      eveningShift: false,
-      nightShift: false,
-      rotatingShift: false,
-      weekendWork: false,
-      holidayWork: false,
-      requirementLevel:
-        "unclear",
-      candidateStatus:
-        "unclear",
-      explanation: "",
-    },
   };
 }
 
@@ -3158,17 +3119,6 @@ export function normalizePackageAnalysis(
               getFirstText(
                 item.sourceEvidence
               ),
-
-            source:
-              item.source ===
-              "primary_resume"
-                ? "primary_resume"
-                : "none",
-
-            regulated:
-              Boolean(
-                item.regulated
-              ),
           }))
       : [];
 
@@ -3205,17 +3155,6 @@ export function normalizePackageAnalysis(
     verification
       .bilingualRequirement
       .languages = [];
-  }
-
-  if (
-    !verification.scheduleRequirement ||
-    typeof verification
-      .scheduleRequirement !==
-      "object"
-  ) {
-    verification.scheduleRequirement =
-      defaultVerification()
-        .scheduleRequirement;
   }
 
   return packageAnalysis;
@@ -3290,7 +3229,7 @@ export function validateRequirementEvidence(
   const warnings: string[] = [];
 
   verification.requirements.forEach(
-    (item) => {
+    (item, index) => {
       if (
         item.evidenceStatus ===
           "supported" ||
@@ -3301,13 +3240,11 @@ export function validateRequirementEvidence(
           !item.sourceEvidence
         ) {
           warnings.push(
-            `Requirement marked ${item.evidenceStatus} without source evidence: ${item.requirement}`
+            `Requirement ${index + 1} marked ${item.evidenceStatus} without source evidence.`
           );
 
           item.evidenceStatus =
             "unclear";
-
-          item.source = "none";
 
           return;
         }
@@ -3323,7 +3260,7 @@ export function validateRequirementEvidence(
             500으로 중단하지 않고 unclear로 보정한다.
           */
           warnings.push(
-            `Requirement evidence could not be matched exactly and was changed to unclear: ${item.requirement}`
+            `Requirement ${index + 1} evidence could not be matched exactly and was changed to unclear.`
           );
 
           item.evidenceStatus =
@@ -3331,8 +3268,6 @@ export function validateRequirementEvidence(
 
           item.sourceEvidence =
             "";
-
-          item.source = "none";
         }
       }
 
@@ -3344,8 +3279,6 @@ export function validateRequirementEvidence(
       ) {
         item.sourceEvidence =
           "";
-
-        item.source = "none";
       }
     }
   );
@@ -4537,10 +4470,6 @@ If mandatory bilingual ability is not fully supported:
 - do not call the candidate bilingual
 - matchLevel must not be strong
 
-If mandatory night, rotating, weekend, or holiday availability is required but the source does not confirm it:
-- scheduleRequirement.candidateStatus must be not_supported or unclear
-- include it in missingRequirements when important
-
 ==================================================
 FOUR ANALYSIS CARDS
 ==================================================
@@ -4635,9 +4564,7 @@ Use exactly this structure:
           "requirement": "",
           "category": "mandatory | preferred | legal_or_regulated",
           "evidenceStatus": "supported | partially_supported | not_supported | unclear",
-          "sourceEvidence": "",
-          "source": "primary_resume | none",
-          "regulated": false
+          "sourceEvidence": ""
         }
       ],
       "regulatedRole": {
@@ -4653,17 +4580,6 @@ Use exactly this structure:
         "languages": [],
         "evidence": "",
         "status": "verified | partially_verified | missing | not_required | unclear"
-      },
-      "scheduleRequirement": {
-        "dayShift": false,
-        "eveningShift": false,
-        "nightShift": false,
-        "rotatingShift": false,
-        "weekendWork": false,
-        "holidayWork": false,
-        "requirementLevel": "mandatory | preferred | not_required | unclear",
-        "candidateStatus": "supported | partially_supported | not_supported | unclear",
-        "explanation": ""
       }
     }
   }

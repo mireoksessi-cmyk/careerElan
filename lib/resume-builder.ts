@@ -200,12 +200,11 @@ ${draft}
     const resume =
       completion.choices[0].message.content?.trim() || "";
 
-    console.log("===== AI RESUME BUILDER =====");
-    console.log(resume);
-
     return resume;
   } catch (err) {
-    console.error("Resume Builder Error:", err);
+    console.error("Resume Builder Error:", {
+      errorName: err instanceof Error ? err.name : typeof err,
+    });
     return "";
   }
 }

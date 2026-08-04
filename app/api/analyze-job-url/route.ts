@@ -429,7 +429,6 @@ export async function POST(req: Request) {
     console.timeEnd("3 clean html");
 
     console.log("jobText length:", jobText.length);
-    console.log("jobText preview:", jobText.slice(0, 300));
 
     if (jobText.length < 300) {
       console.timeEnd("total analyze-job-url");
