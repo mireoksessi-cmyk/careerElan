@@ -54,6 +54,16 @@ check("awards: two distinct awards", awards.length, 2);
 check("awards: entry1 name", awards[0].name?.value, "Northline Media Rising Star Award");
 check("awards: entry1 date", awards[0].dateText?.value, "2022");
 
+// Phase 5D.3B - date-FIRST single-line award ("2008 X Award" - the
+// previous version only ever looked at text BEFORE the date, so a
+// date-first line lost its entire name; the real bug this fixture
+// shape reproduces, anonymized).
+counter = 0;
+const dateFirstAward = [block("2008 Regional Distribution Excellence Award", "bullet")];
+const dateFirstAwardEntries = extractAwardEntries("s1", dateFirstAward);
+check("date-first award: name recovered (not dropped)", dateFirstAwardEntries[0].name?.value, "Regional Distribution Excellence Award");
+check("date-first award: date still extracted", dateFirstAwardEntries[0].dateText?.value, "2008");
+
 // ==================== Publications (synthetic, f3 shape) ====================
 counter = 0;
 const pubBlocks = [block("Chandran, P. (2021). Community nutrition outreach in rural Nova Scotia. Atlantic Health Journal, 14(2).")];

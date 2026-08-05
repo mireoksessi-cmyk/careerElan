@@ -42,6 +42,19 @@ function nonEmpty(text: string | undefined | null): string | undefined {
 
 type TaggedFragment = { value: string; kind: ParityFragmentKind };
 
+/* Phase 5D.3B - mirrors textExtraction.ts's own rawHeaderFallbackFragments
+   and renderers.tsx's RawHeaderFallback exactly: when an entry's own
+   structured fields produced zero tagged fragments, the renderer falls
+   back to showing rawHeaderText verbatim - the canonical manifest (the
+   parity ground truth) must expect that same fallback text. */
+function rawHeaderFallbackTagged(rawHeaderText: string): TaggedFragment[] {
+  return rawHeaderText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((value) => ({ value, kind: "bullet" as const }));
+}
+
 /* Mirrors extractExperienceEntryFragments/extractProjectEntryFragments
    field order and bullets-XOR-descriptionParagraphs precedence
    exactly (see textExtraction.ts). Shared by experience/volunteer and
@@ -77,6 +90,7 @@ function tagEducation(entry: EducationEntry): TaggedFragment[] {
   if (nonEmpty(entry.gpa?.value)) tagged.push({ value: entry.gpa!.value.trim(), kind: "education" });
   for (const h of entry.honors) if (nonEmpty(h.value)) tagged.push({ value: h.value.trim(), kind: "education" });
   for (const d of entry.details) if (nonEmpty(d.value)) tagged.push({ value: d.value.trim(), kind: "bullet" });
+  if (tagged.length === 0) tagged.push(...rawHeaderFallbackTagged(entry.rawHeaderText));
   return tagged;
 }
 
@@ -89,6 +103,7 @@ function tagCredential(entry: CredentialEntry): TaggedFragment[] {
   if (nonEmpty(entry.expiryDateText?.value)) tagged.push({ value: entry.expiryDateText!.value.trim(), kind: "date" });
   if (nonEmpty(entry.location?.value)) tagged.push({ value: entry.location!.value.trim(), kind: "location" });
   for (const d of entry.details) if (nonEmpty(d.value)) tagged.push({ value: d.value.trim(), kind: "bullet" });
+  if (tagged.length === 0) tagged.push(...rawHeaderFallbackTagged(entry.rawHeaderText));
   return tagged;
 }
 
@@ -98,6 +113,7 @@ function tagAward(entry: AwardEntry): TaggedFragment[] {
   if (nonEmpty(entry.issuer?.value)) tagged.push({ value: entry.issuer!.value.trim(), kind: "organization" });
   if (nonEmpty(entry.dateText?.value)) tagged.push({ value: entry.dateText!.value.trim(), kind: "date" });
   for (const d of entry.details) if (nonEmpty(d.value)) tagged.push({ value: d.value.trim(), kind: "bullet" });
+  if (tagged.length === 0) tagged.push(...rawHeaderFallbackTagged(entry.rawHeaderText));
   return tagged;
 }
 
@@ -109,6 +125,7 @@ function tagPublication(entry: PublicationEntry): TaggedFragment[] {
   if (nonEmpty(entry.urlOrDoi?.value)) tagged.push({ value: entry.urlOrDoi!.value.trim(), kind: "publication" });
   for (const a of entry.authors) if (nonEmpty(a.value)) tagged.push({ value: a.value.trim(), kind: "publication" });
   for (const d of entry.details) if (nonEmpty(d.value)) tagged.push({ value: d.value.trim(), kind: "bullet" });
+  if (tagged.length === 0) tagged.push(...rawHeaderFallbackTagged(entry.rawHeaderText));
   return tagged;
 }
 

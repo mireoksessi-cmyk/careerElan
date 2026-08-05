@@ -22,7 +22,7 @@
 import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
-import { hasDateEvidence, extractDateParts } from "./dateRangeParsing";
+import { hasDateEvidence, stripDateAnchor } from "./dateRangeParsing";
 import type { CredentialEntry, StructuredTextValue } from "./types";
 
 const BULLET_PREFIX_RE = /^[•\-*◦▪·‣⁃]\s+/;
@@ -66,15 +66,18 @@ function clusterEntries(blocks: SemanticContentBlock[]): ClusterRange[] {
   return clusters;
 }
 
-function splitNameIssuerDate(fullText: string, dateRangeText: string | undefined): { name: string; issuer?: string } {
-  const withoutDate = dateRangeText ? fullText.slice(0, fullText.indexOf(dateRangeText)) : fullText;
-  const cleaned = withoutDate.trim().replace(/[,–—-]+$/, "").trim();
-  // "Name - Issuer" (dash-separated, issuer as the last dash segment)
-  const dashParts = cleaned.split(/\s+[-–—]\s+/).map((s) => s.trim()).filter((s) => s.length > 0);
+/*
+  Phase 5D.3B - `remainderText` has already had its date span (wherever
+  it fell) stripped by stripDateAnchor; this only splits what's left
+  into "Name - Issuer" (dash-separated, issuer as the last dash
+  segment) - never re-derives or re-strips the date itself.
+*/
+function splitNameIssuer(remainderText: string): { name: string; issuer?: string } {
+  const dashParts = remainderText.split(/\s+[-–—]\s+/).map((s) => s.trim()).filter((s) => s.length > 0);
   if (dashParts.length >= 2) {
     return { name: dashParts.slice(0, -1).join(" - "), issuer: dashParts[dashParts.length - 1] };
   }
-  return { name: cleaned };
+  return { name: remainderText };
 }
 
 export function extractCredentialEntries(sectionId: string, bodyBlocks: SemanticContentBlock[]): CredentialEntry[] {
@@ -87,29 +90,32 @@ export function extractCredentialEntries(sectionId: string, bodyBlocks: Semantic
     const rawHeaderText = blocks.map((b) => b.rawText).join("\n");
     const reasonCodes: string[] = [];
 
-    const dateParts = extractDateParts(combinedText);
+    const anchor = stripDateAnchor(combinedText);
+    const hasDate = anchor.dateRangeText.length > 0;
     let name: StructuredTextValue | undefined;
     let issuer: StructuredTextValue | undefined;
     let issueDateText: StructuredTextValue | undefined;
     const lastBlock = blocks[blocks.length - 1];
 
-    if (dateParts) {
-      issueDateText = makeValue(dateParts.dateRangeText, sectionId, [lastBlock], 0.75);
-      const { name: n, issuer: i } = splitNameIssuerDate(combinedText, dateParts.dateRangeText);
-      // name/issuer are derived from combinedText, which can span every
-      // block in the cluster (a wrapped multi-line credential) - trace
-      // the whole cluster, not just lastBlock, so the validator's
-      // block-coverage/fact-preservation check can find the full value
-      // text within its own source blocks.
-      if (n.length > 0) name = makeValue(n, sectionId, blocks, 0.7);
-      if (i) issuer = makeValue(i, sectionId, blocks, 0.65);
-      reasonCodes.push("date-anchored-cluster");
-    } else {
-      const { name: n, issuer: i } = splitNameIssuerDate(combinedText, undefined);
-      if (n.length > 0) name = makeValue(n, sectionId, blocks, 0.55);
-      if (i) issuer = makeValue(i, sectionId, blocks, 0.5);
-      reasonCodes.push("no-date-evidence-in-cluster");
+    if (hasDate) issueDateText = makeValue(anchor.dateRangeText, sectionId, [lastBlock], 0.75);
+
+    /* Phase 5D.3B - the date can land before, after, or in the middle
+       of the credential text ("Certified Six Sigma Black Belt - ASQ,
+       2014" vs "2014 - Certified Six Sigma Black Belt" vs a mid-string
+       wrap) - never assume "before" is the only real side. Whichever
+       side is non-empty becomes the primary name/issuer candidate;
+       name/issuer are derived from combinedText, which can span every
+       block in the cluster (a wrapped multi-line credential) - trace
+       the whole cluster, not just lastBlock, so the validator's
+       block-coverage/fact-preservation check can find the full value
+       text within its own source blocks. */
+    const primary = anchor.beforeText.length > 0 ? anchor.beforeText : anchor.afterText;
+    if (primary.length > 0) {
+      const { name: n, issuer: i } = splitNameIssuer(primary);
+      if (n.length > 0) name = makeValue(n, sectionId, blocks, hasDate ? 0.7 : 0.55);
+      if (i) issuer = makeValue(i, sectionId, blocks, hasDate ? 0.65 : 0.5);
     }
+    reasonCodes.push(hasDate ? "date-anchored-cluster" : "no-date-evidence-in-cluster");
 
     const kind: CredentialEntry["kind"] =
       CERTIFICATION_KEYWORD_RE.test(combinedText) && !LICENSE_KEYWORD_RE.test(combinedText)
@@ -131,7 +137,7 @@ export function extractCredentialEntries(sectionId: string, bodyBlocks: Semantic
       kind,
       rawHeaderText,
       source: mergeTraces(traceFromBlocks(sectionId, blocks)),
-      isUncertain: name === undefined || dateParts === null,
+      isUncertain: name === undefined || !hasDate,
       reasonCodes,
     };
   });

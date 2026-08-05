@@ -19,11 +19,20 @@
 import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
-import { hasDateEvidence, extractDateParts } from "./dateRangeParsing";
+import { hasDateEvidence, stripDateAnchor, cleanHeaderFragment } from "./dateRangeParsing";
 import { splitOrganizationLocation } from "./splitOrganizationLocation";
 import type { EducationEntry, StructuredTextValue } from "./types";
 
 const DEGREE_KEYWORD_RE = /\b(bachelor|master|ph\.?d|doctorate|associate|diploma|certificate|b\.?a\.?|b\.?s\.?|b\.?comm\.?|m\.?a\.?|m\.?s\.?|m\.?b\.?a\.?)\b/i;
+/*
+  Phase 5D.3B - a generic INSTITUTION-category signal, same kind of
+  lexical class already established by DEGREE_KEYWORD_RE above
+  (generic degree words, never a specific school's own name) - used
+  only as a last-resort disambiguator when NEITHER header line matches
+  DEGREE_KEYWORD_RE, so a two-line header still gets its institution
+  line correctly identified instead of dropping both lines entirely.
+*/
+const INSTITUTION_KEYWORD_RE = /\b(university|college|institute|academy|polytechnic|school|seminary|conservatory)\b/i;
 const GPA_RE = /\bgpa\b[:\s]*([0-4]\.\d{1,2})(?:\s*\/\s*([0-9](?:\.\d)?))?/i;
 const MAX_HEADER_LINE_LENGTH = 100;
 const SENTENCE_END_RE = /[.!?]$/;
@@ -63,7 +72,37 @@ export function segmentEducationRanges(blocks: SemanticContentBlock[]): Educatio
   while (i < n) {
     const headerBlockIndices: number[] = [i];
     let headerEnd = i;
-    if (!hasDateEvidence(blocks[i].text) && i + 1 < n && blocks[i + 1].blockType !== "bullet" && hasDateEvidence(blocks[i + 1].text) && looksLikeHeaderLine(blocks[i])) {
+    const iHasDate = hasDateEvidence(blocks[i].text);
+    const next = i + 1 < n ? blocks[i + 1] : undefined;
+    const nextIsPlainHeaderLine = next !== undefined && next.blockType !== "bullet" && looksLikeHeaderLine(next);
+    if (!iHasDate && nextIsPlainHeaderLine && hasDateEvidence(next!.text) && looksLikeHeaderLine(blocks[i])) {
+      /* Institution-first \n Date-second (bench-A/C/E real shape). */
+      headerEnd = i + 1;
+      headerBlockIndices.push(i + 1);
+    } else if (
+      iHasDate &&
+      nextIsPlainHeaderLine &&
+      !hasDateEvidence(next!.text) &&
+      stripDateAnchor(blocks[i].text).beforeText.length === 0 &&
+      stripDateAnchor(blocks[i].text).afterText.length === 0
+    ) {
+      /* Phase 5D.3B - Date-first \n Institution-second (the user's own
+         primary bug example: "2027\nLaw Clerk (Seneca Polytechnic)").
+         Symmetric with the branch above - previously only the
+         institution-first ordering was ever paired into a 2-line
+         header, so a bare date-only first line was treated as a
+         complete 1-line header and its institution/credential line
+         silently fell through to a generic body/details line instead
+         of the institution field. Gated on the date line's own
+         stripped remainder being EMPTY (a genuinely bare date line,
+         e.g. "2019 - 2021") so an already-self-sufficient single-line
+         header that merely happens to also have real text before/after
+         its date ("Bachelor of Science, Riverton University - 2015")
+         is never incorrectly swallowed together with the next,
+         unrelated entry's own header line. extractEducationEntries's
+         own two-line branch already locates dateBlock by
+         hasDateEvidence on either line (order-agnostic), so no further
+         change is needed there. */
       headerEnd = i + 1;
       headerBlockIndices.push(i + 1);
     }
@@ -90,12 +129,6 @@ export function segmentEducationRanges(blocks: SemanticContentBlock[]): Educatio
 
 function makeValue(value: string, sectionId: string, block: SemanticContentBlock, confidence: number): StructuredTextValue {
   return { value, confidence, extractionMethod: "pattern-rule", source: traceFromBlock(sectionId, block) };
-}
-
-function stripDateAndTrailingPunctuation(text: string, dateRangeText: string): string {
-  const idx = text.indexOf(dateRangeText);
-  const before = idx >= 0 ? text.slice(0, idx) : text;
-  return before.trim().replace(/[,–—|-]+$/, "").trim();
 }
 
 /*
@@ -144,24 +177,54 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
 
     if (headerBlocks.length === 1) {
       const block = headerBlocks[0];
-      const dateParts = extractDateParts(block.text);
-      if (dateParts) {
-        dateRangeText = makeValue(dateParts.dateRangeText, sectionId, block, 0.8);
-        if (dateParts.startDateText) startDateText = makeValue(dateParts.startDateText, sectionId, block, 0.75);
-        if (dateParts.endDateText) endDateText = makeValue(dateParts.endDateText, sectionId, block, 0.75);
-        const before = stripDateAndTrailingPunctuation(block.text, dateParts.dateRangeText);
-        const segments = before.replace(/\([^)]*$/, "").trim().split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-        if (segments.length >= 2) {
-          reasonCodes.push("single-line-header-comma-split");
-          credential = makeValue(segments[0], sectionId, block, 0.7);
-          if (segments.length >= 3) {
-            fieldOfStudy = makeValue(segments[1], sectionId, block, 0.65);
-            institution = makeValue(segments[2], sectionId, block, 0.65);
+      const anchor = stripDateAnchor(block.text);
+      const hasDate = anchor.dateRangeText.length > 0;
+      if (hasDate) {
+        dateRangeText = makeValue(anchor.dateRangeText, sectionId, block, 0.8);
+        if (anchor.startDateText) startDateText = makeValue(anchor.startDateText, sectionId, block, 0.75);
+        if (anchor.endDateText) endDateText = makeValue(anchor.endDateText, sectionId, block, 0.75);
+
+        /* Phase 5D.3B - the date can appear before, after, or in the
+           middle of the credential/institution text ("2027\nLaw Clerk
+           (Seneca Polytechnic)" vs "Law Clerk, Seneca Polytechnic -
+           2027" vs "Law Clerk (Seneca Polytechnic) Expected in 04/2027
+           - Toronto, ON"). Whichever side carries real text becomes the
+           primary candidate; the other side (if also non-empty) becomes
+           a trailing location candidate - neither is ever silently
+           dropped. Scoped to the date-anchored case only (Date is the
+           Anchor this round's spec is built around) - a header with NO
+           date evidence at all isn't one of the listed header shapes,
+           so it's left to the renderer's own RawHeaderFallback (see
+           renderers.tsx) rather than guessed at here from comma
+           structure alone. */
+        const primary = anchor.beforeText.length > 0 ? anchor.beforeText : anchor.afterText;
+        const secondary = anchor.beforeText.length > 0 ? anchor.afterText : "";
+
+        if (primary.length > 0) {
+          const withoutParenTail = primary.replace(/\([^)]*$/, "").trim();
+          const segments = (withoutParenTail.length > 0 ? withoutParenTail : primary).split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+          if (segments.length >= 2) {
+            reasonCodes.push("single-line-header-comma-split");
+            credential = makeValue(segments[0], sectionId, block, 0.7);
+            if (segments.length >= 3) {
+              fieldOfStudy = makeValue(segments[1], sectionId, block, 0.65);
+              institution = makeValue(segments[2], sectionId, block, 0.65);
+            } else {
+              institution = makeValue(segments[1], sectionId, block, 0.65);
+            }
           } else {
-            institution = makeValue(segments[1], sectionId, block, 0.65);
+            /* No comma structure to split on, but the remainder text
+               itself IS real information (e.g. "Cheonan Bukil High
+               School" or "Law Clerk (Seneca Polytechnic)") - never drop
+               it. Institution is the safer default (EducationView/
+               renderEducation both show institution on its own even
+               when credential is empty). */
+            reasonCodes.push("single-line-header-whole-remainder-as-institution");
+            institution = makeValue(segments[0] ?? primary, sectionId, block, 0.6);
           }
+          if (secondary.length > 0) location = makeValue(secondary, sectionId, block, 0.5);
         } else {
-          reasonCodes.push("single-line-header-insufficient-comma-evidence");
+          reasonCodes.push("single-line-header-empty-after-date-strip");
         }
       } else {
         reasonCodes.push("single-line-header-no-date-evidence");
@@ -170,32 +233,80 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       const [lineA, lineB] = headerBlocks;
       const aHasDegree = DEGREE_KEYWORD_RE.test(lineA.text);
       const bHasDegree = DEGREE_KEYWORD_RE.test(lineB.text);
-      const credentialBlock = aHasDegree && !bHasDegree ? lineA : !aHasDegree && bHasDegree ? lineB : null;
-      const institutionBlock = credentialBlock === lineA ? lineB : credentialBlock === lineB ? lineA : null;
+      const aHasInstitutionWord = INSTITUTION_KEYWORD_RE.test(lineA.text);
+      const bHasInstitutionWord = INSTITUTION_KEYWORD_RE.test(lineB.text);
+
+      let credentialBlock: SemanticContentBlock | null = null;
+      let institutionBlock: SemanticContentBlock | null = null;
+      let disambiguatedBy: string | null = null;
+      if (aHasDegree && !bHasDegree) {
+        credentialBlock = lineA;
+        institutionBlock = lineB;
+        disambiguatedBy = "two-line-header-degree-keyword-disambiguated";
+      } else if (!aHasDegree && bHasDegree) {
+        credentialBlock = lineB;
+        institutionBlock = lineA;
+        disambiguatedBy = "two-line-header-degree-keyword-disambiguated";
+      } else if (aHasInstitutionWord && !bHasInstitutionWord) {
+        institutionBlock = lineA;
+        credentialBlock = lineB;
+        disambiguatedBy = "two-line-header-institution-keyword-disambiguated";
+      } else if (!aHasInstitutionWord && bHasInstitutionWord) {
+        institutionBlock = lineB;
+        credentialBlock = lineA;
+        disambiguatedBy = "two-line-header-institution-keyword-disambiguated";
+      }
 
       const dateBlock = hasDateEvidence(lineA.text) ? lineA : hasDateEvidence(lineB.text) ? lineB : undefined;
-      if (dateBlock) {
-        const dateParts = extractDateParts(dateBlock.text);
-        if (dateParts) {
-          dateRangeText = makeValue(dateParts.dateRangeText, sectionId, dateBlock, 0.8);
-          if (dateParts.startDateText) startDateText = makeValue(dateParts.startDateText, sectionId, dateBlock, 0.75);
-          if (dateParts.endDateText) endDateText = makeValue(dateParts.endDateText, sectionId, dateBlock, 0.75);
+      const dateAnchor = dateBlock ? stripDateAnchor(dateBlock.text) : undefined;
+      if (dateAnchor && dateAnchor.dateRangeText.length > 0) {
+        dateRangeText = makeValue(dateAnchor.dateRangeText, sectionId, dateBlock!, 0.8);
+        if (dateAnchor.startDateText) startDateText = makeValue(dateAnchor.startDateText, sectionId, dateBlock!, 0.75);
+        if (dateAnchor.endDateText) endDateText = makeValue(dateAnchor.endDateText, sectionId, dateBlock!, 0.75);
+      }
+
+      function remainderOf(block: SemanticContentBlock): string {
+        if (block === dateBlock && dateAnchor) {
+          return [dateAnchor.beforeText, dateAnchor.afterText].filter((s) => s.length > 0).join(" ");
         }
+        return cleanHeaderFragment(block.rawText);
       }
 
       if (credentialBlock && institutionBlock) {
-        reasonCodes.push("two-line-header-degree-keyword-disambiguated");
-        const credentialText = dateBlock === credentialBlock ? stripDateAndTrailingPunctuation(credentialBlock.text, dateRangeText?.value ?? "") : credentialBlock.rawText;
+        reasonCodes.push(disambiguatedBy!);
+        const credentialText = remainderOf(credentialBlock);
         const { credential: c, fieldOfStudy: f } = splitCredentialField(credentialText);
-        credential = makeValue(c, sectionId, credentialBlock, 0.75);
-        if (f) fieldOfStudy = makeValue(f, sectionId, credentialBlock, 0.65);
+        if (c.length > 0) {
+          credential = makeValue(c, sectionId, credentialBlock, 0.75);
+          if (f) fieldOfStudy = makeValue(f, sectionId, credentialBlock, 0.65);
+        }
 
-        const institutionText = dateBlock === institutionBlock ? stripDateAndTrailingPunctuation(institutionBlock.text, dateRangeText?.value ?? "") : institutionBlock.rawText;
+        const institutionText = remainderOf(institutionBlock);
         const { institution: inst, location: loc } = splitInstitutionLocation(institutionText);
-        institution = makeValue(inst, sectionId, institutionBlock, 0.75);
-        if (loc) location = makeValue(loc, sectionId, institutionBlock, 0.7);
+        if (inst.length > 0) {
+          institution = makeValue(inst, sectionId, institutionBlock, 0.75);
+          if (loc) location = makeValue(loc, sectionId, institutionBlock, 0.7);
+        }
+      } else if (dateBlock) {
+        /* Phase 5D.3B - neither line carries a generic degree or
+           institution keyword (both real, evidenced shapes: two plain
+           proper-noun lines with no lexical disambiguator). There is no
+           signal left to decide WHICH line is credential vs
+           institution - never drop either line's text over that
+           ambiguity. Institution is the always-visible field (shown
+           alone even when credential is empty), so the non-date line
+           goes there and the date line's own remainder (if any)
+           becomes the credential. segmentEducationRanges only ever
+           builds a 2-block header when one of the two lines carries
+           date evidence, so dateBlock is guaranteed here. */
+        reasonCodes.push("two-line-header-positional-fallback-no-keyword-signal");
+        const nonDateBlock = dateBlock === lineA ? lineB : lineA;
+        const nonDateText = cleanHeaderFragment(nonDateBlock.rawText);
+        if (nonDateText.length > 0) institution = makeValue(nonDateText, sectionId, nonDateBlock, 0.55);
+        const dateBlockRemainder = remainderOf(dateBlock);
+        if (dateBlockRemainder.length > 0) credential = makeValue(dateBlockRemainder, sectionId, dateBlock, 0.5);
       } else {
-        reasonCodes.push("two-line-header-no-degree-keyword-disambiguator");
+        reasonCodes.push("two-line-header-no-date-and-no-keyword-signal");
       }
     }
 

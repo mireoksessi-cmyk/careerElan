@@ -8,7 +8,7 @@
 import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
-import { hasDateEvidence, extractDateParts } from "./dateRangeParsing";
+import { hasDateEvidence, stripDateAnchor } from "./dateRangeParsing";
 import type { AwardEntry, StructuredTextValue } from "./types";
 
 const BULLET_PREFIX_RE = /^[•\-*◦▪·‣⁃]\s+/;
@@ -47,13 +47,20 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
     const lastBlock = blocks[blocks.length - 1];
     const reasonCodes: string[] = [];
 
-    const dateParts = extractDateParts(combinedText);
+    const anchor = stripDateAnchor(combinedText);
+    const hasDate = anchor.dateRangeText.length > 0;
     let name: StructuredTextValue | undefined;
     let dateText: StructuredTextValue | undefined;
 
-    if (dateParts) {
-      dateText = makeValue(dateParts.dateRangeText, sectionId, lastBlock, 0.75);
-      const nameText = combinedText.slice(0, combinedText.indexOf(dateParts.dateRangeText)).trim().replace(/[,–—-]+$/, "").trim();
+    if (hasDate) {
+      dateText = makeValue(anchor.dateRangeText, sectionId, lastBlock, 0.75);
+      /* Phase 5D.3B - the date can land before, after, or in the middle
+         of the award name ("2008 Samsung SDI Award" is date-FIRST, the
+         opposite of "Samsung SDI Award, 2008" - the previous version of
+         this function only ever looked at text BEFORE the date, so a
+         date-first line lost its entire name). Whichever side is
+         non-empty becomes the name candidate; never drop either. */
+      const nameText = anchor.beforeText.length > 0 ? anchor.beforeText : anchor.afterText;
       if (nameText.length > 0) name = makeValue(nameText, sectionId, lastBlock, 0.7);
       reasonCodes.push("date-anchored-cluster");
     } else {

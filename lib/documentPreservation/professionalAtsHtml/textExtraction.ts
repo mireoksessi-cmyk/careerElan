@@ -31,6 +31,19 @@ function nonEmpty(text: string | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+/*
+  Phase 5D.3B - mirrors renderers.tsx's own RawHeaderFallback exactly:
+  when an Education/Credential/Award/Publication entry's structured
+  fields AND body items are ALL empty, the renderer falls back to
+  showing rawHeaderText verbatim rather than nothing - so the "expected
+  text" ground truth here must expect that same fallback text, or the
+  validator would flag correctly-rendered fallback output as "invented
+  text" that isn't in its own fragment list.
+*/
+function rawHeaderFallbackFragments(rawHeaderText: string): string[] {
+  return rawHeaderText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+}
+
 export function extractIdentityFragments(identity: ResumeIdentity): string[] {
   const fragments: string[] = [];
   const name = nonEmpty(identity.fullName?.value);
@@ -93,6 +106,7 @@ export function extractEducationEntryFragments(entry: EducationEntry): string[] 
     const v = nonEmpty(d.value);
     if (v) fragments.push(v);
   }
+  if (fragments.length === 0) fragments.push(...rawHeaderFallbackFragments(entry.rawHeaderText));
   return fragments;
 }
 
@@ -106,6 +120,7 @@ export function extractCredentialEntryFragments(entry: CredentialEntry): string[
     const v = nonEmpty(d.value);
     if (v) fragments.push(v);
   }
+  if (fragments.length === 0) fragments.push(...rawHeaderFallbackFragments(entry.rawHeaderText));
   return fragments;
 }
 
@@ -137,6 +152,7 @@ export function extractAwardEntryFragments(entry: AwardEntry): string[] {
     const v = nonEmpty(d.value);
     if (v) fragments.push(v);
   }
+  if (fragments.length === 0) fragments.push(...rawHeaderFallbackFragments(entry.rawHeaderText));
   return fragments;
 }
 
@@ -154,6 +170,7 @@ export function extractPublicationEntryFragments(entry: PublicationEntry): strin
     const v = nonEmpty(d.value);
     if (v) fragments.push(v);
   }
+  if (fragments.length === 0) fragments.push(...rawHeaderFallbackFragments(entry.rawHeaderText));
   return fragments;
 }
 

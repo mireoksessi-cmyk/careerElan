@@ -240,7 +240,25 @@ function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips:
       keepNext: items.length > 0,
     });
   }
+  /* Phase 5D.3B - Fallback requirement: every structured field this
+     entry would normally render (headerLine1, meta, items) is empty -
+     show rawHeaderText verbatim instead of nothing. Mirrors
+     renderers.tsx's own RawHeaderFallback exactly. */
+  if (headerLine1.length === 0 && meta.length === 0 && items.length === 0) {
+    renderRawHeaderFallback(block, ctx, blockGapTwips, entry.rawHeaderText);
+  }
   renderHeaderBearingSubItems(block, ctx, items, true);
+}
+
+function renderRawHeaderFallback(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number, rawHeaderText: string) {
+  const lines = rawHeaderText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  lines.forEach((line, i) => {
+    pushParagraph(ctx, block.id, block.sourceEntryId, [run(line, ctx, { bold: i === 0 })], {
+      spacingBeforeTwips: i === 0 ? blockGapTwips : 0,
+      keepNext: i === 0 && lines.length > 1,
+    });
+  });
+  if (lines.length > 0) ctx.entryHeadersWithKeepNext++;
 }
 
 function renderDetailsEntry(
@@ -248,7 +266,8 @@ function renderDetailsEntry(
   ctx: BuildContext,
   blockGapTwips: number,
   header: { primary?: string; meta?: (string | undefined)[] },
-  items: string[]
+  items: string[],
+  rawHeaderText: string
 ) {
   const headerLine1: TextRun[] = [];
   if (header.primary) headerLine1.push(run(header.primary, ctx, { bold: true }));
@@ -263,16 +282,20 @@ function renderDetailsEntry(
       keepNext: items.length > 0,
     });
   }
+  /* Phase 5D.3B - see renderEducation's own comment above. */
+  if (headerLine1.length === 0 && meta.length === 0 && items.length === 0) {
+    renderRawHeaderFallback(block, ctx, blockGapTwips, rawHeaderText);
+  }
   renderHeaderBearingSubItems(block, ctx, items, false);
 }
 
 function renderCredential(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as CredentialEntry;
-  renderDetailsEntry(block, ctx, blockGapTwips, { primary: val(entry.name), meta: [val(entry.issuer), val(entry.issueDateText)] }, entry.details.map((d) => d.value));
+  renderDetailsEntry(block, ctx, blockGapTwips, { primary: val(entry.name), meta: [val(entry.issuer), val(entry.issueDateText)] }, entry.details.map((d) => d.value), entry.rawHeaderText);
 }
 function renderAward(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as AwardEntry;
-  renderDetailsEntry(block, ctx, blockGapTwips, { primary: val(entry.name), meta: [val(entry.issuer), val(entry.dateText)] }, entry.details.map((d) => d.value));
+  renderDetailsEntry(block, ctx, blockGapTwips, { primary: val(entry.name), meta: [val(entry.issuer), val(entry.dateText)] }, entry.details.map((d) => d.value), entry.rawHeaderText);
 }
 function renderPublication(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as PublicationEntry;
@@ -282,7 +305,8 @@ function renderPublication(block: AssemblyBlock, ctx: BuildContext, blockGapTwip
     ctx,
     blockGapTwips,
     { primary: val(entry.title), meta: [authors || undefined, val(entry.publisherOrVenue), val(entry.dateText)] },
-    entry.details.map((d) => d.value)
+    entry.details.map((d) => d.value),
+    entry.rawHeaderText
   );
 }
 

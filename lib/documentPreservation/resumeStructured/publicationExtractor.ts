@@ -12,6 +12,7 @@
 import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
+import { extractDateParts } from "./dateRangeParsing";
 import type { PublicationEntry, StructuredTextValue } from "./types";
 
 const YEAR_PAREN_RE = /\((?:19|20)\d{2}\)/;
@@ -46,7 +47,21 @@ export function extractPublicationEntries(sectionId: string, bodyBlocks: Semanti
       if (sentences.length >= 1) title = makeValue(sentences[0].replace(/\.$/, ""), sectionId, block, 0.6);
       if (sentences.length >= 2) publisherOrVenue = makeValue(sentences.slice(1).join(". "), sectionId, block, 0.55);
     } else {
-      reasonCodes.push("no-year-anchor-preserved-as-detail-only");
+      /* Phase 5D.3B - no "(YYYY)" citation marker, but a general date
+         evidence (a bare year, "Date + Publication Title" shape) may
+         still be present - this only recovers dateText, never attempts
+         to split title/authors/venue from a shape this module isn't
+         built to parse ("완벽한 citation parser를 만들려고 하지
+         않는다" - see this file's own header comment). details[] below
+         already guarantees the full citation text is never lost either
+         way. */
+      const dateParts = extractDateParts(text);
+      if (dateParts) {
+        dateText = makeValue(dateParts.dateRangeText, sectionId, block, 0.6);
+        reasonCodes.push("general-date-evidence-anchor-found-no-year-parenthetical");
+      } else {
+        reasonCodes.push("no-year-anchor-preserved-as-detail-only");
+      }
     }
 
     const urlMatch = text.match(URL_OR_DOI_RE);

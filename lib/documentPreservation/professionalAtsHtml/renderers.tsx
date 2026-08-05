@@ -85,6 +85,29 @@ function joinContact(parts: (string | undefined)[]): string {
   return parts.filter((p): p is string => p !== undefined && p.length > 0).join(" · ");
 }
 
+/*
+  Phase 5D.3B - Generic Single-Line Header Recovery Hardening's own
+  explicit Fallback requirement: if EVERY structured field this block
+  would normally render is empty, show the entry's own rawHeaderText
+  verbatim instead of nothing - "정보를 숨기지 않는다". This is a
+  last-resort safety net, not the primary fix (educationExtractor.ts/
+  credentialExtractor.ts/awardExtractor.ts's own date-anchor-strip
+  logic already recovers real header text generically in the vast
+  majority of shapes) - it only fires when structured extraction truly
+  found nothing at all to work with.
+*/
+function RawHeaderFallback({ rawHeaderText }: { rawHeaderText: string }) {
+  const lines = rawHeaderText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length === 0) return null;
+  return (
+    <div data-raw-header-fallback>
+      {lines.map((line, i) => (
+        <div key={i}>{line}</div>
+      ))}
+    </div>
+  );
+}
+
 export function experienceLikeSubItemCount(entry: ExperienceEntry | ProjectEntry): number {
   return entry.content.length;
 }
@@ -253,6 +276,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
   const location = val(entry.location);
   const dateRange = val(entry.dateRangeText);
   const gpa = val(entry.gpa);
+  const hasAnyStructuredField = credential || institution || field || location || dateRange || gpa || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="education-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
@@ -265,6 +289,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
             </strong>
           )}
           {(field || location || dateRange || gpa) && <div>{joinContact([field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+          {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
       {items.length > 0 && (
@@ -282,12 +307,14 @@ function CredentialView({ block, subRange, isContinuation, spacing = DEFAULT_SPA
   const name = val(entry.name);
   const issuer = val(entry.issuer);
   const date = val(entry.issueDateText);
+  const hasAnyStructuredField = name || issuer || date || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="credential-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
           {name && <strong>{name}</strong>}
           {(issuer || date) && <div>{joinContact([issuer, date])}</div>}
+          {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
       {items.map((text, i) => inRange(i, subRange) && (
@@ -305,12 +332,14 @@ function AwardView({ block, subRange, isContinuation, spacing = DEFAULT_SPACING 
   const name = val(entry.name);
   const issuer = val(entry.issuer);
   const date = val(entry.dateText);
+  const hasAnyStructuredField = name || issuer || date || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="award-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
           {name && <strong>{name}</strong>}
           {(issuer || date) && <div>{joinContact([issuer, date])}</div>}
+          {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
       {items.map((text, i) => inRange(i, subRange) && (
@@ -329,12 +358,14 @@ function PublicationView({ block, subRange, isContinuation, spacing = DEFAULT_SP
   const venue = val(entry.publisherOrVenue);
   const date = val(entry.dateText);
   const authors = entry.authors.map((a) => a.value).filter((a) => a.trim().length > 0).join(", ");
+  const hasAnyStructuredField = title || authors || venue || date || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="publication-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
           {title && <strong>{title}</strong>}
           {(authors || venue || date) && <div>{joinContact([authors || undefined, venue, date])}</div>}
+          {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
       {items.map((text, i) => inRange(i, subRange) && (

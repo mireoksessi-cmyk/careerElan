@@ -45,6 +45,20 @@ export const DATE_RANGE_CAPTURE_RE = new RegExp(`(${YEAR_OR_PRESENT})\\s*(${DATE
 // (e.g. "SAIT Polytechnic | Calgary, AB - 2016" - a real fixture shape,
 // bench/resume-C-mid-ats.pdf's certificate line).
 export const SINGLE_YEAR_RE = /(?:19|20)\d{2}/;
+/*
+  Phase 5D.3B - a single (non-range) date token, INCLUDING its optional
+  leading month ("Jan 2021 - Registered Nurse License", one of this
+  round's required header shapes: Month Year with no range). Using the
+  full YEAR_OR_PRESENT alternative here (not the bare SINGLE_YEAR_RE
+  above) matters because stripDateAnchor removes exactly the matched
+  substring and returns everything else as institution/credential/award/
+  publication text - if only the bare year "2021" were matched, the
+  leading "Jan " would be left dangling in beforeText and misread as the
+  ENTIRE remaining credential/institution name (a real, confirmed data-
+  loss bug this fixes: "Jan" becoming the credential name while the real
+  credential text "Registered Nurse License" was silently dropped).
+*/
+export const SINGLE_DATE_RE = new RegExp(YEAR_OR_PRESENT, "i");
 
 export function isDateRangeLine(text: string): boolean {
   return DATE_RANGE_RE.test(text);
@@ -72,9 +86,60 @@ export function extractDateParts(text: string): DateParts | null {
   if (rangeMatch) {
     return { dateRangeText: rangeMatch[0], startDateText: rangeMatch[1], endDateText: rangeMatch[3] };
   }
-  const singleMatch = text.match(SINGLE_YEAR_RE);
+  const singleMatch = text.match(SINGLE_DATE_RE);
   if (singleMatch) {
     return { dateRangeText: singleMatch[0] };
   }
   return null;
+}
+
+/*
+  Phase 5D.3B - Generic Single-Line Header Recovery Hardening. A single-
+  line (or already-joined multi-line) header can put its date ANYWHERE
+  relative to the institution/credential/award/publication text - before
+  it ("2019 - 2021 Toronto Metropolitan University"), after it
+  ("Toronto Metropolitan University, 2019 - 2021"), or in the middle
+  ("Law Clerk (Seneca Polytechnic) Expected in 04/2027 - Toronto, ON").
+  The date is only ever an ANCHOR for segmentation, never the field
+  being extracted - so this strips just the matched date span (wherever
+  it falls) and returns BOTH surrounding fragments, never discarding
+  either. Callers (educationExtractor.ts, credentialExtractor.ts,
+  awardExtractor.ts, publicationExtractor.ts) decide which fragment(s)
+  to use as their own institution/credential/name/title candidate -
+  this module has no opinion on resume-section semantics, only on where
+  the date sits in the string.
+*/
+const DANGLING_SEPARATOR_RE = /^[\s,.\-–—|:;()]+|[\s,.\-–—|:;()]+$/g;
+const EMPTY_PARENS_RE = /\(\s*\)/g;
+
+export function cleanHeaderFragment(text: string): string {
+  return text
+    .replace(EMPTY_PARENS_RE, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(DANGLING_SEPARATOR_RE, "")
+    .trim();
+}
+
+export type DateAnchorResult = DateParts & {
+  /* Text before the matched date span, separators/parens trimmed - "" if
+     the date is the very first token or no date was found. */
+  beforeText: string;
+  /* Text after the matched date span, separators/parens trimmed - "" if
+     the date is the very last token or no date was found. */
+  afterText: string;
+};
+
+export function stripDateAnchor(text: string): DateAnchorResult {
+  const dateParts = extractDateParts(text);
+  if (!dateParts) {
+    return { dateRangeText: "", beforeText: cleanHeaderFragment(text), afterText: "" };
+  }
+  const idx = text.indexOf(dateParts.dateRangeText);
+  if (idx < 0) {
+    return { ...dateParts, beforeText: cleanHeaderFragment(text), afterText: "" };
+  }
+  const before = cleanHeaderFragment(text.slice(0, idx));
+  const after = cleanHeaderFragment(text.slice(idx + dateParts.dateRangeText.length));
+  return { ...dateParts, beforeText: before, afterText: after };
 }

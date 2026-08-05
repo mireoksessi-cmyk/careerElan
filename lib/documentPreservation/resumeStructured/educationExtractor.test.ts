@@ -91,12 +91,29 @@ const withHonors = [block("Bachelor of Science, Biology"), block("McGill Univers
 const withHonorsEntries = extractEducationEntries("s1", withHonors);
 checkTrue("honors: detail line with 'Honours'/'Dean's List' routed to honors[], not generic details[]", withHonorsEntries[0].honors.length === 1);
 
-// --- degree ambiguity: certification course NOT force-classified as a degree (no degree keyword anywhere) ---
+// --- degree ambiguity, but a generic INSTITUTION keyword ("University")
+// still resolves it (Phase 5D.3B) - no degree keyword anywhere, but
+// "University" on the second line is enough to identify it as the
+// institution line without guessing at any specific school's name. ---
 counter = 0;
 const noDegreeKeyword = [block("Advanced Clinical Nutrition Workshop Series"), block("Dalhousie University - 2022")];
 const noDegreeEntries = extractEducationEntries("s1", noDegreeKeyword);
-checkTrue("no degree keyword: entry preserved, but marked uncertain rather than guessing which line is which", noDegreeEntries[0].isUncertain);
-check("no degree keyword: rawHeaderText preserved verbatim regardless", noDegreeEntries[0].rawHeaderText, "Advanced Clinical Nutrition Workshop Series\nDalhousie University - 2022");
+check("institution-keyword fallback: credential is the non-institution line", noDegreeEntries[0].credential?.value, "Advanced Clinical Nutrition Workshop Series");
+check("institution-keyword fallback: institution resolved via generic 'University' keyword", noDegreeEntries[0].institution?.value, "Dalhousie University");
+checkTrue("institution-keyword fallback: no longer marked uncertain (both fields recovered)", !noDegreeEntries[0].isUncertain);
+check("institution-keyword fallback: rawHeaderText preserved verbatim regardless", noDegreeEntries[0].rawHeaderText, "Advanced Clinical Nutrition Workshop Series\nDalhousie University - 2022");
+
+// --- truly no lexical signal at all (neither degree nor institution
+// keyword on either line) - Phase 5D.3B's positional fallback still
+// preserves BOTH lines' text (never drops either), even though it
+// can't confidently tell which is credential vs institution. ---
+counter = 0;
+const noSignalAtAll = [block("Advanced Workshop Series Alpha"), block("Beta Learning Centre - 2022")];
+const noSignalEntries = extractEducationEntries("s1", noSignalAtAll);
+checkTrue("no lexical signal: institution populated from the non-date line", noSignalEntries[0].institution !== undefined);
+check("no lexical signal: institution is the non-date line's full text", noSignalEntries[0].institution?.value, "Advanced Workshop Series Alpha");
+check("no lexical signal: credential recovered from the date line's own remainder", noSignalEntries[0].credential?.value, "Beta Learning Centre");
+checkTrue("no lexical signal: reasonCodes disclose the positional fallback (not a guessed keyword match)", noSignalEntries[0].reasonCodes.includes("two-line-header-positional-fallback-no-keyword-signal"));
 
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
