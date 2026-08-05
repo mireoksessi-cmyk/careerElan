@@ -37,6 +37,7 @@ import type {
   AwardEntry,
   PublicationEntry,
   CustomResumeSection,
+  MetricGrid,
   StructuredTextValue,
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
@@ -309,6 +310,39 @@ function CustomSectionView({ block, subRange, isContinuation, spacing = DEFAULT_
   );
 }
 
+/*
+  Phase 5D.2B - one Value/Label pair per column, wrapped so a 4-column
+  KPI band still reads correctly if the paper is too narrow (same
+  general-layout reasoning as ExperienceLikeView - never a fixed pixel
+  width tied to any one resume's own column count). Never splittable
+  (breakPolicy.ts's own "whole-block" policy for this kind) - subRange/
+  isContinuation are accepted for signature consistency with every
+  other block view but have no effect here, mirroring IdentityView/
+  SkillGroupView's own treatment of non-splittable kinds.
+*/
+function MetricGridView({ block, spacing = DEFAULT_SPACING }: { block: AssemblyBlock; spacing?: DensitySpacingTokens }) {
+  const grid = block.payload as MetricGrid;
+  return (
+    <div data-block-id={block.id} data-block-kind="metric-grid" data-source-entry-id={block.sourceEntryId} style={{ display: "flex", flexWrap: "wrap", gap: spacing.entryGapPx }}>
+      {grid.entries.map((entry) => (
+        <div key={entry.id} data-sub-index={entry.id} style={{ display: "flex", flexDirection: "column" }}>
+          <strong style={{ fontSize: "1.15em" }}>{entry.value.value}</strong>
+          {/* No CSS text-transform here (unlike SectionHeadingView's
+              already-canonically-uppercase labels) - a metric label's
+              case comes straight from the source document and must
+              render verbatim; text-transform would visually uppercase
+              it but leave the DOM text node (and therefore the PDF's
+              exported glyphs) mismatched against the canonical parity
+              manifest for any label that isn't already all-caps in the
+              source (real-fixture evidence bug, caught by f11's
+              deliberately mixed-case labels). */}
+          <span style={{ fontSize: "0.75em", letterSpacing: "0.03em" }}>{entry.label.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AssemblyBlockView({
   block,
   subRange,
@@ -341,6 +375,8 @@ export function AssemblyBlockView({
       return <PublicationView block={block} subRange={subRange} isContinuation={isContinuation} spacing={spacing} />;
     case "custom-section":
       return <CustomSectionView block={block} subRange={subRange} isContinuation={isContinuation} spacing={spacing} />;
+    case "metric-grid":
+      return <MetricGridView block={block} spacing={spacing} />;
     default:
       return null;
   }

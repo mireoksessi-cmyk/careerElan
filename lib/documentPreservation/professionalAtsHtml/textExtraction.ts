@@ -23,6 +23,7 @@ import type {
   AwardEntry,
   PublicationEntry,
   CustomResumeSection,
+  MetricGrid,
 } from "../resumeStructured/types";
 
 function nonEmpty(text: string | undefined): string | undefined {
@@ -192,6 +193,22 @@ export function extractCustomSectionFragments(section: CustomResumeSection): str
   return fragments;
 }
 
+/*
+  Phase 5D.2B - mirrors renderers.tsx's MetricGridView exactly: every
+  entry contributes its value text and its label text, in entry order -
+  the same Value/Label pair the renderer draws, nothing paraphrased.
+*/
+export function extractMetricGridFragments(grid: MetricGrid): string[] {
+  const fragments: string[] = [];
+  for (const entry of grid.entries) {
+    const value = nonEmpty(entry.value.value);
+    if (value) fragments.push(value);
+    const label = nonEmpty(entry.label.value);
+    if (label) fragments.push(label);
+  }
+  return fragments;
+}
+
 export function extractPayloadFragments(kind: string, payload: unknown): string[] {
   switch (kind) {
     case "identity":
@@ -215,6 +232,8 @@ export function extractPayloadFragments(kind: string, payload: unknown): string[
       return extractPublicationEntryFragments(payload as PublicationEntry);
     case "custom-section":
       return extractCustomSectionFragments(payload as CustomResumeSection);
+    case "metric-grid":
+      return extractMetricGridFragments(payload as MetricGrid);
     default:
       return [];
   }

@@ -34,7 +34,7 @@ check("only some visible -> gaps closed, order preserved", computeVisibleSection
 check("none visible -> empty array", computeVisibleSectionOrder({}), []);
 
 check("hidden order is the complement", computeHiddenSectionOrder({ identity: true, education: true }), [
-  "professional_summary", "core_skills", "professional_experience", "volunteer_experience",
+  "metric_highlights", "professional_summary", "core_skills", "professional_experience", "volunteer_experience",
   "certifications_licenses", "projects", "awards", "publications", "additional_information",
 ]);
 

@@ -56,6 +56,18 @@ function collectAllTraces(model: ResumeStructuredModel): SourceTrace[] {
   for (const a of model.awards) traces.push(a.source);
   for (const p of model.publications) traces.push(p.source);
   for (const c of model.customSections) traces.push(c.source);
+  // Phase 5D.2B - each MetricEntry's value/label pushed independently
+  // (not merged via the grid's own aggregate `.source`) because the two
+  // sides can legitimately trace back to two different Phase 1 sections
+  // (see metricGridExtractor.ts) - merging them into one trace would
+  // under-report section coverage for whichever side's section came
+  // second in mergeTraces' own first-wins sourceSectionId rule.
+  for (const g of model.metricGrids) {
+    for (const e of g.entries) {
+      traces.push(e.value.source);
+      traces.push(e.label.source);
+    }
+  }
   return traces;
 }
 
@@ -115,6 +127,12 @@ function collectAllStructuredTextValues(model: ResumeStructuredModel): Structure
   }
   for (const c of model.customSections) {
     c.paragraphs.forEach(pushIfValue);
+  }
+  for (const g of model.metricGrids) {
+    for (const e of g.entries) {
+      pushIfValue(e.value);
+      pushIfValue(e.label);
+    }
   }
   return values;
 }

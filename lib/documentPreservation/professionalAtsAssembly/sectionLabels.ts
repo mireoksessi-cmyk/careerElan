@@ -9,6 +9,7 @@ import type { ProfessionalAtsSectionKey } from "./types";
 
 export const PROFESSIONAL_ATS_SECTION_ORDER: ProfessionalAtsSectionKey[] = [
   "identity",
+  "metric_highlights",
   "professional_summary",
   "core_skills",
   "professional_experience",
@@ -23,6 +24,7 @@ export const PROFESSIONAL_ATS_SECTION_ORDER: ProfessionalAtsSectionKey[] = [
 
 export const PROFESSIONAL_ATS_SECTION_LABELS: Record<ProfessionalAtsSectionKey, string | null> = {
   identity: null,
+  metric_highlights: "KEY METRICS",
   professional_summary: "PROFESSIONAL SUMMARY",
   core_skills: "CORE SKILLS",
   professional_experience: "PROFESSIONAL EXPERIENCE",

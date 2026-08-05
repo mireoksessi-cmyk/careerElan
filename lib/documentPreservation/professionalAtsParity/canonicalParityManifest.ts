@@ -31,6 +31,7 @@ import type {
   AwardEntry,
   PublicationEntry,
   CustomResumeSection,
+  MetricGrid,
 } from "../resumeStructured/types";
 import type { CanonicalParityEntry, CanonicalParityManifest, ParityFragment, ParityFragmentKind } from "./types";
 
@@ -126,6 +127,19 @@ function tagCustomSection(section: CustomResumeSection): TaggedFragment[] {
   return tagged;
 }
 
+/*
+  Phase 5D.2B - mirrors extractMetricGridFragments' value-then-label,
+  entry-order-preserving field order exactly (see textExtraction.ts).
+*/
+function tagMetricGrid(grid: MetricGrid): TaggedFragment[] {
+  const tagged: TaggedFragment[] = [];
+  for (const entry of grid.entries) {
+    if (nonEmpty(entry.value.value)) tagged.push({ value: entry.value.value.trim(), kind: "metric" });
+    if (nonEmpty(entry.label.value)) tagged.push({ value: entry.label.value.trim(), kind: "metric" });
+  }
+  return tagged;
+}
+
 function tagSkillGroup(group: SkillGroup): TaggedFragment[] {
   const tagged: TaggedFragment[] = [];
   if (nonEmpty(group.label)) tagged.push({ value: group.label!.trim(), kind: "skill" });
@@ -171,6 +185,8 @@ function tagBlockFragments(block: AssemblyBlock): TaggedFragment[] {
       return tagPublication(block.payload as PublicationEntry);
     case "custom-section":
       return tagCustomSection(block.payload as CustomResumeSection);
+    case "metric-grid":
+      return tagMetricGrid(block.payload as MetricGrid);
     default:
       return [];
   }

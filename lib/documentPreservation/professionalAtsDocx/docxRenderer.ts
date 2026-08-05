@@ -51,6 +51,7 @@ import type {
   AwardEntry,
   PublicationEntry,
   CustomResumeSection,
+  MetricGrid,
   StructuredTextValue,
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
@@ -285,6 +286,30 @@ function renderCustomSection(block: AssemblyBlock, ctx: BuildContext, blockGapTw
   }
 }
 
+/*
+  Phase 5D.2B - one bold value paragraph + one plain label paragraph
+  per MetricEntry, keepNext-linked so Word never breaks a pair across a
+  page. DOCX has no natural side-by-side column primitive this renderer
+  otherwise uses (every other block here is a linear paragraph flow),
+  so entries render as a vertical stack of pairs in the SAME order
+  detectMetricGrids found them - preserves the Value<->Label meaning and
+  order (spec's actual requirement) rather than chasing a pixel-identical
+  multi-column layout across formats.
+*/
+function renderMetricGrid(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
+  const grid = block.payload as MetricGrid;
+  grid.entries.forEach((entry, i) => {
+    pushParagraph(ctx, block.id, block.sourceEntryId, [run(entry.value.value, ctx, { bold: true })], {
+      spacingBeforeTwips: i === 0 ? blockGapTwips : ctx.bulletGapTwips,
+      keepNext: true,
+    });
+    pushParagraph(ctx, block.id, block.sourceEntryId, [run(entry.label.value, ctx)], {
+      spacingBeforeTwips: 0,
+      keepLines: true,
+    });
+  });
+}
+
 function renderBlock(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   switch (block.kind) {
     case "identity":
@@ -307,6 +332,8 @@ function renderBlock(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: num
       return renderPublication(block, ctx, blockGapTwips);
     case "custom-section":
       return renderCustomSection(block, ctx, blockGapTwips);
+    case "metric-grid":
+      return renderMetricGrid(block, ctx, blockGapTwips);
     default:
       return;
   }

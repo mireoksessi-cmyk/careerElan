@@ -29,6 +29,7 @@ import { extractAwardEntries } from "./awardExtractor";
 import { extractPublicationEntries } from "./publicationExtractor";
 import { adaptCustomSection } from "./customSectionAdapter";
 import { splitEmbeddedCanonicalSubsections } from "./embeddedSubsectionSplitter";
+import { detectMetricGrids } from "./metricGridExtractor";
 import { validateStructuredResume } from "./structuredValidator";
 import type { CustomResumeSection, ResumeSlotKey, ResumeStructuredModel, SourceTrace } from "./types";
 
@@ -160,6 +161,7 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
     awards: [],
     publications: [],
     customSections: [],
+    metricGrids: [],
     slotAvailability: {
       identity: false,
       professional_summary: false,
@@ -202,7 +204,28 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
 
   let summaryConsumed = false;
 
-  for (const section of document.sections) {
+  /*
+    Phase 5D.2B - detected once, over EVERY section's blocks in their
+    original Phase 1 form (never re-sorted, sourceOrder untouched), so a
+    KPI/metric grid can be recovered even when Phase 1's own
+    section-boundary logic (unchanged, out of scope this round) split
+    the grid's value row and label row into two different sections - see
+    metricGridExtractor.ts's own header comment for the real-fixture
+    evidence this handles. Each consumed block is then filtered OUT of
+    its own section's `blocks` before that section reaches any other
+    extractor below, so nothing is ever represented twice (once as a
+    MetricEntry, again as ordinary custom-section text). A section left
+    with zero blocks after filtering still flows through its normal
+    switch branch below - typically `adaptCustomSection` on an
+    empty-blocks section - which is what keeps section-level coverage
+    (structuredValidator.ts checks A/F) satisfied without inventing or
+    duplicating anything.
+  */
+  const { grids: metricGrids, consumedBlockIds } = detectMetricGrids(document.sections);
+  model.metricGrids = metricGrids;
+  const sections = consumedBlockIds.size > 0 ? document.sections.map((s) => ({ ...s, blocks: s.blocks.filter((b) => !consumedBlockIds.has(b.id)) })) : document.sections;
+
+  for (const section of sections) {
     if (section.id === identitySourceSectionId) continue;
     const body = bodyBlocksOf(section);
 

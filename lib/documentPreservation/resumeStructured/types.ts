@@ -205,6 +205,38 @@ export type PublicationEntry = {
   reasonCodes: string[];
 };
 
+/*
+  Phase 5D.2B - a single Value/Label pair recovered from a KPI grid,
+  metric dashboard, stat-card row, or similar Number+Caption structure
+  ("$212M+" paired with "CUMULATIVE CONTRACT VALUE"). Each side keeps its own
+  independent source trace (they usually come from two different Phase
+  1 blocks, and - because of a known, pre-existing Phase 1 section-
+  boundary bug this round deliberately does not touch, see
+  metricGridExtractor.ts's own header comment - can even come from two
+  different Phase 1 sections) rather than being merged into one, so
+  block/section coverage checks still resolve correctly no matter which
+  Phase 1 section either side actually landed in.
+*/
+export type MetricEntry = {
+  id: string;
+  value: StructuredTextValue;
+  label: StructuredTextValue;
+};
+
+/*
+  A grid of MetricEntry, in left-to-right / top-to-bottom order exactly
+  as detected (never re-sorted by value/label content) - `columns` is
+  the number of entries found in the grid's first row-pair (2 for a
+  2-column card row, 4 for a 4-column KPI band, 1 for a vertically-
+  stacked single-column Score Panel).
+*/
+export type MetricGrid = {
+  id: string;
+  entries: MetricEntry[];
+  columns: number;
+  source: SourceTrace;
+};
+
 export type CustomResumeSection = {
   id: string;
 
@@ -262,6 +294,7 @@ export type ResumeStructuredModel = {
   publications: PublicationEntry[];
 
   customSections: CustomResumeSection[];
+  metricGrids: MetricGrid[];
 
   slotAvailability: Record<ResumeSlotKey, boolean>;
 

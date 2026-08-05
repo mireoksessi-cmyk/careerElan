@@ -44,6 +44,7 @@ function emptyModel(): ResumeStructuredModel {
     awards: [],
     publications: [],
     customSections: [],
+    metricGrids: [],
     slotAvailability: {
       identity: false, professional_summary: false, core_skills: false, professional_experience: false,
       volunteer_experience: false, education: false, certifications_licenses: false, projects: false,
@@ -78,7 +79,12 @@ function emptyModel(): ResumeStructuredModel {
     "identity", "professional_summary", "core_skills", "professional_experience", "volunteer_experience",
     "education", "certifications_licenses", "projects", "awards", "publications", "additional_information",
   ]);
-  check("all-sections: zero hidden", doc.hiddenSectionKeys.length, 0);
+  // metric_highlights is the one fixed-order section this fixture never
+  // populates (no MetricGrid data) - it alone stays hidden even when
+  // every other section has content, same reasoning Phase 5D.2B applies
+  // everywhere else: a section with zero real entries is never forced
+  // visible.
+  check("all-sections: metric_highlights is the only hidden section", doc.hiddenSectionKeys, ["metric_highlights"]);
   checkTrue("all-sections: validator passed", doc.validation.passed);
   check("all-sections: zero missing entries", doc.validation.missingEntryIds.length, 0);
   check("all-sections: zero duplicate entries", doc.validation.duplicateEntryIds.length, 0);
@@ -100,7 +106,7 @@ function emptyModel(): ResumeStructuredModel {
 {
   const doc = buildProfessionalAtsAssembly(emptyModel());
   check("empty model: zero visible sections", doc.visibleSectionKeys.length, 0);
-  check("empty model: all 11 hidden", doc.hiddenSectionKeys.length, 11);
+  check("empty model: all 12 hidden", doc.hiddenSectionKeys.length, 12);
   checkTrue("empty model: validator passed (nothing to lose)", doc.validation.passed);
   checkTrue("empty model: no section carries blocks", doc.sections.every((s) => s.blocks.length === 0));
 }

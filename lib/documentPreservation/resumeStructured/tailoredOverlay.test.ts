@@ -77,6 +77,7 @@ function makeModel(): ResumeStructuredModel {
     awards: [],
     publications: [],
     customSections: [],
+    metricGrids: [],
     slotAvailability: {
       identity: false,
       professional_summary: true,

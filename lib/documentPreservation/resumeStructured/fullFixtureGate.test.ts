@@ -1,8 +1,9 @@
 /*
   TASK 10 - Full Fixture Gate. Runs Phase 2's buildStructuredResume
-  against all Phase 1 fixtures (16 real + 8 synthetic, 24 total as of
-  Phase 5D.1's f7 addition) and reports a fixture-by-fixture pass/fail
-  matrix based on structuredValidator's own report - the same gate
+  against all Phase 1 fixtures (16 real + 16 synthetic, 32 total as of
+  Phase 5D.2B's f8-f11 metric-grid additions) and reports a
+  fixture-by-fixture pass/fail matrix based on structuredValidator's own
+  report - the same gate
   buildStructuredResume.test.ts already applies to a 9-fixture subset,
   extended here to every fixture in fixtures/resumes/ so no fixture
   escapes the gate purely because it wasn't picked for TASK 7's earlier,
@@ -43,6 +44,14 @@ const FIXTURES: { file: string; format: "pdf" | "docx" }[] = [
   { file: "lossless-synthetic/f6-docx-table-skills.docx", format: "docx" },
   { file: "lossless-synthetic/f7-embedded-education-certifications.pdf", format: "pdf" },
   { file: "lossless-synthetic/f7-embedded-education-certifications.docx", format: "docx" },
+  { file: "lossless-synthetic/f8-metric-grid-4col-kpi.pdf", format: "pdf" },
+  { file: "lossless-synthetic/f8-metric-grid-4col-kpi.docx", format: "docx" },
+  { file: "lossless-synthetic/f9-metric-cards-2col.pdf", format: "pdf" },
+  { file: "lossless-synthetic/f9-metric-cards-2col.docx", format: "docx" },
+  { file: "lossless-synthetic/f10-metric-cards-3col.pdf", format: "pdf" },
+  { file: "lossless-synthetic/f10-metric-cards-3col.docx", format: "docx" },
+  { file: "lossless-synthetic/f11-metric-score-panel-stacked.pdf", format: "pdf" },
+  { file: "lossless-synthetic/f11-metric-score-panel-stacked.docx", format: "docx" },
 ];
 
 async function main() {

@@ -30,7 +30,8 @@ export type ParityFragmentKind =
   | "project"
   | "award"
   | "publication"
-  | "custom";
+  | "custom"
+  | "metric";
 
 export type ParityFragmentOccurrence = "exactly-once" | "at-least-once" | "ordered";
 

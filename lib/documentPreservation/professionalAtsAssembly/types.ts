@@ -21,6 +21,7 @@
 export type ProfessionalAtsSectionKey =
   | "identity"
   | "professional_summary"
+  | "metric_highlights"
   | "core_skills"
   | "professional_experience"
   | "volunteer_experience"
@@ -63,7 +64,8 @@ export type AssemblyBlockKind =
   | "publication-entry"
   | "custom-section"
   | "custom-paragraph"
-  | "custom-bullet-group";
+  | "custom-bullet-group"
+  | "metric-grid";
 
 export type AssemblySplitStrategy = "none" | "between-bullets" | "between-paragraphs" | "between-items";
 

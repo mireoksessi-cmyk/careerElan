@@ -22,6 +22,7 @@ import type {
   AwardEntry,
   PublicationEntry,
   CustomResumeSection,
+  MetricGrid,
   SkillGroup,
   ResumeSummary,
 } from "../resumeStructured/types";
@@ -128,4 +129,36 @@ export function buildIdentityBlock(sourceSectionId: string, sourceBlockIds: stri
   const block = buildBlock("identity", `assembly-identity-${sourceSectionId}`, undefined, sourceSectionId, sourceBlockIds, 0, false, payload, {});
   block.estimatedContentUnits = HEADER_BASELINE_UNITS;
   return block;
+}
+
+/*
+  Phase 5D.2B - one AssemblyBlock per MetricGrid. Bypasses buildBlock's
+  single-sourceSectionId signature (unlike every other entry type, a
+  grid's entries can legitimately span two different Phase 1 sections -
+  see metricGridExtractor.ts's own header comment) and instead unions
+  every entry's value + label source ids directly, so
+  assemblyValidator.ts's own content-preservation check (D) can still
+  trace every contributing Phase 1 section/block correctly.
+*/
+export function buildMetricGridBlock(grid: MetricGrid, priority: number): AssemblyBlock {
+  const sourceSectionIds = [...new Set(grid.entries.flatMap((e) => [e.value.source.sourceSectionId, e.label.source.sourceSectionId]))];
+  const sourceBlockIds = [...new Set(grid.entries.flatMap((e) => [...e.value.source.sourceBlockIds, ...e.label.source.sourceBlockIds]))];
+  const policy = defaultBlockPolicy("metric-grid", { detailCount: grid.entries.length });
+  return {
+    id: `assembly-metric-grid-${grid.id}`,
+    kind: "metric-grid",
+    sourceEntryId: grid.id,
+    sourceSectionIds,
+    sourceBlockIds,
+    estimatedContentUnits: HEADER_BASELINE_UNITS + sumTextUnits(grid.entries.flatMap((e) => [e.value.value, e.label.value])),
+    minVisibleContentUnits: HEADER_BASELINE_UNITS,
+    breakPolicy: policy.breakPolicy,
+    keepTogether: policy.keepTogether,
+    canSplit: policy.canSplit,
+    splitStrategy: policy.splitStrategy,
+    priority,
+    isOptional: false,
+    isUncertain: false,
+    payload: grid,
+  };
 }

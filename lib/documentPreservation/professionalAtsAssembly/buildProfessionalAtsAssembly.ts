@@ -27,6 +27,7 @@ import {
   hasAwardsContent,
   hasPublicationsContent,
   hasCustomContent,
+  hasMetricGridsContent,
 } from "./visibilityPolicy";
 import {
   buildIdentityBlock,
@@ -39,6 +40,7 @@ import {
   buildAwardEntryBlock,
   buildPublicationEntryBlock,
   buildCustomSectionBlock,
+  buildMetricGridBlock,
 } from "./blockBuilders";
 import { PROFESSIONAL_ATS_COMPACTION_POLICY, getDefaultDensity } from "./densityPolicy";
 import { validateAssembly } from "./assemblyValidator";
@@ -92,6 +94,24 @@ export function buildProfessionalAtsAssembly(model: ResumeStructuredModel): Prof
         key, label: PROFESSIONAL_ATS_SECTION_LABELS[key], order: order(key), visible: true, visibilityReason: "has-content",
         blocks: [block], keepHeadingWithFirstBlock: false, breakBefore: "allow", breakAfter: "allow", minBlocksToShow: 1,
         sourceSectionIds: [merged.sourceSectionId],
+      };
+    }
+  }
+
+  // --- metric_highlights (Phase 5D.2B - KPI/metric grids) ---
+  {
+    const key: ProfessionalAtsSectionKey = "metric_highlights";
+    const visible = hasMetricGridsContent(model.metricGrids);
+    visibility[key] = visible;
+    if (!visible) {
+      sections[key] = emptySection(key, order(key), model.metricGrids.length === 0 ? "empty" : "no-valid-entries");
+    } else {
+      const validGrids = model.metricGrids.filter((g) => hasMetricGridsContent([g]));
+      const blocks = validGrids.map((g, i) => buildMetricGridBlock(g, i));
+      sections[key] = {
+        key, label: PROFESSIONAL_ATS_SECTION_LABELS[key], order: order(key), visible: true, visibilityReason: "has-content",
+        blocks, keepHeadingWithFirstBlock: true, breakBefore: "allow", breakAfter: "allow", minBlocksToShow: 1,
+        sourceSectionIds: [...new Set(blocks.flatMap((b) => b.sourceSectionIds))],
       };
     }
   }

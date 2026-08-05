@@ -102,6 +102,11 @@ export function defaultBlockPolicy(kind: AssemblyBlockKind, input: BlockPolicyIn
     case "custom-bullet-group":
       return noSplit("avoid", "whole-block");
 
+    case "metric-grid":
+      // A KPI band's Value/Label pairs read as one visual unit - never
+      // split a grid across a page break, same treatment as identity.
+      return noSplit("avoid", "whole-block");
+
     default:
       return noSplit("avoid", "none");
   }

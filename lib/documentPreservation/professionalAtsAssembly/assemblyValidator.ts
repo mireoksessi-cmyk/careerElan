@@ -23,11 +23,13 @@ import {
   hasAwardsContent,
   hasPublicationsContent,
   hasCustomContent,
+  hasMetricGridsContent,
 } from "./visibilityPolicy";
 
 function expectedVisibility(model: ResumeStructuredModel): Partial<Record<ProfessionalAtsSectionKey, boolean>> {
   return {
     identity: hasIdentityContent(model.identity),
+    metric_highlights: hasMetricGridsContent(model.metricGrids),
     professional_summary: hasSummaryContent(model.professionalSummary),
     core_skills: hasSkillsContent(model.skillGroups),
     professional_experience: hasExperienceContent(model.professionalExperience),
@@ -50,6 +52,7 @@ function allValidEntryIds(model: ResumeStructuredModel): Set<string> {
   for (const e of model.awards) if (hasAwardsContent([e])) ids.add(e.id);
   for (const e of model.publications) if (hasPublicationsContent([e])) ids.add(e.id);
   for (const s of model.customSections) if (hasCustomContent([s])) ids.add(s.id);
+  for (const g of model.metricGrids) if (hasMetricGridsContent([g])) ids.add(g.id);
   return ids;
 }
 
@@ -58,7 +61,7 @@ function knownPayloadObjects(model: ResumeStructuredModel): Set<unknown> {
   if (model.identity) set.add(model.identity);
   if (model.professionalSummary) set.add(model.professionalSummary);
   for (const g of model.skillGroups) set.add(g);
-  for (const e of [...model.professionalExperience, ...model.volunteerExperience, ...model.education, ...model.credentials, ...model.projects, ...model.awards, ...model.publications, ...model.customSections]) {
+  for (const e of [...model.professionalExperience, ...model.volunteerExperience, ...model.education, ...model.credentials, ...model.projects, ...model.awards, ...model.publications, ...model.customSections, ...model.metricGrids]) {
     set.add(e);
   }
   return set;

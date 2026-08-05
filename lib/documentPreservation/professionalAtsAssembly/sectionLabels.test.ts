@@ -14,8 +14,9 @@ function check(label: string, actual: unknown, expected: unknown) {
   else fail++;
 }
 
-check("exact 11-key fixed order", PROFESSIONAL_ATS_SECTION_ORDER, [
+check("exact 12-key fixed order", PROFESSIONAL_ATS_SECTION_ORDER, [
   "identity",
+  "metric_highlights",
   "professional_summary",
   "core_skills",
   "professional_experience",
@@ -31,6 +32,7 @@ check("exact 11-key fixed order", PROFESSIONAL_ATS_SECTION_ORDER, [
 check("volunteer immediately follows professional experience", PROFESSIONAL_ATS_SECTION_ORDER.indexOf("volunteer_experience"), PROFESSIONAL_ATS_SECTION_ORDER.indexOf("professional_experience") + 1);
 
 check("identity has no display label", PROFESSIONAL_ATS_SECTION_LABELS.identity, null);
+check("metric_highlights label", PROFESSIONAL_ATS_SECTION_LABELS.metric_highlights, "KEY METRICS");
 check("professional_summary label", PROFESSIONAL_ATS_SECTION_LABELS.professional_summary, "PROFESSIONAL SUMMARY");
 check("core_skills label", PROFESSIONAL_ATS_SECTION_LABELS.core_skills, "CORE SKILLS");
 check("professional_experience label", PROFESSIONAL_ATS_SECTION_LABELS.professional_experience, "PROFESSIONAL EXPERIENCE");

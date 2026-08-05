@@ -22,6 +22,7 @@ import type {
   AwardEntry,
   PublicationEntry,
   CustomResumeSection,
+  MetricGrid,
   StructuredTextValue,
 } from "../resumeStructured/types";
 
@@ -148,4 +149,21 @@ function hasCustomSectionContent(s: CustomResumeSection): boolean {
 
 export function hasCustomContent(sections: CustomResumeSection[]): boolean {
   return sections.some(hasCustomSectionContent);
+}
+
+/*
+  Phase 5D.2B - a grid is visible only when it carries at least one
+  entry with BOTH a non-blank value and a non-blank label - mirrors
+  every other hasXContent predicate's "real, displayable content only"
+  rule (metricGridExtractor.ts's own >=2-entries-per-grid gate already
+  keeps a genuinely empty/singleton grid from ever reaching this point,
+  but this stays a pure content check, independent of how the grid was
+  produced).
+*/
+function hasMetricGridContent(g: MetricGrid): boolean {
+  return g.entries.some((e) => e.value.value.trim().length > 0 && e.label.value.trim().length > 0);
+}
+
+export function hasMetricGridsContent(grids: MetricGrid[]): boolean {
+  return grids.some(hasMetricGridContent);
 }
