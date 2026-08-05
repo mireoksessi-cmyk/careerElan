@@ -61,6 +61,7 @@ export async function buildFlatPageHtml(assembly: ProfessionalAtsAssemblyDocumen
     color: #111111;
   }
   #${MEASURE_CONTENT_ID} { display: flex; flex-direction: column; gap: ${tokens.sectionGapPx}px; }
+  .ats-identity-contact { overflow-wrap: break-word; word-break: break-word; }
 </style>
 </head>
 <body>

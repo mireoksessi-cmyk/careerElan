@@ -98,12 +98,23 @@ function IdentityView({ block }: { block: AssemblyBlock }) {
   const identity = block.payload as ResumeIdentity;
   const name = val(identity.fullName);
   const headline = val(identity.headline);
-  const contact = joinContact([val(identity.email), val(identity.phone), val(identity.location), val(identity.linkedin), val(identity.portfolio)]);
+  const contact = joinContact([
+    val(identity.email),
+    val(identity.phone),
+    val(identity.location),
+    val(identity.linkedin),
+    val(identity.portfolio),
+    ...identity.otherContactLines.map(val),
+  ]);
   return (
     <div data-block-id={block.id} data-block-kind="identity">
       {name && <h1 style={{ margin: 0, fontSize: "1.7em" }}>{name}</h1>}
       {headline && <p style={{ margin: "2px 0 0" }}>{headline}</p>}
-      {contact.length > 0 && <p style={{ margin: "2px 0 0" }}>{contact}</p>}
+      {contact.length > 0 && (
+        <p className="ats-identity-contact" style={{ margin: "2px 0 0" }}>
+          {contact}
+        </p>
+      )}
     </div>
   );
 }

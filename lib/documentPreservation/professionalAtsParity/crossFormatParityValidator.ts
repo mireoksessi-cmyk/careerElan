@@ -15,11 +15,13 @@
   does not attempt; see the final report's "Unverified" section.
 */
 import { normalizeForParity } from "./parityNormalization";
-import { advancingIndexOf, computeEntryOrderFromText, isShortGenericToken } from "./parityMatcher";
+import { advancingIndexOf, computeEntryOrderFromText, fragmentSearchPattern, isShortGenericToken } from "./parityMatcher";
 import type { CanonicalParityEntry, CanonicalParityManifest, CrossFormatParityReport, FormatName, FormatParityResult, NormalizedFormatSnapshot, PairwiseParityResult, ParityFragment, ParityMismatch } from "./types";
 
 function fragmentPresent(normalizedText: string, fragmentValue: string): boolean {
-  return advancingIndexOf(normalizedText, normalizeForParity(fragmentValue), 0) >= 0;
+  const normalized = normalizeForParity(fragmentValue);
+  if (!normalized) return true;
+  return fragmentSearchPattern(normalized).test(normalizedText);
 }
 
 function findMissingFragments(manifest: CanonicalParityManifest, snapshot: NormalizedFormatSnapshot): ParityMismatch[] {
@@ -50,7 +52,7 @@ function findInventedFragments(manifest: CanonicalParityManifest, snapshot: Norm
   for (const fragment of sortedFragments) {
     const normalized = normalizeForParity(fragment.value);
     if (!normalized) continue;
-    leftover = leftover.split(normalized).join(" ");
+    leftover = leftover.replace(fragmentSearchPattern(normalized, "g"), " ");
   }
   leftover = leftover.replace(/[\s.,;:·•\-–—'"()]+/g, " ").trim();
   if (leftover.length === 0) return [];

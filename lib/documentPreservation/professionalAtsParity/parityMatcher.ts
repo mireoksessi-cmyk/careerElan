@@ -36,6 +36,42 @@ function boundaryPattern(fragment: string): RegExp {
   return new RegExp(`${startsAlnum ? "\\b" : ""}${escaped}${endsAlnum ? "\\b" : ""}`);
 }
 
+/* Phase 5C.1 - a long single-token fragment (URL, email, etc.) with no
+   internal whitespace of its own can legitimately be split across two
+   lines by Chromium's real print-to-PDF layout when the whole contact
+   line doesn't fit on one line - the extracted native text then
+   contains a real space at the wrap point even though the source
+   value has none (confirmed via a direct pdfjs TextItem dump: the
+   whole token is intact within a single TextItem up to the wrap, then
+   continues in the next TextItem on the next line - not a rendering
+   or extraction bug, just where the wrap fell). Gated to fragments
+   >=20 chars with zero internal whitespace so it can only ever make
+   matching MORE permissive about wrap-induced whitespace - it can
+   never accept different or missing characters, and it's structurally
+   unable to mask a genuinely missing word in ordinary multi-word
+   prose (which never qualifies as a "long unbroken token" at all). */
+const LONG_UNBROKEN_TOKEN_MIN_LENGTH = 20;
+
+export function isLongUnbrokenToken(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length >= LONG_UNBROKEN_TOKEN_MIN_LENGTH && !/\s/.test(trimmed);
+}
+
+function whitespaceTolerantPattern(fragment: string, flags = ""): RegExp {
+  const chars = [...fragment].map(escapeRegExp);
+  return new RegExp(chars.join("\\s*"), flags);
+}
+
+/* Existence check used by the cross-format validator's missing-
+   fragment and invented-fragment (removal) passes - literal boundary
+   match for ordinary fragments, whitespace-tolerant for long unbroken
+   tokens per the rationale above. */
+export function fragmentSearchPattern(fragment: string, flags = ""): RegExp {
+  if (isLongUnbrokenToken(fragment)) return whitespaceTolerantPattern(fragment, flags);
+  const base = boundaryPattern(fragment);
+  return new RegExp(base.source, flags);
+}
+
 /* Find `marker` in `text` starting no earlier than `cursor`. Returns
    -1 if not found. Never searches before `cursor` - this is what makes
    repeated short tokens resolve to their NEXT occurrence instead of

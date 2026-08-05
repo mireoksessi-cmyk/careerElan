@@ -96,6 +96,10 @@ export async function buildPaginatedPageHtml(
     flex-direction: column;
     gap: ${tokens.entryGapPx}px;
   }
+  .ats-identity-contact {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
 </style>
 </head>
 <body>${pagesMarkup}</body>

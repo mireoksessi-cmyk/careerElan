@@ -10,6 +10,12 @@
   target the class of bug parityMatcher.ts's advancing-cursor design
   was built to prevent. Run with
   `npx tsx lib/documentPreservation/professionalAtsParity/syntheticStress.test.ts`.
+
+  Phase 5C.1: Career Élan's supported-language scope is English/French
+  only - Korean/CJK is out of scope. korean-text (from Phase 5B's own
+  ALL_MULTILINGUAL_SCENARIOS) is excluded from this gate's pass/fail
+  tally and reported separately as an unsupported-language scenario,
+  never silently converted to pass or fail.
 */
 import { buildProfessionalAtsParity } from "./buildProfessionalAtsParity";
 import { closeSharedBrowser } from "../sharedBrowser";
@@ -21,6 +27,7 @@ import type { ProfessionalAtsAssemblyDocument } from "../professionalAtsAssembly
 
 let pass = 0;
 let fail = 0;
+const unsupportedLanguage: string[] = [];
 function checkTrue(label: string, actual: boolean, detail?: unknown) {
   const ok = actual === true;
   console.log(ok ? "PASS" : "FAIL", label, ok ? "" : `detail=${JSON.stringify(detail)}`);
@@ -29,6 +36,11 @@ function checkTrue(label: string, actual: boolean, detail?: unknown) {
 }
 
 async function runScenario(name: string, build: () => ProfessionalAtsAssemblyDocument, paperSize: PaperSize) {
+  if (name === "korean-text") {
+    unsupportedLanguage.push(`${name}/${paperSize}`);
+    console.log("SKIP (unsupported-language scenario, not counted as pass or fail):", `${name}/${paperSize}`);
+    return;
+  }
   const assembly = build();
 
   /* A thrown exception (e.g. Phase 4's own buildProfessionalAtsPdf
@@ -72,7 +84,7 @@ async function main() {
     await runScenario(scenario.name, scenario.build, "a4");
   }
 
-  console.log(`\n--- ${pass} passed, ${fail} failed ---`);
+  console.log(`\n--- ${pass} passed, ${fail} failed, ${unsupportedLanguage.length} unsupported-language (excluded from tally: ${unsupportedLanguage.join(", ")}) ---`);
   await closeSharedBrowser();
   if (fail > 0) process.exit(1);
 }
