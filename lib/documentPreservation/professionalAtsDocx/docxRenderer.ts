@@ -291,7 +291,17 @@ function renderDetailsEntry(
 
 function renderCredential(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as CredentialEntry;
-  renderDetailsEntry(block, ctx, blockGapTwips, { primary: val(entry.name), meta: [val(entry.issuer), val(entry.issueDateText)] }, entry.details.map((d) => d.value), entry.rawHeaderText);
+  const date = val(entry.issueDateText);
+  const expiry = val(entry.expiryDateText);
+  const dateRange = expiry ? [date, expiry].filter((d): d is string => !!d).join(" - ") : date;
+  renderDetailsEntry(
+    block,
+    ctx,
+    blockGapTwips,
+    { primary: val(entry.name), meta: [val(entry.issuer), val(entry.location), dateRange, val(entry.credentialId)] },
+    entry.details.map((d) => d.value),
+    entry.rawHeaderText
+  );
 }
 function renderAward(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as AwardEntry;

@@ -113,7 +113,7 @@ const noSignalEntries = extractEducationEntries("s1", noSignalAtAll);
 checkTrue("no lexical signal: institution populated from the non-date line", noSignalEntries[0].institution !== undefined);
 check("no lexical signal: institution is the non-date line's full text", noSignalEntries[0].institution?.value, "Advanced Workshop Series Alpha");
 check("no lexical signal: credential recovered from the date line's own remainder", noSignalEntries[0].credential?.value, "Beta Learning Centre");
-checkTrue("no lexical signal: reasonCodes disclose the positional fallback (not a guessed keyword match)", noSignalEntries[0].reasonCodes.includes("two-line-header-positional-fallback-no-keyword-signal"));
+checkTrue("no lexical signal: reasonCodes disclose the positional fallback (not a guessed keyword match)", noSignalEntries[0].reasonCodes.includes("multi-line-header-positional-fallback-no-keyword-signal"));
 
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 

@@ -115,6 +115,13 @@ const REGION_CODE_RE = /^[A-Z]{2}$/;
 
 const REMOTE_HYBRID_RE = /^(remote|hybrid)$/i;
 const REMOTE_HYBRID_WITH_QUALIFIER_RE = new RegExp(`^(remote|hybrid)\\s*(?:,|${DASH_SEPARATOR_RE})\\s*(.+)$`, "i");
+/*
+  Phase 5D.3C - a generic conjunction/slash joiner between two or more
+  otherwise-independent location clauses ("Toronto, ON and Vancouver,
+  BC", "Vancouver, BC and Remote") - the round's own required "Multiple
+  Locations" shape. Never a city/company name lookup, purely structural.
+*/
+const LOCATION_CONJUNCTION_RE = /\s+(?:and|&)\s+|\s*\/\s*/i;
 
 function isKnownCountryName(text: string): boolean {
   return KNOWN_COUNTRY_NAMES.has(text.trim().toLowerCase());
@@ -152,6 +159,14 @@ export function looksLikeLocation(text: string): boolean {
     if (REGION_CODE_RE.test(commaParts[1])) return true;
     if (isKnownCountryName(commaParts[1])) return true;
   }
+
+  /* Phase 5D.3C - Multiple Locations shape: every conjunction-joined
+     clause independently looks like a location by the same strict rule
+     above (recursive on this same generic shape check, never a city
+     lookup). Requires 2+ clauses so a single bare word never trivially
+     "passes" through this branch. */
+  const clauses = trimmed.split(LOCATION_CONJUNCTION_RE).map((s) => s.trim()).filter((s) => s.length > 0);
+  if (clauses.length >= 2 && clauses.every((c) => looksLikeLocation(c))) return true;
 
   return false;
 }

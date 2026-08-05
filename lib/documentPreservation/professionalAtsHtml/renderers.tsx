@@ -307,13 +307,18 @@ function CredentialView({ block, subRange, isContinuation, spacing = DEFAULT_SPA
   const name = val(entry.name);
   const issuer = val(entry.issuer);
   const date = val(entry.issueDateText);
-  const hasAnyStructuredField = name || issuer || date || items.length > 0;
+  const expiry = val(entry.expiryDateText);
+  const credentialId = val(entry.credentialId);
+  const location = val(entry.location);
+  const dateRange = expiry ? [date, expiry].filter((d): d is string => !!d).join(" - ") : date;
+  const hasAnyStructuredField = name || issuer || date || expiry || credentialId || location || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="credential-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
           {name && <strong>{name}</strong>}
-          {(issuer || date) && <div>{joinContact([issuer, date])}</div>}
+          {(issuer || dateRange || location) && <div>{joinContact([issuer, location, dateRange])}</div>}
+          {credentialId && <div>{credentialId}</div>}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}

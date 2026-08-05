@@ -21,7 +21,17 @@ const MONTH_RE = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:
   shows a 1-2 digit MONTH before the slash.
 */
 const NUMERIC_MONTH_PREFIX_RE = "\\d{1,2}[/-]";
-const YEAR_OR_PRESENT = `(?:${MONTH_RE}|${NUMERIC_MONTH_PREFIX_RE})?(?:(?:19|20)\\d{2}(?:[/-]\\d{1,2})?|present|current)`;
+/*
+  Phase 5D.3C bugfix - "present"/"current" need their own word
+  boundaries here, or they match as a bare SUBSTRING inside an
+  unrelated word ("Presented in Toronto, ON..." was misread as
+  containing the date keyword "Present", truncating the real sentence
+  down to "ed in Toronto, ON..." and reporting a bogus "Present" date).
+  Every other alternative in this group already has an implicit
+  boundary (a 4-digit year, or a leading month/numeric-month token), so
+  only this pair needed the explicit `\b`.
+*/
+const YEAR_OR_PRESENT = `(?:${MONTH_RE}|${NUMERIC_MONTH_PREFIX_RE})?(?:(?:19|20)\\d{2}(?:[/-]\\d{1,2})?|\\bpresent\\b|\\bcurrent\\b)`;
 
 /*
   Phase 5D.1 - single source of truth for every dash-like date-range
@@ -109,16 +119,56 @@ export function extractDateParts(text: string): DateParts | null {
   this module has no opinion on resume-section semantics, only on where
   the date sits in the string.
 */
-const DANGLING_SEPARATOR_RE = /^[\s,.\-–—|:;()]+|[\s,.\-–—|:;()]+$/g;
+/*
+  Phase 5D.3C bugfix - parens are deliberately NOT in this class anymore
+  (see stripUnbalancedParens below). Stripping them unconditionally here
+  used to eat a legitimate, BALANCED closing paren off the end of a
+  parenthetical qualifier ("Bachelor of Engineering (Co-op)" ->
+  "Bachelor of Engineering (Co-op" - a real, confirmed data-loss bug),
+  since a trailing ")" is indistinguishable from a dangling one by this
+  regex alone.
+*/
+const DANGLING_SEPARATOR_RE = /^[\s,.\-–—|:;]+|[\s,.\-–—|:;]+$/g;
 const EMPTY_PARENS_RE = /\(\s*\)/g;
 
+/*
+  Strips only an UNBALANCED leading/trailing paren character - e.g. the
+  dangling "(" left over in "Institute (" after a date match cut through
+  the middle of "Institute (2020)". A BALANCED paren pair anywhere in the
+  text (including one whose ")" happens to be the very last character,
+  "Bachelor of Engineering (Co-op)") is always left untouched, since it
+  isn't dangling at all.
+*/
+function stripUnbalancedParens(text: string): string {
+  let result = text;
+  for (let i = 0; i < 6; i++) {
+    const opens = (result.match(/\(/g) || []).length;
+    const closes = (result.match(/\)/g) || []).length;
+    if (opens === closes) break;
+    if (opens > closes && result.startsWith("(")) {
+      result = result.slice(1).trim();
+    } else if (opens > closes && result.endsWith("(")) {
+      result = result.slice(0, -1).trim();
+    } else if (closes > opens && result.endsWith(")")) {
+      result = result.slice(0, -1).trim();
+    } else if (closes > opens && result.startsWith(")")) {
+      result = result.slice(1).trim();
+    } else {
+      break;
+    }
+  }
+  return result;
+}
+
 export function cleanHeaderFragment(text: string): string {
-  return text
+  let result = text
     .replace(EMPTY_PARENS_RE, " ")
     .replace(/\s{2,}/g, " ")
     .trim()
     .replace(DANGLING_SEPARATOR_RE, "")
     .trim();
+  result = stripUnbalancedParens(result);
+  return result.replace(DANGLING_SEPARATOR_RE, "").trim();
 }
 
 export type DateAnchorResult = DateParts & {
