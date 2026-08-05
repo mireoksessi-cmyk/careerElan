@@ -1,13 +1,18 @@
 /*
   TASK 4 - Static DOCX renderer. Phase 3 AssemblyBlock payload text
   only, never rewritten - mirrors professionalAtsHtml/renderers.tsx's
-  own per-kind field selection and sub-item precedence EXACTLY (same
-  bullets-vs-descriptionParagraphs / paragraphs-vs-bullets precedence,
-  same "which fields render" logic) so Phase 5B never invents a
+  own per-kind field selection EXACTLY so Phase 5B never invents a
   different content policy than Phase 4/5A already established -
   renderers.tsx itself is not imported (React/JSX, not directly
   reusable for docx.js Paragraph/TextRun construction), but every
   field-selection decision below is a direct line-by-line port.
+
+  Phase 5D.3A - experience/volunteer/project entries and custom
+  sections render their own `content` array (renderOrderedContentSubItems)
+  instead of a bullets-vs-descriptionParagraphs / paragraphs-vs-bullets
+  precedence that silently dropped one array whenever an entry
+  legitimately mixed both kinds - same fix, same reasoning as
+  renderers.tsx's own header comment.
 
   Real editable OOXML structure throughout: every bullet is a real
   Paragraph with the `docx` package's own `bullet: { level: 0 }`
@@ -53,6 +58,7 @@ import type {
   CustomResumeSection,
   MetricGrid,
   StructuredTextValue,
+  EntryContentBlock,
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 import type { AssemblyDensity } from "../professionalAtsAssembly/types";
@@ -161,10 +167,29 @@ function renderHeaderBearingSubItems(block: AssemblyBlock, ctx: BuildContext, it
   });
 }
 
+/*
+  Phase 5D.3A - same as renderHeaderBearingSubItems above, but takes
+  each item's own kind instead of one flag applied to every item, so a
+  mixed bullet+paragraph entry.content renders each sub-item as its own
+  real bullet or plain paragraph (docx has no <ul>-style grouping
+  requirement the way HTML does - each Paragraph carries its own
+  `bullet` property independently, so there is no "run" concept to
+  build here, unlike renderers.tsx's renderOrderedContentBlocks). Order
+  is exactly `content`'s own order - never re-sorted, never XOR'd away.
+*/
+function renderOrderedContentSubItems(block: AssemblyBlock, ctx: BuildContext, content: EntryContentBlock[]) {
+  content.forEach((c) => {
+    if (!c.text.trim()) return;
+    pushParagraph(ctx, block.id, block.sourceEntryId, [run(c.text, ctx, { bold: c.kind === "subheading" })], {
+      spacingBeforeTwips: ctx.bulletGapTwips,
+      keepLines: true,
+      bullet: c.kind === "bullet",
+    });
+  });
+}
+
 function renderExperienceLike(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as ExperienceEntry | ProjectEntry;
-  const usesBullets = entry.bullets.length > 0;
-  const items = usesBullets ? entry.bullets.map((b) => b.text) : entry.descriptionParagraphs.map((d) => d.value);
   const role = val("role" in entry ? entry.role : undefined);
   const org = val(("organization" in entry ? entry.organization : "name" in entry ? entry.name : undefined) as StructuredTextValue | undefined);
   const location = "location" in entry ? val(entry.location) : undefined;
@@ -183,10 +208,10 @@ function renderExperienceLike(block: AssemblyBlock, ctx: BuildContext, blockGapT
   if (meta.length > 0) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(meta, ctx)], {
       spacingBeforeTwips: headerLine1.length > 0 ? 0 : blockGapTwips,
-      keepNext: items.length > 0,
+      keepNext: entry.content.length > 0,
     });
   }
-  renderHeaderBearingSubItems(block, ctx, items, usesBullets);
+  renderOrderedContentSubItems(block, ctx, entry.content);
 }
 
 function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
@@ -263,27 +288,14 @@ function renderPublication(block: AssemblyBlock, ctx: BuildContext, blockGapTwip
 
 function renderCustomSection(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const section = block.payload as CustomResumeSection;
-  const usesParagraphs = section.paragraphs.length > 0;
-  const items = usesParagraphs ? section.paragraphs.map((p) => p.value) : section.bullets.map((b) => b.text);
 
-  let headingPushed = false;
   if (section.originalHeading) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(section.originalHeading, ctx, { bold: true })], {
       spacingBeforeTwips: blockGapTwips,
-      keepNext: items.length > 0,
+      keepNext: section.content.length > 0,
     });
-    headingPushed = true;
   }
-  renderHeaderBearingSubItems(block, ctx, items, !usesParagraphs);
-  if (!headingPushed && ctx.tags.length > 0) {
-    /* No heading rendered - the first sub-item paragraph still needs
-       the block-level gap applied (mirrors CustomSectionView, which
-       unconditionally uses flat bulletGapPx even with no heading -
-       renderHeaderBearingSubItems already applied bulletGapTwips to
-       every item, so nothing further to add here; this branch exists
-       only to document the intentional match with renderers.tsx's own
-       "always flat" custom-section spacing, not a gap in coverage). */
-  }
+  renderOrderedContentSubItems(block, ctx, section.content);
 }
 
 /*

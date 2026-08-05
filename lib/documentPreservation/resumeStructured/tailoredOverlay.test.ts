@@ -49,6 +49,10 @@ function makeModel(): ResumeStructuredModel {
           { id: "entry-exp-0-bullet-1", text: "Coordinated cross-team scheduling.", source: src },
         ],
         descriptionParagraphs: [],
+        content: [
+          { id: "entry-exp-0-content-0", kind: "bullet", text: "Managed weekly logistics reporting.", source: src },
+          { id: "entry-exp-0-content-1", kind: "bullet", text: "Coordinated cross-team scheduling.", source: src },
+        ],
         rawHeaderText: "Coordinator\nAcme Corp - 2019 - 2022",
         source: src,
         isVolunteer: false,
@@ -68,6 +72,7 @@ function makeModel(): ResumeStructuredModel {
         technologies: [],
         bullets: [{ id: "entry-proj-0-bullet-0", text: "Built a small internal tool.", source: src }],
         descriptionParagraphs: [],
+        content: [{ id: "entry-proj-0-content-0", kind: "bullet", text: "Built a small internal tool.", source: src }],
         rawHeaderText: "Internal Tracker",
         source: src,
         isUncertain: false,

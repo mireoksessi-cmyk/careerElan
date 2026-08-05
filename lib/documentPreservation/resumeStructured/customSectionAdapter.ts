@@ -22,12 +22,23 @@ export function adaptCustomSection(section: LosslessResumeSection): CustomResume
     .filter((b) => b.blockType === "bullet")
     .map((b, i) => ({ id: bulletId(id, i), text: b.rawText, source: traceFromBlock(section.id, b) }));
 
+  // Phase 5D.3A - same bodyBlocks, in their original order, each tagged
+  // with its own blockType instead of split into paragraphs/bullets
+  // above. See types.ts's own comment on CustomResumeSection.content.
+  const content = bodyBlocks.map((b, i) => ({
+    id: `${id}-content-${i}`,
+    kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
+    text: b.rawText,
+    source: traceFromBlock(section.id, b),
+  }));
+
   return {
     id,
     originalHeading: section.originalHeading,
     displayHeading: section.displayHeading,
     paragraphs,
     bullets,
+    content,
     sourceOrder: section.sourceOrder,
     source: traceFromBlocks(section.id, section.blocks),
   };

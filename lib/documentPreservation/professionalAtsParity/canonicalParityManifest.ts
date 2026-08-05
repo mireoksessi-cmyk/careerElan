@@ -59,14 +59,10 @@ function tagExperienceLike(entry: ExperienceEntry | ProjectEntry): TaggedFragmen
       if (nonEmpty(t.value)) tagged.push({ value: t.value.trim(), kind: "skill" });
     }
   }
-  if (entry.bullets.length > 0) {
-    for (const b of entry.bullets) {
-      if (nonEmpty(b.text)) tagged.push({ value: b.text.trim(), kind: "bullet" });
-    }
-  } else {
-    for (const d of entry.descriptionParagraphs) {
-      if (nonEmpty(d.value)) tagged.push({ value: d.value.trim(), kind: "bullet" });
-    }
+  // Phase 5D.3A - see textExtraction.ts's extractExperienceEntryFragments
+  // own comment: every block in entry.content, in original order.
+  for (const c of entry.content) {
+    if (nonEmpty(c.text)) tagged.push({ value: c.text.trim(), kind: "bullet" });
   }
   return tagged;
 }
@@ -119,11 +115,8 @@ function tagPublication(entry: PublicationEntry): TaggedFragment[] {
 function tagCustomSection(section: CustomResumeSection): TaggedFragment[] {
   const tagged: TaggedFragment[] = [];
   if (nonEmpty(section.originalHeading ?? undefined)) tagged.push({ value: section.originalHeading!.trim(), kind: "custom" });
-  if (section.paragraphs.length > 0) {
-    for (const p of section.paragraphs) if (nonEmpty(p.value)) tagged.push({ value: p.value.trim(), kind: "custom" });
-  } else {
-    for (const b of section.bullets) if (nonEmpty(b.text)) tagged.push({ value: b.text.trim(), kind: "bullet" });
-  }
+  // Phase 5D.3A - see tagExperienceLike's own comment.
+  for (const c of section.content) if (nonEmpty(c.text)) tagged.push({ value: c.text.trim(), kind: "bullet" });
   return tagged;
 }
 

@@ -57,7 +57,7 @@ check("neither professional nor volunteer visible -> neither appears, order unaf
 
 // ==================== Custom section ordering by sourceOrder ====================
 function customSection(id: string, sourceOrder: number): CustomResumeSection {
-  return { id, originalHeading: id, displayHeading: id, paragraphs: [], bullets: [], sourceOrder, source: src };
+  return { id, originalHeading: id, displayHeading: id, paragraphs: [], bullets: [], content: [], sourceOrder, source: src };
 }
 
 check("custom sections re-sorted by sourceOrder regardless of input order", orderCustomSectionsBySourceOrder([customSection("c", 5), customSection("a", 1), customSection("b", 3)]).map((s) => s.id), ["a", "b", "c"]);

@@ -61,6 +61,7 @@ const emptyExperienceEntry = {
   id: "e1",
   bullets: [],
   descriptionParagraphs: [],
+  content: [],
   rawHeaderText: "",
   source: src,
   isVolunteer: false,
@@ -86,25 +87,25 @@ check("credentials: all fields empty -> hidden", hasCredentialsContent([emptyCre
 check("credentials: name present -> visible", hasCredentialsContent([{ ...emptyCredentialEntry, name: tv("PMP") }]), true);
 
 // ==================== Projects ====================
-const emptyProjectEntry = { id: "p1", technologies: [], bullets: [], descriptionParagraphs: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyProjectEntry = { id: "p1", technologies: [], bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("projects: empty entries -> hidden", hasProjectsContent([]), false);
 check("projects: all fields empty -> hidden", hasProjectsContent([emptyProjectEntry]), false);
 check("projects: name present -> visible", hasProjectsContent([{ ...emptyProjectEntry, name: tv("Tracker") }]), true);
 
 // ==================== Awards ====================
-const emptyAwardEntry = { id: "a1", details: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyAwardEntry = { id: "a1", details: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("awards: empty entries -> hidden", hasAwardsContent([]), false);
 check("awards: all fields empty -> hidden", hasAwardsContent([emptyAwardEntry]), false);
 check("awards: name present -> visible", hasAwardsContent([{ ...emptyAwardEntry, name: tv("Employee of the Year") }]), true);
 
 // ==================== Publications ====================
-const emptyPublicationEntry = { id: "pub1", authors: [], details: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyPublicationEntry = { id: "pub1", authors: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("publications: empty entries -> hidden", hasPublicationsContent([]), false);
 check("publications: all fields empty -> hidden", hasPublicationsContent([emptyPublicationEntry]), false);
 check("publications: title present -> visible", hasPublicationsContent([{ ...emptyPublicationEntry, title: tv("A Study") }]), true);
 
 // ==================== Custom (heading-only must NOT count) ====================
-const headingOnlyCustomSection = { id: "cs1", originalHeading: "Professional Experience", displayHeading: "Professional Experience", paragraphs: [], bullets: [], sourceOrder: 0, source: src };
+const headingOnlyCustomSection = { id: "cs1", originalHeading: "Professional Experience", displayHeading: "Professional Experience", paragraphs: [], bullets: [], content: [], sourceOrder: 0, source: src };
 check("custom: empty sections array -> hidden", hasCustomContent([]), false);
 check("custom: heading-only (no paragraphs/bullets) -> hidden (spec-recommended)", hasCustomContent([headingOnlyCustomSection]), false);
 check("custom: real paragraph present -> visible", hasCustomContent([{ ...headingOnlyCustomSection, paragraphs: [tv("Board member since 2020.")] }]), true);

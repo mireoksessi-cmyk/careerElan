@@ -65,23 +65,16 @@ export function extractExperienceEntryFragments(entry: ExperienceEntry): string[
     const v = nonEmpty(f?.value);
     if (v) fragments.push(v);
   }
-  // Mirrors renderers.tsx's ExperienceLikeView exactly: bullets if any
-  // exist, otherwise descriptionParagraphs - never both. A block whose
-  // upstream data happens to carry both (a real Phase 1/2 boundary
-  // artifact seen in generated-sidebar-professional.pdf, where two
-  // job entries were merged into one) only ever RENDERS the bullets
-  // side, so expecting descriptionParagraphs too here would flag
-  // correctly-rendered output as "missing text".
-  if (entry.bullets.length > 0) {
-    for (const b of entry.bullets) {
-      const v = nonEmpty(b.text);
-      if (v) fragments.push(v);
-    }
-  } else {
-    for (const d of entry.descriptionParagraphs) {
-      const v = nonEmpty(d.value);
-      if (v) fragments.push(v);
-    }
+  // Phase 5D.3A - mirrors renderers.tsx's ExperienceLikeView exactly:
+  // every block in entry.content, in original order - bullets and
+  // paragraphs both render now, so both are expected here. This
+  // replaced a bullets-XOR-descriptionParagraphs precedence that
+  // silently dropped an entire array whenever an entry legitimately
+  // mixed both kinds (Phase 5D.3 UAT's Prior Experience / Government-
+  // Funded Projects findings - the very bug this round exists to fix).
+  for (const c of entry.content) {
+    const v = nonEmpty(c.text);
+    if (v) fragments.push(v);
   }
   return fragments;
 }
@@ -126,18 +119,10 @@ export function extractProjectEntryFragments(entry: ProjectEntry): string[] {
     const v = nonEmpty(t.value);
     if (v) fragments.push(v);
   }
-  // Same bullets-XOR-descriptionParagraphs precedence as
-  // extractExperienceEntryFragments above - see its comment.
-  if (entry.bullets.length > 0) {
-    for (const b of entry.bullets) {
-      const v = nonEmpty(b.text);
-      if (v) fragments.push(v);
-    }
-  } else {
-    for (const d of entry.descriptionParagraphs) {
-      const v = nonEmpty(d.value);
-      if (v) fragments.push(v);
-    }
+  // Phase 5D.3A - see extractExperienceEntryFragments's own comment.
+  for (const c of entry.content) {
+    const v = nonEmpty(c.text);
+    if (v) fragments.push(v);
   }
   return fragments;
 }
@@ -176,19 +161,10 @@ export function extractCustomSectionFragments(section: CustomResumeSection): str
   const fragments: string[] = [];
   const heading = nonEmpty(section.originalHeading ?? undefined);
   if (heading) fragments.push(heading);
-  // Mirrors renderers.tsx's CustomSectionView exactly: paragraphs if
-  // any exist, otherwise bullets - never both (same rationale as
-  // extractExperienceEntryFragments's own comment above).
-  if (section.paragraphs.length > 0) {
-    for (const p of section.paragraphs) {
-      const v = nonEmpty(p.value);
-      if (v) fragments.push(v);
-    }
-  } else {
-    for (const b of section.bullets) {
-      const v = nonEmpty(b.text);
-      if (v) fragments.push(v);
-    }
+  // Phase 5D.3A - see extractExperienceEntryFragments's own comment.
+  for (const c of section.content) {
+    const v = nonEmpty(c.text);
+    if (v) fragments.push(v);
   }
   return fragments;
 }

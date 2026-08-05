@@ -85,6 +85,14 @@ export function extractProjectEntries(sectionId: string, bodyBlocks: SemanticCon
     const descriptionParagraphs = bodyBlocksForEntry.filter((b) => b.blockType !== "bullet").map((b) => makeValue(b.rawText, sectionId, b, 0.6));
     const technologies = extractTechnologies(sectionId, bodyBlocksForEntry);
 
+    // Phase 5D.3A - see ExperienceEntry.content's own comment (types.ts).
+    const content = bodyBlocksForEntry.map((b, ci) => ({
+      id: `${entryId(sectionId, "project", index)}-content-${ci}`,
+      kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
+      text: b.rawText,
+      source: traceFromBlock(sectionId, b),
+    }));
+
     const allBlocks = [nameBlock, ...bodyBlocksForEntry];
 
     return {
@@ -95,6 +103,7 @@ export function extractProjectEntries(sectionId: string, bodyBlocks: SemanticCon
       technologies,
       bullets,
       descriptionParagraphs,
+      content,
       rawHeaderText: nameBlock.rawText,
       source: mergeTraces(traceFromBlocks(sectionId, allBlocks)),
       isUncertain: name === undefined,

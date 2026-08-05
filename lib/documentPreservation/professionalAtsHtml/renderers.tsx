@@ -6,18 +6,25 @@
   splittable sub-item (bullet/paragraph/detail) carries `data-sub-index`
   so a page-boundary split can target it precisely.
 
-  Sub-item definition per kind (mirrors breakPolicy.ts's own bullet-vs-
-  paragraph precedence exactly, so measurement/pagination/rendering
-  never disagree about what "item N" means for a given block):
-  - experience/volunteer/project entries: bullets if any exist,
-    otherwise descriptionParagraphs. (breakPolicy.ts checks
-    bulletCount first, same precedence.)
+  Sub-item definition per kind (mirrors breakPolicy.ts's own counts
+  exactly, so measurement/pagination/rendering never disagree about
+  what "item N" means for a given block):
+  - experience/volunteer/project entries, and custom sections: the
+    entry/section's own `content` array (Phase 5D.3A) - every body
+    block (bullet/paragraph/subheading) in original source order, one
+    sub-item per element, GLOBAL content-array index used for both
+    data-sub-index and margin math (renderOrderedContentBlocks below).
+    This replaced an older "bullets if any exist, else
+    descriptionParagraphs" rule that silently dropped an entire array
+    whenever an entry legitimately mixed bullets and paragraphs (Phase
+    5D.3 UAT's Prior Experience / Government-Funded Projects findings)
+    - bullets/descriptionParagraphs/paragraphs still exist on these
+    types for other consumers (contentUnits.ts, breakPolicy.ts) but are
+    no longer read here.
   - education entries: honors followed by details, as one combined
     sequence (breakPolicy.ts's detailCount = honors+details).
   - credential/award entries: details.
   - publication entries: details.
-  - custom sections: paragraphs if any exist, otherwise bullets
-    (mirrors breakPolicy.ts's custom-section precedence).
 
   `isContinuation` (from a BlockPlacement) suppresses the block's own
   header re-render on a later page - the header/heading was already
@@ -39,6 +46,7 @@ import type {
   CustomResumeSection,
   MetricGrid,
   StructuredTextValue,
+  EntryContentBlock,
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 import { PROFESSIONAL_ATS_SECTION_LABELS } from "../professionalAtsAssembly/sectionLabels";
@@ -78,7 +86,7 @@ function joinContact(parts: (string | undefined)[]): string {
 }
 
 export function experienceLikeSubItemCount(entry: ExperienceEntry | ProjectEntry): number {
-  return entry.bullets.length > 0 ? entry.bullets.length : entry.descriptionParagraphs.length;
+  return entry.content.length;
 }
 export function educationSubItemCount(entry: EducationEntry): number {
   return entry.honors.length + entry.details.length;
@@ -87,12 +95,78 @@ export function detailsSubItemCount(entry: CredentialEntry | AwardEntry | Public
   return entry.details.length;
 }
 export function customSectionSubItemCount(section: CustomResumeSection): number {
-  return section.paragraphs.length > 0 ? section.paragraphs.length : section.bullets.length;
+  return section.content.length;
 }
 
 function inRange(index: number, range?: SubRange): boolean {
   if (!range) return true;
   return index >= range.startIndex && index <= range.endIndex;
+}
+
+/*
+  Phase 5D.3A - shared ordered-content renderer for ExperienceLikeView
+  and CustomSectionView. Walks `content` once, grouping consecutive
+  same-kind ("bullet" vs everything else) items into runs so bullets
+  still render inside a single valid <ul> - never re-sorted, never
+  XOR'd away, exact original order preserved end to end.
+
+  Margin math reproduces the pre-existing (pure-bullets-only or
+  pure-paragraphs-only) visual output byte-for-byte: the very first
+  rendered item overall gets 0 top-margin when isContinuation (else
+  spacing.bulletGapPx), and every subsequent item - whether the next
+  <li> in the same <ul> or the first item of the next run - gets
+  spacing.bulletGapPx. data-sub-index is always the block's GLOBAL
+  index in `content` (never a per-run local index) so pagination
+  (measurement.ts's real DOM query, paginationPlanner.ts's subRange)
+  keeps working unchanged - see this file's own header comment.
+*/
+function renderOrderedContentBlocks(content: EntryContentBlock[], subRange: SubRange | undefined, isContinuation: boolean, spacing: DensitySpacingTokens): React.ReactNode[] {
+  type Run = { isBullet: boolean; items: { block: EntryContentBlock; index: number }[] };
+  const runs: Run[] = [];
+  content.forEach((block, index) => {
+    const isBullet = block.kind === "bullet";
+    const last = runs[runs.length - 1];
+    if (last && last.isBullet === isBullet) last.items.push({ block, index });
+    else runs.push({ isBullet, items: [{ block, index }] });
+  });
+
+  const rendered: React.ReactNode[] = [];
+  let visibleSeen = 0;
+  for (const run of runs) {
+    const visibleItems = run.items.filter(({ index }) => inRange(index, subRange));
+    if (visibleItems.length === 0) continue;
+    const isFirstOverall = visibleSeen === 0;
+    if (run.isBullet) {
+      rendered.push(
+        <ul key={`ul-${visibleItems[0].index}`} style={{ margin: 0, marginTop: isFirstOverall && isContinuation ? 0 : spacing.bulletGapPx }}>
+          {visibleItems.map(({ block, index }, localIdx) => (
+            <li key={index} data-sub-index={index} style={{ marginTop: gapMarginTop(localIdx, spacing.bulletGapPx) }}>
+              {block.text}
+            </li>
+          ))}
+        </ul>
+      );
+    } else {
+      visibleItems.forEach(({ block, index }, localIdx) => {
+        const isFirstRendered = isFirstOverall && localIdx === 0;
+        rendered.push(
+          <p
+            key={index}
+            data-sub-index={index}
+            style={{
+              margin: 0,
+              marginTop: isFirstRendered && isContinuation ? 0 : spacing.bulletGapPx,
+              fontWeight: block.kind === "subheading" ? 600 : undefined,
+            }}
+          >
+            {block.text}
+          </p>
+        );
+      });
+    }
+    visibleSeen += visibleItems.length;
+  }
+  return rendered;
 }
 
 function IdentityView({ block }: { block: AssemblyBlock }) {
@@ -147,8 +221,6 @@ function SkillGroupView({ block }: { block: AssemblyBlock }) {
 
 function ExperienceLikeView({ block, subRange, isContinuation, spacing = DEFAULT_SPACING }: { block: AssemblyBlock; subRange?: SubRange; isContinuation: boolean; spacing?: DensitySpacingTokens }) {
   const entry = block.payload as ExperienceEntry | ProjectEntry;
-  const usesBullets = entry.bullets.length > 0;
-  const items = usesBullets ? entry.bullets.map((b) => b.text) : entry.descriptionParagraphs.map((d) => d.value);
   const role = val(("role" in entry ? entry.role : undefined));
   const org = val(("organization" in entry ? entry.organization : "name" in entry ? entry.name : undefined) as StructuredTextValue | undefined);
   const location = "location" in entry ? val(entry.location) : undefined;
@@ -167,21 +239,7 @@ function ExperienceLikeView({ block, subRange, isContinuation, spacing = DEFAULT
           {(location || dateRange) && <div>{joinContact([location, dateRange])}</div>}
         </div>
       )}
-      {items.length > 0 && (
-        usesBullets ? (
-          <ul style={{ margin: 0, marginTop: isContinuation ? 0 : spacing.bulletGapPx }}>
-            {items.map((text, i) => inRange(i, subRange) && <li key={i} data-sub-index={i} style={{ marginTop: gapMarginTop(i, spacing.bulletGapPx) }}>{text}</li>)}
-          </ul>
-        ) : (
-          <>
-            {items.map((text, i) => inRange(i, subRange) && (
-              <p key={i} data-sub-index={i} style={{ margin: 0, marginTop: isContinuation ? gapMarginTop(i, spacing.bulletGapPx) : spacing.bulletGapPx }}>
-                {text}
-              </p>
-            ))}
-          </>
-        )
-      )}
+      {renderOrderedContentBlocks(entry.content, subRange, isContinuation, spacing)}
     </div>
   );
 }
@@ -290,22 +348,10 @@ function PublicationView({ block, subRange, isContinuation, spacing = DEFAULT_SP
 
 function CustomSectionView({ block, subRange, isContinuation, spacing = DEFAULT_SPACING }: { block: AssemblyBlock; subRange?: SubRange; isContinuation: boolean; spacing?: DensitySpacingTokens }) {
   const section = block.payload as CustomResumeSection;
-  const usesParagraphs = section.paragraphs.length > 0;
-  const items = usesParagraphs ? section.paragraphs.map((p) => p.value) : section.bullets.map((b) => b.text);
   return (
     <div data-block-id={block.id} data-block-kind="custom-section" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && section.originalHeading && <h3 style={{ margin: 0 }}>{section.originalHeading}</h3>}
-      {usesParagraphs
-        ? items.map((text, i) => inRange(i, subRange) && (
-            <p key={i} data-sub-index={i} style={{ margin: 0, marginTop: isContinuation ? gapMarginTop(i, spacing.bulletGapPx) : spacing.bulletGapPx }}>
-              {text}
-            </p>
-          ))
-        : items.length > 0 && (
-            <ul style={{ margin: 0, marginTop: isContinuation ? 0 : spacing.bulletGapPx }}>
-              {items.map((text, i) => inRange(i, subRange) && <li key={i} data-sub-index={i} style={{ marginTop: gapMarginTop(i, spacing.bulletGapPx) }}>{text}</li>)}
-            </ul>
-          )}
+      {renderOrderedContentBlocks(section.content, subRange, isContinuation, spacing)}
     </div>
   );
 }

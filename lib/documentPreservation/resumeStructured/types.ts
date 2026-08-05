@@ -65,6 +65,43 @@ export type StructuredBullet = {
   source: SourceTrace;
 };
 
+/*
+  Phase 5D.3A - Mixed Block Rendering Hardening. A single body-content
+  item inside an entry/section, tagged with its own original block
+  type and kept in the SAME relative order Phase 1 found it in -
+  additive alongside each entry's existing bullets[]/
+  descriptionParagraphs[]/paragraphs[]/details[] arrays (never replaces
+  them; those stay exactly as before for any other consumer - e.g.
+  contentUnits.ts's own estimatedContentUnits math, breakPolicy.ts's
+  own bulletCount/paragraphCount split-strategy decision). Renderers
+  (HTML/PDF/DOCX) and their "expected content" extractors switch to
+  iterating THIS array instead of picking one of the two bucketed
+  arrays and discarding the other - see renderers.tsx's own header
+  comment on why that XOR pattern silently drops real content whenever
+  a single entry legitimately mixes bullet and paragraph blocks (a
+  bullet's own line-wrap that Phase 1 tags as a new "paragraph" block
+  is the real-fixture case this exists to fix - Phase 5D.3 UAT's
+  Prior Experience / Government-Funded Projects findings).
+
+  "subheading" is included in the kind union for forward-compatibility
+  with a future embedded-subheading signal (matches this round's own
+  design ask) but no current extractor ever produces it - Phase 1 does
+  not surface an embedded numbered sub-header ("1) xEV Battery Module...")
+  as a distinct blockType from an ordinary body paragraph, and inventing
+  a heuristic to guess which paragraphs are "really" subheadings would
+  be a Semantic classification change this round explicitly prohibits.
+  Every real EntryContentBlock produced this round is "bullet" or
+  "paragraph", verbatim from Phase 1's own blockType.
+*/
+export type EntryContentBlockKind = "bullet" | "paragraph" | "subheading";
+
+export type EntryContentBlock = {
+  id: string;
+  kind: EntryContentBlockKind;
+  text: string;
+  source: SourceTrace;
+};
+
 export type ResumeIdentity = {
   fullName?: StructuredTextValue;
   headline?: StructuredTextValue;
@@ -103,6 +140,12 @@ export type ExperienceEntry = {
 
   bullets: StructuredBullet[];
   descriptionParagraphs: StructuredTextValue[];
+  /* Phase 5D.3A - same body blocks as bullets/descriptionParagraphs
+     above, but as ONE order-preserving array tagging each block's own
+     kind instead of two separate buckets. Renderers use this field;
+     bullets/descriptionParagraphs stay populated unchanged for every
+     other existing consumer. */
+  content: EntryContentBlock[];
 
   /* The raw entry-header line(s) this entry was segmented from, kept
      verbatim regardless of how much structure was confidently
@@ -167,6 +210,8 @@ export type ProjectEntry = {
 
   bullets: StructuredBullet[];
   descriptionParagraphs: StructuredTextValue[];
+  /* Phase 5D.3A - see ExperienceEntry.content's own comment. */
+  content: EntryContentBlock[];
 
   rawHeaderText: string;
   source: SourceTrace;
@@ -181,6 +226,13 @@ export type AwardEntry = {
   issuer?: StructuredTextValue;
   dateText?: StructuredTextValue;
   details: StructuredTextValue[];
+  /* Phase 5D.3A - mirrors `details` 1:1 (see awardExtractor.ts's own
+     comment: this extractor never separates a "detail" line from the
+     name/date-bearing line today, so there is no observed real
+     multi-block body to preserve differently - added for type-level
+     consistency with Experience/Project/CustomSection, not because a
+     content-loss bug was found here). */
+  content: EntryContentBlock[];
 
   rawHeaderText: string;
   source: SourceTrace;
@@ -198,6 +250,10 @@ export type PublicationEntry = {
   urlOrDoi?: StructuredTextValue;
 
   details: StructuredTextValue[];
+  /* Phase 5D.3A - mirrors `details` 1:1 (see publicationExtractor.ts's
+     own comment: one full citation per Phase 1 block, no separate
+     multi-block body today). */
+  content: EntryContentBlock[];
 
   rawHeaderText: string;
   source: SourceTrace;
@@ -245,6 +301,8 @@ export type CustomResumeSection = {
 
   paragraphs: StructuredTextValue[];
   bullets: StructuredBullet[];
+  /* Phase 5D.3A - see ExperienceEntry.content's own comment. */
+  content: EntryContentBlock[];
 
   sourceOrder: number;
   source: SourceTrace;

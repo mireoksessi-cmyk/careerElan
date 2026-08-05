@@ -67,6 +67,10 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
       issuer: undefined,
       dateText,
       details: [],
+      // Phase 5D.3A - mirrors `details` 1:1 (see types.ts's own comment
+      // on AwardEntry.content: this extractor never separates a detail
+      // line from the name/date-bearing line today).
+      content: [],
       rawHeaderText: blocks.map((b) => b.rawText).join("\n"),
       source: mergeTraces(traceFromBlocks(sectionId, blocks)),
       isUncertain: name === undefined,

@@ -60,6 +60,17 @@ export function extractPublicationEntries(sectionId: string, bodyBlocks: Semanti
       dateText,
       urlOrDoi,
       details: [makeValue(text, sectionId, block, 1)],
+      // Phase 5D.3A - mirrors `details` 1:1 (see types.ts's own comment
+      // on PublicationEntry.content: one full citation per Phase 1
+      // block, no separate multi-block body today).
+      content: [
+        {
+          id: `${entryId(sectionId, "publication", index)}-content-0`,
+          kind: block.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
+          text,
+          source: traceFromBlock(sectionId, block),
+        },
+      ],
       rawHeaderText: text,
       source: mergeTraces(traceFromBlocks(sectionId, [block])),
       isUncertain: title === undefined,

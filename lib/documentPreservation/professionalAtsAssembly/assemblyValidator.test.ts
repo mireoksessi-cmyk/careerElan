@@ -64,14 +64,14 @@ function emptyModel(): ResumeStructuredModel {
   model.identity = { fullName: tv("Jane Doe"), otherContactLines: [] };
   model.professionalSummary = { text: "Experienced generalist.", source: src };
   model.skillGroups = [{ skills: ["Excel"], source: src }];
-  model.professionalExperience = [{ id: "exp-0", organization: tv("Acme"), bullets: [], descriptionParagraphs: [], rawHeaderText: "", source: src, isVolunteer: false, isUncertain: false, reasonCodes: [] }];
-  model.volunteerExperience = [{ id: "vol-0", organization: tv("Food Bank"), bullets: [], descriptionParagraphs: [], rawHeaderText: "", source: src, isVolunteer: true, isUncertain: false, reasonCodes: [] }];
+  model.professionalExperience = [{ id: "exp-0", organization: tv("Acme"), bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isVolunteer: false, isUncertain: false, reasonCodes: [] }];
+  model.volunteerExperience = [{ id: "vol-0", organization: tv("Food Bank"), bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isVolunteer: true, isUncertain: false, reasonCodes: [] }];
   model.education = [{ id: "edu-0", institution: tv("MIT"), honors: [], details: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
   model.credentials = [{ id: "cred-0", name: tv("PMP"), details: [], kind: "certification", rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.projects = [{ id: "proj-0", name: tv("Tracker"), technologies: [], bullets: [], descriptionParagraphs: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.awards = [{ id: "award-0", name: tv("Top Performer"), details: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.publications = [{ id: "pub-0", title: tv("A Study"), authors: [], details: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.customSections = [{ id: "cs-0", originalHeading: "Volunteer Board Work", displayHeading: "Volunteer Board Work", paragraphs: [tv("Board member.")], bullets: [], sourceOrder: 0, source: src }];
+  model.projects = [{ id: "proj-0", name: tv("Tracker"), technologies: [], bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.awards = [{ id: "award-0", name: tv("Top Performer"), details: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.publications = [{ id: "pub-0", title: tv("A Study"), authors: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.customSections = [{ id: "cs-0", originalHeading: "Volunteer Board Work", displayHeading: "Volunteer Board Work", paragraphs: [tv("Board member.")], bullets: [], content: [], sourceOrder: 0, source: src }];
 
   const doc = buildProfessionalAtsAssembly(model);
   check("all-sections: every one of the 11 sections is visible", doc.visibleSectionKeys.length, 11);

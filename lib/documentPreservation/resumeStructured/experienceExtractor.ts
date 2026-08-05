@@ -285,6 +285,19 @@ export function extractExperienceEntries(sectionId: string, bodyBlocks: Semantic
       .filter((b) => b.blockType !== "bullet" && b.rawText.length > 0)
       .map((b) => makeValue(b.rawText, sectionId, b, 0.6));
 
+    // Phase 5D.3A - same bodyRunBlocks, in their original order, each
+    // tagged with its own blockType instead of split into the two
+    // arrays above. See types.ts's own comment on why renderers use
+    // this instead of bullets/descriptionParagraphs.
+    const content = bodyRunBlocks
+      .filter((b) => b.rawText.length > 0)
+      .map((b, ci) => ({
+        id: `${entryId(sectionId, "experience", index)}-content-${ci}`,
+        kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
+        text: b.rawText,
+        source: traceFromBlock(sectionId, b),
+      }));
+
     const allEntryBlocks = [...headerBlocks, ...bodyRunBlocks];
     const isUncertain = fields.organization === undefined || fields.role === undefined;
 
@@ -298,6 +311,7 @@ export function extractExperienceEntries(sectionId: string, bodyBlocks: Semantic
       dateRangeText: fields.dateRangeText,
       bullets,
       descriptionParagraphs,
+      content,
       rawHeaderText: headerBlocks.map((b) => b.rawText).join("\n"),
       source: mergeTraces(traceFromBlocks(sectionId, allEntryBlocks)),
       isVolunteer,
