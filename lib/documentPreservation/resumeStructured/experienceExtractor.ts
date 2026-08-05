@@ -75,10 +75,33 @@ export function segmentEntryRanges(blocks: SemanticContentBlock[]): EntryRange[]
     return looksLikeHeaderLine(block) && next !== undefined && next.blockType !== "bullet" && isDateRangeLine(next.text);
   }
 
+  /*
+    Phase 5D.1 - date-FIRST two-line header: blocks[i] is itself a
+    self-contained "Role, Date" line, and blocks[i+1] is a separate,
+    non-date "Company, Location" line immediately after it. Guarded
+    against misreading blocks[i+1] as this entry's org/location line
+    when it is actually the ROLE half of the NEXT entry's own,
+    dominant role-first/date-second header (blocks[i+2] itself has a
+    date) - that existing, more common shape must keep winning.
+  */
+  function isDateFirstTwoLineHeader(index: number): boolean {
+    if (index + 1 >= n) return false;
+    const first = blocks[index];
+    const next = blocks[index + 1];
+    if (!isDateRangeLine(first.text) || !looksLikeHeaderLine(first)) return false;
+    if (next.blockType === "bullet" || isDateRangeLine(next.text) || !looksLikeHeaderLine(next)) return false;
+    const afterNext = blocks[index + 2];
+    if (afterNext && afterNext.blockType !== "bullet" && isDateRangeLine(afterNext.text)) return false;
+    return true;
+  }
+
   while (i < n) {
     const headerBlockIndices: number[] = [i];
     let headerEnd = i;
     if (!isDateRangeLine(blocks[i].text) && i + 1 < n && blocks[i + 1].blockType !== "bullet" && isDateRangeLine(blocks[i + 1].text) && looksLikeHeaderLine(blocks[i])) {
+      headerEnd = i + 1;
+      headerBlockIndices.push(i + 1);
+    } else if (isDateFirstTwoLineHeader(i)) {
       headerEnd = i + 1;
       headerBlockIndices.push(i + 1);
     }
@@ -174,6 +197,42 @@ function buildFieldsFromHeader(
     }
     reasonCodes.push("single-line-header-insufficient-comma-evidence");
     return { dateRangeText: dateValue, startDateText: startValue, endDateText: endValue, reasonCodes };
+  }
+
+  // Phase 5D.1 - date-first two-line header: headerBlocks[0] is itself
+  // a self-contained "Role, Date" line (segmentEntryRanges only groups
+  // this shape via isDateFirstTwoLineHeader), headerBlocks[1] is the
+  // separate, non-date "Company[, Location]" line. Handled before the
+  // (dominant, pre-existing) "headerBlocks[0] has no date" shape below,
+  // since that shape's own logic assumes headerBlocks[0] never has a
+  // date - true for every case that reaches it once this branch has
+  // first claimed the date-first shape.
+  if (isDateRangeLine(headerBlocks[0].text)) {
+    const [roleBlock, orgBlock] = headerBlocks;
+    const dateParts = extractDateParts(roleBlock.text);
+    if (!dateParts) {
+      reasonCodes.push("two-line-header-missing-expected-date");
+      return { reasonCodes };
+    }
+    const dateStartIndex = roleBlock.text.indexOf(dateParts.dateRangeText);
+    const dateValue = makeValue(dateParts.dateRangeText, sectionId, roleBlock, 0.85);
+    const startValue = dateParts.startDateText ? makeValue(dateParts.startDateText, sectionId, roleBlock, 0.8) : undefined;
+    const endValue = dateParts.endDateText ? makeValue(dateParts.endDateText, sectionId, roleBlock, 0.8) : undefined;
+
+    const roleText = roleBlock.text.slice(0, dateStartIndex).trim().replace(/[,]+$/, "").trim();
+    const roleClean = roleText.length > 0 && !/[/\d]$/.test(roleText);
+
+    const { organization, location } = splitOrganizationLocation(orgBlock.rawText);
+    reasonCodes.push("two-line-header-date-first-role-then-organization-location");
+    return {
+      role: roleClean ? makeValue(roleText, sectionId, roleBlock, 0.75) : undefined,
+      organization: makeValue(organization, sectionId, orgBlock, 0.75),
+      location: location ? makeValue(location, sectionId, orgBlock, 0.7) : undefined,
+      dateRangeText: dateValue,
+      startDateText: startValue,
+      endDateText: endValue,
+      reasonCodes,
+    };
   }
 
   // Two-line header: headerBlocks[0] has no date, headerBlocks[1] has the date.

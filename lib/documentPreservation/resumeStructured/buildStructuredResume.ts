@@ -28,8 +28,9 @@ import { extractProjectEntries } from "./projectExtractor";
 import { extractAwardEntries } from "./awardExtractor";
 import { extractPublicationEntries } from "./publicationExtractor";
 import { adaptCustomSection } from "./customSectionAdapter";
+import { splitEmbeddedCanonicalSubsections } from "./embeddedSubsectionSplitter";
 import { validateStructuredResume } from "./structuredValidator";
-import type { ResumeSlotKey, ResumeStructuredModel } from "./types";
+import type { CustomResumeSection, ResumeSlotKey, ResumeStructuredModel, SourceTrace } from "./types";
 
 function bodyBlocksOf(section: LosslessResumeSection): SemanticContentBlock[] {
   return section.blocks.filter((b) => b.blockType !== "heading");
@@ -69,6 +70,79 @@ function mergeSectionHeadingIntoFirst<T extends { source: { sourceSectionId: str
 */
 function isEmpty(items: unknown[]): boolean {
   return items.length === 0;
+}
+
+/*
+  Phase 5D.1 - variant of mergeSectionHeadingIntoFirst for an EMBEDDED
+  heading (e.g. "Education and Training" found partway through a
+  Volunteer Experience section's body), which is never section.blocks[0]
+  and so cannot use that function's own lookup. Same rule: only ever
+  extends which block ids an already-produced item's trace covers,
+  never invents a value.
+*/
+function mergeHeadingBlockIntoFirst<T extends { source: SourceTrace }>(
+  sectionId: string,
+  headingBlock: SemanticContentBlock | null,
+  items: T[]
+): void {
+  if (!headingBlock || items.length === 0) return;
+  items[0].source = mergeTraces(items[0].source, traceFromBlock(sectionId, headingBlock));
+}
+
+/*
+  Phase 5D.1 - an embedded Education/Credentials subsection whose own
+  extractor produced zero entries (heading found, but nothing after it
+  the extractor could turn into an entry) must not silently vanish -
+  same "structuring failed, preserve don't delete" rule
+  adaptCustomSection already implements for a whole top-level section.
+  Reused here via a minimal synthetic LosslessResumeSection so the
+  paragraph/bullet split and source trace stay identical to every other
+  residual-preservation path, instead of re-implementing that logic.
+  headingBlock's blockType is overridden to "heading" ONLY within this
+  synthetic object (never mutates the real block) so adaptCustomSection
+  correctly excludes it from paragraphs/bullets while still tracing it -
+  the embedded heading's own blockType in the real document is
+  "paragraph" (Phase 1 never marks it "heading"), which is accurate for
+  Phase 1's own purposes but would otherwise print the heading text a
+  second time as a body paragraph here.
+*/
+function buildEmbeddedResidualSubsection(
+  sectionId: string,
+  virtualId: string,
+  sourceOrder: number,
+  headingBlock: SemanticContentBlock | null,
+  blocks: SemanticContentBlock[]
+): CustomResumeSection {
+  const allBlocks = headingBlock ? [{ ...headingBlock, blockType: "heading" as const }, ...blocks] : blocks;
+  const pageIndices = allBlocks.map((b) => b.pageIndex);
+  // `id: sectionId` (the REAL parent section, never the virtual
+  // subsection id) is what makes adaptCustomSection's own internal
+  // traceFromBlock(s)/traceFromBlocks calls stamp every trace with the
+  // correct sourceSectionId - required for structuredValidator.ts's
+  // section-coverage (check A) and missing-custom-section (check F)
+  // checks, both keyed on real Phase 1 section ids. The synthetic
+  // CustomResumeSection this produces would otherwise get the SAME
+  // `${sectionId}-custom` id as any other embedded residual for this
+  // same section (or a whole-section fallback) - overridden to the
+  // caller's own deterministic, unique virtualId below instead.
+  const synthetic: LosslessResumeSection = {
+    id: sectionId,
+    originalHeading: headingBlock?.rawText ?? null,
+    normalizedHeading: null,
+    normalizedType: "custom",
+    displayHeading: headingBlock?.rawText ?? null,
+    sourceOrder,
+    startPageIndex: pageIndices.length > 0 ? Math.min(...pageIndices) : 0,
+    endPageIndex: pageIndices.length > 0 ? Math.max(...pageIndices) : 0,
+    confidence: 0,
+    classificationMethod: "fallback",
+    reasonCodes: ["embedded-subsection-extraction-empty-residual-fallback"],
+    blocks: allBlocks,
+    rawText: allBlocks.map((b) => b.rawText).join("\n"),
+    isUncertain: true,
+  };
+  const result = adaptCustomSection(synthetic);
+  return { ...result, id: virtualId };
 }
 
 export function buildStructuredResume(document: LosslessResumeDocument): ResumeStructuredModel {
@@ -149,18 +223,83 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
         model.skillGroups.push(...groups);
         break;
       }
-      case "experience": {
-        const entries = extractExperienceEntries(section.id, body, false);
-        if (isEmpty(entries)) { model.customSections.push(adaptCustomSection(section)); break; }
-        mergeSectionHeadingIntoFirst(section, entries);
-        model.professionalExperience.push(...entries);
-        break;
-      }
+      case "experience":
       case "volunteering": {
-        const entries = extractExperienceEntries(section.id, body, true);
-        if (isEmpty(entries)) { model.customSections.push(adaptCustomSection(section)); break; }
-        mergeSectionHeadingIntoFirst(section, entries);
-        model.volunteerExperience.push(...entries);
+        const isVolunteer = section.normalizedType === "volunteering";
+        /*
+          Phase 5D.1 - a real private entry-level resume put
+          "Education and Training" and "Certifications & Licenses" as
+          plain paragraph lines INSIDE its Volunteer Experience
+          section's body (Phase 1 correctly kept the section boundary
+          at "Volunteer Experience" - see Phase 5D.0's audit). Splitting
+          `body` into runs BEFORE handing anything to
+          extractExperienceEntries is what keeps that embedded content
+          out of the primary experience/volunteer entries' bullets in
+          the first place - routing it to educationExtractor/
+          credentialExtractor after the fact would be too late, since
+          extractExperienceEntries would already have folded it into
+          whichever entry was still "open". When no embedded heading
+          exists anywhere in `body` (the overwhelmingly common case),
+          this produces exactly one "primary" subsection covering the
+          whole body, so behavior for every existing fixture is
+          unchanged.
+        */
+        const subsections = splitEmbeddedCanonicalSubsections(body);
+        if (isEmpty(subsections)) {
+          // Real-fixture evidence, unchanged from before this round:
+          // bench/resume-B-junior-canva.pdf's "Professional Experience"
+          // section has a heading and NO body blocks at all. An empty
+          // `body` produces zero subsections (splitEmbeddedCanonical
+          // Subsections' own filter drops the empty leading-primary
+          // placeholder), so this section-level fallback - identical to
+          // every other typed-section case below - is still required to
+          // keep the heading block itself covered.
+          model.customSections.push(adaptCustomSection(section));
+          break;
+        }
+        let firstProducedHost: { source: SourceTrace }[] | null = null;
+
+        subsections.forEach((sub, index) => {
+          if (sub.type === "primary") {
+            const entries = extractExperienceEntries(section.id, sub.blocks, isVolunteer);
+            if (isEmpty(entries)) {
+              // Unreachable in practice (segmentEntryRanges always
+              // returns >=1 range for a non-empty block list, and a
+              // "primary" run's headingBlock is always null, which per
+              // the splitter's own filter means its blocks are never
+              // empty) - kept as a fail-safe residual path rather than
+              // silently dropping coverage if that invariant ever
+              // changes.
+              if (sub.blocks.length > 0 || sub.headingBlock) {
+                model.customSections.push(buildEmbeddedResidualSubsection(section.id, `${section.id}-embedded-${index}`, section.sourceOrder, sub.headingBlock, sub.blocks));
+              }
+              return;
+            }
+            mergeHeadingBlockIntoFirst(section.id, sub.headingBlock, entries);
+            if (!firstProducedHost) firstProducedHost = entries;
+            (isVolunteer ? model.volunteerExperience : model.professionalExperience).push(...entries);
+          } else if (sub.type === "education") {
+            const entries = extractEducationEntries(section.id, sub.blocks);
+            if (isEmpty(entries)) {
+              model.customSections.push(buildEmbeddedResidualSubsection(section.id, `${section.id}-embedded-${index}`, section.sourceOrder, sub.headingBlock, sub.blocks));
+              return;
+            }
+            mergeHeadingBlockIntoFirst(section.id, sub.headingBlock, entries);
+            if (!firstProducedHost) firstProducedHost = entries;
+            model.education.push(...entries);
+          } else {
+            const entries = extractCredentialEntries(section.id, sub.blocks);
+            if (isEmpty(entries)) {
+              model.customSections.push(buildEmbeddedResidualSubsection(section.id, `${section.id}-embedded-${index}`, section.sourceOrder, sub.headingBlock, sub.blocks));
+              return;
+            }
+            mergeHeadingBlockIntoFirst(section.id, sub.headingBlock, entries);
+            if (!firstProducedHost) firstProducedHost = entries;
+            model.credentials.push(...entries);
+          }
+        });
+
+        if (firstProducedHost) mergeSectionHeadingIntoFirst(section, firstProducedHost);
         break;
       }
       case "education": {

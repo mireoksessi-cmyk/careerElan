@@ -134,6 +134,86 @@ check("isVolunteer=false when caller passes false, same extractor", nonVolunteer
 counter = 0;
 check("empty body blocks: zero entries, no crash", extractExperienceEntries("s1", [], false), []);
 
+/*
+  Phase 5D.1 - Pattern E: date-FIRST two-line header ("Role, Date" then
+  a separate "Company, Location" line with no date of its own) - the
+  real private entry-level resume's exact shape (fullwidth-hyphen dates
+  covered separately below). Two entries back to back, mirroring the
+  real Phone Banker / Court Clerk pair.
+*/
+counter = 0;
+const patternE = [
+  block("Community Outreach Lead, Jan 2022 - Jun 2023"),
+  block("Northside Volunteer Network, Ottawa, ON"),
+  block("Recruited and trained 40 volunteers.", "bullet"),
+  block("Case Coordinator, Jul 2023 - Present"),
+  block("Riverside Legal Clinic, Ottawa, ON"),
+  block("Managed intake for pro bono legal consultations.", "bullet"),
+  block("Scheduled client appointments across three staff lawyers.", "bullet"),
+];
+const entriesE = extractExperienceEntries("s1", patternE, true);
+check("pattern E (date-first two-line header): exactly TWO entries", entriesE.length, 2);
+check("pattern E: entry1 role/organization/location", [entriesE[0].role?.value, entriesE[0].organization?.value, entriesE[0].location?.value], [
+  "Community Outreach Lead",
+  "Northside Volunteer Network",
+  "Ottawa, ON",
+]);
+check("pattern E: entry1 dateRangeText", entriesE[0].dateRangeText?.value, "Jan 2022 - Jun 2023");
+check("pattern E: entry2 role/organization/location", [entriesE[1].role?.value, entriesE[1].organization?.value, entriesE[1].location?.value], [
+  "Case Coordinator",
+  "Riverside Legal Clinic",
+  "Ottawa, ON",
+]);
+check("pattern E: entry2 has 2 bullets", entriesE[1].bullets.length, 2);
+
+// --- fullwidth hyphen-minus (U+FF0D) date separator, the real private-resume shape ---
+counter = 0;
+const fullwidthDash = [
+  block("Phone Banker, 05/2026 － Current"),
+  block("Liberal Party of Canada ON office － Toronto, ON"),
+  block("Conducted approximately 50 outreach calls per volunteer shift.", "bullet"),
+  block("Court Clerk , 04/2026 － 05/2026"),
+  block("OBA – OJEN Competitive Mock Trials － Toronto, ON"),
+  block("Participated as a court clerk in 6 competitive mock trials.", "bullet"),
+  block("Administered arraignments and witness oaths.", "bullet"),
+];
+const fullwidthEntries = extractExperienceEntries("s1", fullwidthDash, true);
+check("fullwidth dash (U+FF0D): exactly TWO entries, not collapsed into one (Phase 5D.0's exact real failure)", fullwidthEntries.length, 2);
+check("fullwidth dash: entry1 role is clean, no stray trailing date fragment", fullwidthEntries[0].role?.value, "Phone Banker");
+check("fullwidth dash: entry2 role is clean", fullwidthEntries[1].role?.value, "Court Clerk");
+checkTrue("fullwidth dash: entry1 dateRangeText contains the month/year (05/2026)", (fullwidthEntries[0].dateRangeText?.value ?? "").includes("2026"));
+check("fullwidth dash: entry1 bullet preserved", fullwidthEntries[0].bullets.length, 1);
+check("fullwidth dash: entry2 has 2 bullets", fullwidthEntries[1].bullets.length, 2);
+
+// --- other Unicode dash separators (figure dash, horizontal bar, "to") ---
+counter = 0;
+const otherDashes = [
+  block("Field Technician, 2020 ‒ 2022"),
+  block("Northwind Utilities, Sudbury, ON"),
+  block("Field Supervisor, 2019 ― 2021"),
+  block("Northwind Utilities, Sudbury, ON"),
+];
+const otherDashEntries = extractExperienceEntries("s1", otherDashes, false);
+check("figure dash (U+2012) / horizontal bar (U+2015): two entries recognized", otherDashEntries.length, 2);
+
+counter = 0;
+const toSeparator = [block("Intern, 2021 to 2022"), block("Harborview Studios, Halifax, NS")];
+const toEntries = extractExperienceEntries("s1", toSeparator, false);
+check("'to' word separator: recognized as a date range", toEntries.length, 1);
+check("'to' word separator: dateRangeText captured", toEntries[0].dateRangeText?.value, "2021 to 2022");
+
+// --- false-positive prevention: a bullet containing a year must NEVER start a new entry ---
+counter = 0;
+const bulletYearFalsePositive = [
+  block("Program Manager, 2020 － 2023"),
+  block("Westfield Community Services, London, ON"),
+  block("Increased revenue by 25% in 2024.", "bullet"),
+  block("Completed 12 projects from 2022 to 2023.", "bullet"),
+];
+const bulletYearEntries = extractExperienceEntries("s1", bulletYearFalsePositive, false);
+check("bullet containing '2024' does not start a new entry", bulletYearEntries.length, 1);
+check("bullet containing '2022 to 2023' does not start a new entry", bulletYearEntries[0].bullets.length, 2);
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number, expectVolunteerSeparate: boolean) {
