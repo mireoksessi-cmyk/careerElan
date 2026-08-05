@@ -45,7 +45,15 @@ check("institution-first: dateRangeText extracted", instFirstEntries[0].dateRang
 counter = 0;
 const credFirst = [block("Bachelor of Science in Nursing"), block("Toronto Metropolitan University, Toronto, ON — 2013 to 2017")];
 const credFirstEntries = extractEducationEntries("s1", credFirst);
-check("credential-first: credential correctly identified despite coming FIRST in the text", credFirstEntries[0].credential?.value, "Bachelor of Science in Nursing");
+/* Phase 5D.3D - resolveCredentialsFromText now recovers the embedded
+   "Degree in Major" pattern from a single unsplit credential line
+   (splitDegreeInMajor, tried before the old comma-only
+   splitCredentialField fallback) - "Bachelor of Science in Nursing"
+   now correctly splits into credential + fieldOfStudy instead of
+   staying one combined string, matching this round's generalized
+   Double Degree/Major field-of-study extraction. */
+check("credential-first: credential correctly identified despite coming FIRST in the text", credFirstEntries[0].credential?.value, "Bachelor of Science");
+check("credential-first: fieldOfStudy extracted from embedded \"in Major\" pattern", credFirstEntries[0].fieldOfStudy?.value, "Nursing");
 check("credential-first: institution correctly identified from the SECOND line", credFirstEntries[0].institution?.value, "Toronto Metropolitan University");
 check("credential-first: location extracted from institution line", credFirstEntries[0].location?.value, "Toronto, ON");
 check("credential-first: dateRangeText extracted", credFirstEntries[0].dateRangeText?.value, "2013 to 2017");

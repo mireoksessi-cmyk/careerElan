@@ -167,6 +167,26 @@ export type EducationEntry = {
   fieldOfStudy?: StructuredTextValue;
   location?: StructuredTextValue;
 
+  /*
+    Phase 5D.3D - Generic Academic Composite Parsing. ALL credentials/
+    fields-of-study/institutions found within this entry's header
+    window, in source order - additive, never replacing the singular
+    fields above. `institution`/`credential`/`fieldOfStudy` above are
+    ALWAYS equal to `institutions[0]`/`credentials[0]`/`fieldsOfStudy[0]`
+    whenever the corresponding array is non-empty (backward compatible:
+    any consumer reading only the singular field sees exactly the same
+    value it always did). A Double Degree/Double Major/Joint Program
+    entry populates 2+ items here instead of the second value being
+    silently dropped, glued into the wrong field, or overwriting the
+    first. Most entries have exactly 1 item per array (the common
+    single-credential/single-institution case) - these arrays are not
+    "the new source of truth replacing the singular field," they are
+    "the singular field's own full list."
+  */
+  credentials: StructuredTextValue[];
+  fieldsOfStudy: StructuredTextValue[];
+  institutions: StructuredTextValue[];
+
   startDateText?: StructuredTextValue;
   endDateText?: StructuredTextValue;
   dateRangeText?: StructuredTextValue;
@@ -190,6 +210,13 @@ export type CredentialEntry = {
   issueDateText?: StructuredTextValue;
   expiryDateText?: StructuredTextValue;
   location?: StructuredTextValue;
+
+  /* Phase 5D.3D - see EducationEntry's own comment on credentials[]/
+     fieldsOfStudy[]/institutions[]: same additive, backward-compatible
+     "full list" convention, for a single line combining 2+ credential
+     names or 2+ issuing authorities. */
+  names: StructuredTextValue[];
+  issuers: StructuredTextValue[];
 
   details: StructuredTextValue[];
 
@@ -224,6 +251,9 @@ export type AwardEntry = {
 
   name?: StructuredTextValue;
   issuer?: StructuredTextValue;
+  /* Phase 5D.3D - see EducationEntry's own comment. Additive "full
+     list" for 2+ award names combined on one composite line. */
+  names: StructuredTextValue[];
   dateText?: StructuredTextValue;
   details: StructuredTextValue[];
   /* Phase 5D.3A - mirrors `details` 1:1 (see awardExtractor.ts's own
@@ -244,6 +274,9 @@ export type PublicationEntry = {
   id: string;
 
   title?: StructuredTextValue;
+  /* Phase 5D.3D - see EducationEntry's own comment. Additive "full
+     list" for 2+ publication titles combined on one composite line. */
+  titles: StructuredTextValue[];
   authors: StructuredTextValue[];
   publisherOrVenue?: StructuredTextValue;
   dateText?: StructuredTextValue;

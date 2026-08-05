@@ -66,11 +66,11 @@ function emptyModel(): ResumeStructuredModel {
   model.skillGroups = [{ skills: ["Excel"], source: src }];
   model.professionalExperience = [{ id: "exp-0", organization: tv("Acme"), bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isVolunteer: false, isUncertain: false, reasonCodes: [] }];
   model.volunteerExperience = [{ id: "vol-0", organization: tv("Food Bank"), bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isVolunteer: true, isUncertain: false, reasonCodes: [] }];
-  model.education = [{ id: "edu-0", institution: tv("MIT"), honors: [], details: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.credentials = [{ id: "cred-0", name: tv("PMP"), details: [], kind: "certification", rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.education = [{ id: "edu-0", institution: tv("MIT"), credentials: [], fieldsOfStudy: [], institutions: [tv("MIT")], honors: [], details: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.credentials = [{ id: "cred-0", name: tv("PMP"), names: [tv("PMP")], issuers: [], details: [], kind: "certification", rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
   model.projects = [{ id: "proj-0", name: tv("Tracker"), technologies: [], bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.awards = [{ id: "award-0", name: tv("Top Performer"), details: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
-  model.publications = [{ id: "pub-0", title: tv("A Study"), authors: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.awards = [{ id: "award-0", name: tv("Top Performer"), names: [tv("Top Performer")], details: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
+  model.publications = [{ id: "pub-0", title: tv("A Study"), titles: [tv("A Study")], authors: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
   model.customSections = [{ id: "cs-0", originalHeading: "Volunteer Board Work", displayHeading: "Volunteer Board Work", paragraphs: [tv("Board member.")], bullets: [], content: [], sourceOrder: 0, source: src }];
 
   const doc = buildProfessionalAtsAssembly(model);

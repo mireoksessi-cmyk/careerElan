@@ -15,24 +15,55 @@
   appears on exactly one of the two header lines, regardless of which
   line comes first - so that keyword, not line order, decides which
   line is the credential and which is the institution.
+
+  Phase 5D.3D - Generic Academic Composite Parsing. Every field
+  resolution path below now goes through resolveCredentialsFromText/
+  resolveInstitutionsFromText, which detect a Double Degree/Double
+  Major/Joint Program encoded either across SEPARATE header-window
+  lines (degreeLines.length >= 2 / instLines.length >= 2, below) or
+  WITHIN one line via a delimiter (multiAcademicValueParser.ts's
+  splitMultiValueSegment). All output accumulates into
+  credentials[]/fieldsOfStudy[]/institutions[] arrays; the singular
+  credential/fieldOfStudy/institution fields are derived from index 0
+  of each array at the very end, guaranteeing by construction that any
+  consumer reading only the singular field sees exactly the value it
+  always would have (backward compatible, never a behavior change for
+  the single-degree case).
 */
 import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
-import { hasDateEvidence, stripDateAnchor, cleanHeaderFragment } from "./dateRangeParsing";
-import { splitOrganizationLocation } from "./splitOrganizationLocation";
+import { hasDateEvidence, stripDateAnchor } from "./dateRangeParsing";
+import { parseInlineCompositeHeader } from "./academicCompositeParser";
+import {
+  splitMultiValueSegment,
+  splitDegreeInMajor,
+  detectProgramLabel,
+  segmentLooksLikeDegree,
+  segmentLooksLikeInstitution,
+  segmentLooksLikeFieldOfStudy,
+} from "./multiAcademicValueParser";
 import {
   collectHeaderWindow,
   classifyWindow,
   looksLikeHeaderLine,
   DEGREE_KEYWORD_RE,
   INSTITUTION_KEYWORD_RE,
+  isQualifierOnlyText,
   type HeaderWindowLine,
 } from "./headerWindow";
 import type { EducationEntry, StructuredTextValue } from "./types";
 
 const GPA_RE = /\bgpa\b[:\s]*([0-4]\.\d{1,2})(?:\s*\/\s*([0-9](?:\.\d)?))?/i;
 const HONORS_RE = /\b(honou?rs?|dean'?s list|cum laude|distinction)\b/i;
+/* A pure descriptive label line ("Double Degree:", "Joint Program:")
+   carries no institution/degree/major text of its own - excluded from
+   field assignment (still fully preserved via rawHeaderText) so it
+   never gets misassigned as an institution/credential value. */
+const PURE_LABEL_MAX_WORDS = 4;
+function isPureLabelLine(text: string): boolean {
+  return detectProgramLabel(text) && text.trim().split(/\s+/).filter((w) => w.length > 0).length <= PURE_LABEL_MAX_WORDS;
+}
 
 export type EducationEntryRange = { headerBlockIndices: number[]; bodyBlockIndices: number[] };
 
@@ -114,16 +145,18 @@ function makeValue(value: string, sectionId: string, block: SemanticContentBlock
 }
 
 /*
-  Phase 5D.2A - delegates to the shared, general-purpose
-  splitOrganizationLocation (dash-separator detection first, gated on
-  looksLikeLocation, falling back to the pre-existing unconditional
-  comma-based split) and relabels its "organization" field as
-  "institution" - the same boundary concept, just a different field
-  name in this extractor's own output shape.
+  Phase 5D.3D - superset of the pre-5D.3D splitInstitutionLocation:
+  parseInlineCompositeHeader adds pipe/middle-dot/bullet/parenthetical
+  delimiter recognition on top of the SAME proven dash/trailing-comma
+  logic (via its own internal fallback to splitOrganizationLocation),
+  so every previously-passing dash/comma case behaves identically.
+  `detail` (a middle "campus" segment - "Institute | Campus | City, ST")
+  has no dedicated schema field; callers fold it into details[] rather
+  than inventing a new field for one rare shape.
 */
-function splitInstitutionLocation(text: string): { institution: string; location?: string } {
-  const { organization, location } = splitOrganizationLocation(text);
-  return { institution: organization, location };
+function splitInstitutionLocationComposite(text: string): { institution: string; location?: string; detail?: string } {
+  const result = parseInlineCompositeHeader(text, "education");
+  return { institution: result.primaryText, location: result.location, detail: result.detailText };
 }
 
 function splitCredentialField(text: string): { credential: string; fieldOfStudy?: string } {
@@ -135,9 +168,115 @@ function splitCredentialField(text: string): { credential: string; fieldOfStudy?
      study; only split into credential/fieldOfStudy when the remainder
      does not itself look like another degree, or the second degree's
      own text gets mislabeled as "major" instead of preserved as part
-     of the credential. */
+     of the credential. Phase 5D.3D generalizes this exact case via
+     resolveCredentialsFromText's own splitMultiValueSegment call
+     (which now properly SPLITS it into 2 credentials instead of just
+     refusing to mislabel it) - this guard stays as the fallback for
+     when that split isn't reached (single remaining candidate with no
+     multi-value shape confirmed). */
   if (DEGREE_KEYWORD_RE.test(parts[1])) return { credential: withoutLocationSuffix };
   return { credential: parts[0], fieldOfStudy: parts.slice(1).join(", ") };
+}
+
+/*
+  Phase 5D.3D - resolves one line/segment of text into 1+ credentials
+  (+ their own field-of-study, via " in " - splitDegreeInMajor) using
+  splitMultiValueSegment's delimiter+shape analysis first; falls back
+  to the pre-5D.3D single-value splitCredentialField (unchanged
+  behavior) when no multi-value split is justified.
+*/
+function resolveCredentialsFromText(
+  text: string,
+  sectionId: string,
+  block: SemanticContentBlock,
+  hasReinforcingLabel: boolean,
+  baseConfidence: number
+): { credentials: StructuredTextValue[]; fieldsOfStudy: StructuredTextValue[]; reasonCodes: string[] } {
+  const split = splitMultiValueSegment(text, { segmentShapeTest: segmentLooksLikeDegree, hasReinforcingLabel });
+  const credentials: StructuredTextValue[] = [];
+  const fieldsOfStudy: StructuredTextValue[] = [];
+  if (split.values.length >= 2) {
+    for (const v of split.values) {
+      const { credential, fieldOfStudy } = splitDegreeInMajor(v);
+      if (credential.length > 0) credentials.push(makeValue(credential, sectionId, block, baseConfidence));
+      if (fieldOfStudy) fieldsOfStudy.push(makeValue(fieldOfStudy, sectionId, block, baseConfidence - 0.05));
+    }
+    return { credentials, fieldsOfStudy, reasonCodes: ["multi-credential-same-line-split", ...split.reasonCodes] };
+  }
+  /* Phase 5D.3D bugfix (real-fixture shape - see this file's own header
+     comment: "Bachelor of Science in Nursing") - a single, unsplit
+     credential line may still encode its own field of study via " in "
+     ("Degree in Major"), which the pre-5D.3D comma-only
+     splitCredentialField never recognized. Tried first since it is
+     more specific; falls back to the comma-based split unchanged when
+     no " in " pattern is found. */
+  const inMajorResult = splitDegreeInMajor(text);
+  if (inMajorResult.fieldOfStudy) {
+    credentials.push(makeValue(inMajorResult.credential, sectionId, block, baseConfidence));
+    fieldsOfStudy.push(makeValue(inMajorResult.fieldOfStudy, sectionId, block, baseConfidence - 0.05));
+    return { credentials, fieldsOfStudy, reasonCodes: [...split.reasonCodes, "single-value-in-major-pattern"] };
+  }
+  const { credential: c, fieldOfStudy: f } = splitCredentialField(text);
+  if (c.length > 0) credentials.push(makeValue(c, sectionId, block, baseConfidence));
+  if (f) fieldsOfStudy.push(makeValue(f, sectionId, block, baseConfidence - 0.05));
+  return { credentials, fieldsOfStudy, reasonCodes: split.reasonCodes };
+}
+
+/*
+  Phase 5D.3D - resolves one line/segment of text into 1+ institutions
+  (+ optional location/detail via parseInlineCompositeHeader) using
+  splitMultiValueSegment's institution-shape test first (same-line
+  Joint Program: "Institution A / Institution B"); falls back to the
+  pre-5D.3D single-institution splitInstitutionLocationComposite when
+  no multi-value split is justified.
+*/
+function resolveInstitutionsFromText(
+  text: string,
+  sectionId: string,
+  block: SemanticContentBlock,
+  hasReinforcingLabel: boolean,
+  baseConfidence: number
+): { institutions: StructuredTextValue[]; location?: StructuredTextValue; detail?: StructuredTextValue; reasonCodes: string[] } {
+  const split = splitMultiValueSegment(text, { segmentShapeTest: segmentLooksLikeInstitution, hasReinforcingLabel, excludeCommaDelimiter: true });
+  if (split.values.length >= 2) {
+    const institutions = split.values.filter((v) => v.length > 0).map((v) => makeValue(v, sectionId, block, baseConfidence));
+    return { institutions, reasonCodes: ["multi-institution-same-line-split", ...split.reasonCodes] };
+  }
+  const { institution: inst, location: loc, detail } = splitInstitutionLocationComposite(text);
+  const institutions: StructuredTextValue[] = [];
+  if (inst.length > 0) institutions.push(makeValue(inst, sectionId, block, baseConfidence));
+  return {
+    institutions,
+    location: loc ? makeValue(loc, sectionId, block, baseConfidence - 0.05) : undefined,
+    detail: detail ? makeValue(detail, sectionId, block, baseConfidence - 0.1) : undefined,
+    reasonCodes: split.reasonCodes,
+  };
+}
+
+/*
+  Phase 5D.3D - Double Major ("Dual Major:\nDegree\nMajor A / Major B\n
+  Institution" / "Double Major:\nDegree\nMajor A and Major B\n
+  Institution"). A field of study has no reliable lexical keyword,
+  hence the permissive segmentLooksLikeFieldOfStudy shape test, gated
+  much more conservatively than degree/institution splitting: "and"/"&"
+  NEVER splits from shape alone (weakConjunctionShapeTest: () => false
+  - only a genuine reinforcing program-label line unlocks it), and a
+  comma split is capped at exactly 2 segments (maxStrongDelimiterSegments:
+  2 - see that option's own comment: protects a 3+-item Oxford-comma
+  department/focus-area name like "Strategy, Operations, and Finance"
+  from being misread as 3 separate majors).
+*/
+function resolveFieldsOfStudyFromText(text: string, sectionId: string, block: SemanticContentBlock, hasReinforcingLabel: boolean, baseConfidence: number): StructuredTextValue[] {
+  const split = splitMultiValueSegment(text, {
+    segmentShapeTest: segmentLooksLikeFieldOfStudy,
+    hasReinforcingLabel,
+    weakConjunctionShapeTest: () => false,
+    maxStrongDelimiterSegments: 2,
+  });
+  if (split.values.length >= 2) {
+    return split.values.map((v) => makeValue(v, sectionId, block, baseConfidence));
+  }
+  return [makeValue(text, sectionId, block, baseConfidence)];
 }
 
 function extractGpa(sectionId: string, blocks: SemanticContentBlock[]): StructuredTextValue | undefined {
@@ -156,9 +295,10 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
     const bodyRunBlocks = range.bodyBlockIndices.map((i) => bodyBlocks[i]);
     const reasonCodes: string[] = [];
 
-    let institution: StructuredTextValue | undefined;
-    let credential: StructuredTextValue | undefined;
-    let fieldOfStudy: StructuredTextValue | undefined;
+    const credentialsAcc: StructuredTextValue[] = [];
+    const fieldsOfStudyAcc: StructuredTextValue[] = [];
+    const institutionsAcc: StructuredTextValue[] = [];
+    const extraDetails: StructuredTextValue[] = [];
     let location: StructuredTextValue | undefined;
     let dateRangeText: StructuredTextValue | undefined;
     let startDateText: StructuredTextValue | undefined;
@@ -168,6 +308,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       const block = headerBlocks[0];
       const anchor = stripDateAnchor(block.text);
       const hasDate = anchor.dateRangeText.length > 0;
+      const hasReinforcingLabel = detectProgramLabel(block.text);
       if (hasDate) {
         dateRangeText = makeValue(anchor.dateRangeText, sectionId, block, 0.8);
         if (anchor.startDateText) startDateText = makeValue(anchor.startDateText, sectionId, block, 0.75);
@@ -180,36 +321,62 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
            - Toronto, ON"). Whichever side carries real text becomes the
            primary candidate; the other side (if also non-empty) becomes
            a trailing location candidate - neither is ever silently
-           dropped. Scoped to the date-anchored case only (Date is the
-           Anchor this round's spec is built around) - a header with NO
-           date evidence at all isn't one of the listed header shapes,
-           so it's left to the renderer's own RawHeaderFallback (see
-           renderers.tsx) rather than guessed at here from comma
-           structure alone. */
+           dropped. */
         const primary = anchor.beforeText.length > 0 ? anchor.beforeText : anchor.afterText;
         const secondary = anchor.beforeText.length > 0 ? anchor.afterText : "";
 
         if (primary.length > 0) {
           const withoutParenTail = primary.replace(/\([^)]*$/, "").trim();
-          const segments = (withoutParenTail.length > 0 ? withoutParenTail : primary).split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+          const candidateText = withoutParenTail.length > 0 ? withoutParenTail : primary;
+          const segments = candidateText.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
           if (segments.length >= 2) {
             reasonCodes.push("single-line-header-comma-split");
-            credential = makeValue(segments[0], sectionId, block, 0.7);
-            if (segments.length >= 3) {
-              fieldOfStudy = makeValue(segments[1], sectionId, block, 0.65);
-              institution = makeValue(segments[2], sectionId, block, 0.65);
+            /* Phase 5D.3D - the first comma segment may itself be a
+               same-line Double Degree ("B.Sc., M.Sc., Example
+               University" - 3 comma parts total, first two are both
+               degrees). Try multi-credential resolution on segment[0]
+               joined back with any OTHER leading degree-shaped
+               segments before falling to the pre-5D.3D positional
+               assignment. */
+            let consumedCount = 1;
+            const degreeRun: string[] = [segments[0]];
+            while (consumedCount < segments.length - 1 && segmentLooksLikeDegree(segments[consumedCount])) {
+              degreeRun.push(segments[consumedCount]);
+              consumedCount++;
+            }
+            if (degreeRun.length >= 2) {
+              reasonCodes.push("single-line-header-comma-multi-degree-run");
+              for (const d of degreeRun) {
+                const { credential, fieldOfStudy } = splitDegreeInMajor(d);
+                if (credential.length > 0) credentialsAcc.push(makeValue(credential, sectionId, block, 0.7));
+                if (fieldOfStudy) fieldsOfStudyAcc.push(makeValue(fieldOfStudy, sectionId, block, 0.65));
+              }
             } else {
-              institution = makeValue(segments[1], sectionId, block, 0.65);
+              const { credential, fieldOfStudy } = splitDegreeInMajor(segments[0]);
+              if (credential.length > 0) credentialsAcc.push(makeValue(credential, sectionId, block, 0.7));
+              if (fieldOfStudy) fieldsOfStudyAcc.push(makeValue(fieldOfStudy, sectionId, block, 0.65));
+            }
+            const remainderSegments = segments.slice(consumedCount);
+            if (remainderSegments.length >= 2) {
+              fieldsOfStudyAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
+              institutionsAcc.push(makeValue(remainderSegments.slice(1).join(", "), sectionId, block, 0.65));
+            } else if (remainderSegments.length === 1) {
+              institutionsAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
             }
           } else {
-            /* No comma structure to split on, but the remainder text
-               itself IS real information (e.g. "Cheonan Bukil High
-               School" or "Law Clerk (Seneca Polytechnic)") - never drop
-               it. Institution is the safer default (EducationView/
-               renderEducation both show institution on its own even
-               when credential is empty). */
-            reasonCodes.push("single-line-header-whole-remainder-as-institution");
-            institution = makeValue(segments[0] ?? primary, sectionId, block, 0.6);
+            /* No comma structure - try a same-line delimiter-based
+               multi-credential split (slash/pipe/semicolon/ampersand/
+               and) before falling to the pre-5D.3D whole-remainder-as-
+               institution default. */
+            const credResult = resolveCredentialsFromText(candidateText, sectionId, block, hasReinforcingLabel, 0.68);
+            if (credResult.credentials.length >= 2) {
+              reasonCodes.push("single-line-header-delimiter-multi-credential", ...credResult.reasonCodes);
+              credentialsAcc.push(...credResult.credentials);
+              fieldsOfStudyAcc.push(...credResult.fieldsOfStudy);
+            } else {
+              reasonCodes.push("single-line-header-whole-remainder-as-institution");
+              institutionsAcc.push(makeValue(segments[0] ?? primary, sectionId, block, 0.6));
+            }
           }
           if (secondary.length > 0) location = makeValue(secondary, sectionId, block, 0.5);
         } else {
@@ -220,17 +387,8 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       }
     } else {
       /* Phase 5D.3C - Generic Multi-Line Academic Header Recovery
-         Hardening. Generalizes the old exactly-2-line degree/
-         institution keyword disambiguation (still applied verbatim
-         when there are exactly 2 non-date/non-location candidate
-         lines) up to headerWindow.ts's full N-line window (Shape
-         E/F: Degree, Major, Institution, [Location], Date and its
-         variants). Every date-bearing line's own remainder text (the
-         mixed-line case, e.g. "Law Clerk - 2027, Toronto, ON") is
-         folded in as an ordinary candidate alongside the genuinely
-         non-date lines, exactly like the single-line branch above
-         already does - never assumes the date line carries nothing
-         else. */
+         Hardening, extended in Phase 5D.3D for Double Degree/Double
+         Major/Joint Program spanning SEPARATE window lines. */
       const classified = classifyWindow(bodyBlocks, range.headerBlockIndices);
       const { dateLines } = classified;
 
@@ -241,32 +399,71 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
         if (primaryDate.dateAnchor.endDateText) endDateText = makeValue(primaryDate.dateAnchor.endDateText, sectionId, primaryDate.block, 0.75);
       }
 
+      const windowHasProgramLabel = classified.lines.some((l) => detectProgramLabel(l.remainderText.length > 0 ? l.remainderText : l.block.text));
+
       type Candidate = { line: HeaderWindowLine; text: string };
-      const candidateLines: Candidate[] = classified.lines
+      const allCandidateLines: Candidate[] = classified.lines
         .filter((l) => l.remainderText.length > 0)
         .map((l) => ({ line: l, text: l.remainderText }));
+      /* Pure program-label lines ("Joint Program:") and pure date-
+         qualifier remainders ("Expected Graduation", left over after
+         "Expected Graduation 2026" gives up its date - Phase 5D.3D
+         bugfix, f15 fixture evidence) carry no institution/degree/major
+         text of their own - excluded from field assignment, still
+         preserved via rawHeaderText. */
+      const candidateLines = allCandidateLines.filter((c) => !isPureLabelLine(c.text) && !isQualifierOnlyText(c.text));
 
       const locationCandidate = candidateLines.find((c) => c.line.looksLikeLocationShape);
       if (locationCandidate) location = makeValue(locationCandidate.text, sectionId, locationCandidate.line.block, 0.7);
 
       const remaining = candidateLines.filter((c) => c !== locationCandidate);
+      const degreeLines = remaining.filter((c) => c.line.hasDegreeKeyword);
+      const instLines = remaining.filter((c) => c.line.hasInstitutionKeyword && !c.line.hasDegreeKeyword);
+      const otherLines = remaining.filter((c) => !degreeLines.includes(c) && !instLines.includes(c));
 
       if (remaining.length === 0) {
         reasonCodes.push("multi-line-header-only-date-and-location");
+      } else if (degreeLines.length >= 2 || instLines.length >= 2) {
+        /* Explicit multi-line Double Degree ("Degree A in Major A" /
+           "Degree B in Major B" / Institution) or Joint Program
+           ("Institution A" / "Institution B" / Degree) - each
+           qualifying line becomes its own credentials[]/institutions[]
+           entry in window order, instead of only the FIRST match being
+           kept (the pre-5D.3D behavior). */
+        reasonCodes.push("multi-line-header-explicit-multi-value-lines");
+        for (const d of degreeLines) {
+          const r = resolveCredentialsFromText(d.text, sectionId, d.line.block, windowHasProgramLabel, 0.75);
+          credentialsAcc.push(...r.credentials);
+          fieldsOfStudyAcc.push(...r.fieldsOfStudy);
+        }
+        for (const inst of instLines) {
+          const r = resolveInstitutionsFromText(inst.text, sectionId, inst.line.block, windowHasProgramLabel, 0.75);
+          institutionsAcc.push(...r.institutions);
+          if (r.location && !location) location = r.location;
+          if (r.detail) extraDetails.push(r.detail);
+        }
+        if (otherLines.length > 0) {
+          if (otherLines.length >= 2) {
+            for (const o of otherLines) fieldsOfStudyAcc.push(makeValue(o.text, sectionId, o.line.block, 0.55));
+          } else {
+            fieldsOfStudyAcc.push(...resolveFieldsOfStudyFromText(otherLines[0].text, sectionId, otherLines[0].line.block, windowHasProgramLabel, 0.55));
+          }
+        }
       } else if (remaining.length === 1) {
         const only = remaining[0];
         if (only.line.hasDegreeKeyword && !only.line.hasInstitutionKeyword) {
           reasonCodes.push("multi-line-header-single-remainder-as-credential");
-          const { credential: c, fieldOfStudy: f } = splitCredentialField(only.text);
-          if (c.length > 0) {
-            credential = makeValue(c, sectionId, only.line.block, 0.7);
-            if (f) fieldOfStudy = makeValue(f, sectionId, only.line.block, 0.65);
-          }
+          const r = resolveCredentialsFromText(only.text, sectionId, only.line.block, windowHasProgramLabel, 0.7);
+          credentialsAcc.push(...r.credentials);
+          fieldsOfStudyAcc.push(...r.fieldsOfStudy);
+          reasonCodes.push(...r.reasonCodes);
         } else {
           reasonCodes.push("multi-line-header-single-remainder-as-institution");
-          const { institution: inst, location: loc } = splitInstitutionLocation(only.text);
-          if (inst.length > 0) institution = makeValue(inst, sectionId, only.line.block, 0.65);
-          if (loc && !location) location = makeValue(loc, sectionId, only.line.block, 0.6);
+          const r = resolveInstitutionsFromText(only.text, sectionId, only.line.block, windowHasProgramLabel, 0.65);
+          institutionsAcc.push(...r.institutions);
+          if (r.location && !location) location = r.location;
+          if (r.detail) extraDetails.push(r.detail);
+          reasonCodes.push(...r.reasonCodes);
         }
       } else if (remaining.length === 2) {
         const [a, b] = remaining;
@@ -298,87 +495,77 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
 
         if (credentialCand && institutionCand) {
           reasonCodes.push(disambiguatedBy!);
-          const { credential: c, fieldOfStudy: f } = splitCredentialField(credentialCand.text);
-          if (c.length > 0) {
-            credential = makeValue(c, sectionId, credentialCand.line.block, 0.75);
-            if (f) fieldOfStudy = makeValue(f, sectionId, credentialCand.line.block, 0.65);
-          }
-          const { institution: inst, location: loc } = splitInstitutionLocation(institutionCand.text);
-          if (inst.length > 0) institution = makeValue(inst, sectionId, institutionCand.line.block, 0.75);
-          if (loc && !location) location = makeValue(loc, sectionId, institutionCand.line.block, 0.7);
+          const credR = resolveCredentialsFromText(credentialCand.text, sectionId, credentialCand.line.block, windowHasProgramLabel, 0.75);
+          credentialsAcc.push(...credR.credentials);
+          fieldsOfStudyAcc.push(...credR.fieldsOfStudy);
+          const instR = resolveInstitutionsFromText(institutionCand.text, sectionId, institutionCand.line.block, windowHasProgramLabel, 0.75);
+          institutionsAcc.push(...instR.institutions);
+          if (instR.location && !location) location = instR.location;
+          if (instR.detail) extraDetails.push(instR.detail);
         } else {
           /* Phase 5D.3B/5D.3C - neither line carries a generic degree
              or institution keyword. There is no lexical signal left to
              decide WHICH line is credential vs institution - never drop
-             either line's text over that ambiguity. When exactly one of
-             the two remaining candidates was derived from the window's
-             own date line (a mixed date+text line, e.g. "Beta Learning
-             Centre - 2022"), the established 5D.3B convention applies
-             unchanged regardless of position: the plain non-date line
-             becomes institution (the always-visible field), the date
-             line's own remainder becomes credential. Only when BOTH
-             candidates are plain non-date lines (a genuine 3+ line
-             window collapsing to 2 after location removal) does this
-             fall back to pure position (last = institution, closest to
-             the date; first = credential). */
+             either line's text over that ambiguity. */
           reasonCodes.push("multi-line-header-positional-fallback-no-keyword-signal");
           const dateDerived = remaining.find((r) => r.line.hasDate);
           const nonDateDerived = remaining.find((r) => !r.line.hasDate);
           const institutionCandFallback = dateDerived && nonDateDerived && dateDerived !== nonDateDerived ? nonDateDerived : remaining[remaining.length - 1];
           const credentialCandFallback = dateDerived && nonDateDerived && dateDerived !== nonDateDerived ? dateDerived : remaining[0] !== institutionCandFallback ? remaining[0] : undefined;
 
-          const { institution: inst, location: loc } = splitInstitutionLocation(institutionCandFallback.text);
-          if (inst.length > 0) institution = makeValue(inst, sectionId, institutionCandFallback.line.block, 0.55);
-          if (loc && !location) location = makeValue(loc, sectionId, institutionCandFallback.line.block, 0.5);
+          const instR = resolveInstitutionsFromText(institutionCandFallback.text, sectionId, institutionCandFallback.line.block, windowHasProgramLabel, 0.55);
+          institutionsAcc.push(...instR.institutions);
+          if (instR.location && !location) location = instR.location;
+          if (instR.detail) extraDetails.push(instR.detail);
           if (credentialCandFallback) {
-            const { credential: c, fieldOfStudy: f } = splitCredentialField(credentialCandFallback.text);
-            if (c.length > 0) {
-              credential = makeValue(c, sectionId, credentialCandFallback.line.block, 0.5);
-              if (f) fieldOfStudy = makeValue(f, sectionId, credentialCandFallback.line.block, 0.45);
-            }
+            const credR = resolveCredentialsFromText(credentialCandFallback.text, sectionId, credentialCandFallback.line.block, windowHasProgramLabel, 0.5);
+            credentialsAcc.push(...credR.credentials);
+            fieldsOfStudyAcc.push(...credR.fieldsOfStudy);
           }
         }
       } else {
-        /* 3+ remaining candidate lines - Shape E/F (Degree, Major,
-           Institution[, ...]). Institution and Degree are each
-           resolved by keyword first (order-independent), falling back
-           to position (institution = closest to the date/last;
-           degree = first) only when no line carries either keyword.
-           Every remaining, unclaimed line becomes fieldOfStudy (joined
-           if more than one) - never dropped. */
+        /* 3+ remaining candidate lines (with at most 1 degree-keyword
+           line and at most 1 institution-keyword line, otherwise the
+           explicit-multi-value branch above would have fired) - Shape
+           E/F (Degree, Major, Institution[, ...]). */
         reasonCodes.push("multi-line-header-shape-scored");
         const institutionCand = remaining.find((r) => r.line.hasInstitutionKeyword) ?? remaining[remaining.length - 1];
         const degreeCand = remaining.find((r) => r !== institutionCand && r.line.hasDegreeKeyword) ?? (remaining[0] !== institutionCand ? remaining[0] : undefined);
 
-        const { institution: inst, location: loc } = splitInstitutionLocation(institutionCand.text);
-        if (inst.length > 0) institution = makeValue(inst, sectionId, institutionCand.line.block, 0.7);
-        if (loc && !location) location = makeValue(loc, sectionId, institutionCand.line.block, 0.6);
+        const instR = resolveInstitutionsFromText(institutionCand.text, sectionId, institutionCand.line.block, windowHasProgramLabel, 0.7);
+        institutionsAcc.push(...instR.institutions);
+        if (instR.location && !location) location = instR.location;
+        if (instR.detail) extraDetails.push(instR.detail);
 
         if (degreeCand) {
-          const { credential: c, fieldOfStudy: f } = splitCredentialField(degreeCand.text);
-          if (c.length > 0) {
-            credential = makeValue(c, sectionId, degreeCand.line.block, 0.65);
-            if (f) fieldOfStudy = makeValue(f, sectionId, degreeCand.line.block, 0.6);
-          }
+          const credR = resolveCredentialsFromText(degreeCand.text, sectionId, degreeCand.line.block, windowHasProgramLabel, 0.65);
+          credentialsAcc.push(...credR.credentials);
+          fieldsOfStudyAcc.push(...credR.fieldsOfStudy);
         }
 
         const majorLines = remaining.filter((r) => r !== institutionCand && r !== degreeCand);
-        if (majorLines.length > 0 && !fieldOfStudy) {
-          /* Phase 5D.3C - joined with a plain space, matching exactly
-             how structuredValidator.ts's own fact-preservation check
-             reconstructs a multi-block value's expected source text
-             (blockById(...).rawText.join(" ")) - a comma-joined value
-             would never be found as a substring of that space-joined
-             source and would be flagged as "invented" even though every
-             word came verbatim from a real source block. */
+        if (majorLines.length === 1 && fieldsOfStudyAcc.length === 0) {
+          /* Phase 5D.3D - a SINGLE leftover major line may itself
+             encode a Double Major via delimiter (see
+             resolveFieldsOfStudyFromText's own comment). */
+          fieldsOfStudyAcc.push(...resolveFieldsOfStudyFromText(majorLines[0].text, sectionId, majorLines[0].line.block, windowHasProgramLabel, 0.55));
+        } else if (majorLines.length > 0 && fieldsOfStudyAcc.length === 0) {
+          /* Phase 5D.3C - 2+ SEPARATE major lines joined with a plain
+             space, matching exactly how structuredValidator.ts's own
+             fact-preservation check reconstructs a multi-block value's
+             expected source text - kept unchanged from 5D.3C (each
+             line here is already a distinct physical block, so no
+             delimiter-based splitting decision is needed; per-line
+             splitting was evaluated but deferred as a known limitation
+             - see the round's final report). */
           const majorText = majorLines.map((m) => m.text).join(" ");
           if (majorText.length > 0) {
-            fieldOfStudy = {
+            fieldsOfStudyAcc.push({
               value: majorText,
               confidence: 0.55,
               extractionMethod: "pattern-rule",
               source: mergeTraces(traceFromBlocks(sectionId, majorLines.map((m) => m.line.block))),
-            };
+            });
           }
         }
       }
@@ -386,7 +573,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
 
     const gpa = extractGpa(sectionId, [...headerBlocks, ...bodyRunBlocks]);
     const honors: StructuredTextValue[] = [];
-    const details: StructuredTextValue[] = [];
+    const details: StructuredTextValue[] = [...extraDetails];
     for (const block of bodyRunBlocks) {
       if (block.rawText.length === 0) continue;
       if (GPA_RE.test(block.text)) continue;
@@ -398,13 +585,22 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
     }
 
     const allBlocks = [...headerBlocks, ...bodyRunBlocks];
+    const institution = institutionsAcc[0];
+    const credential = credentialsAcc[0];
+    const fieldOfStudy = fieldsOfStudyAcc[0];
     const isUncertain = institution === undefined || credential === undefined;
+    if (institutionsAcc.length >= 2) reasonCodes.push("multiple-institutions-preserved");
+    if (credentialsAcc.length >= 2) reasonCodes.push("multiple-credentials-preserved");
+    if (fieldsOfStudyAcc.length >= 2) reasonCodes.push("multiple-fields-of-study-preserved");
 
     return {
       id: entryId(sectionId, "education", index),
       institution,
       credential,
       fieldOfStudy,
+      credentials: credentialsAcc,
+      fieldsOfStudy: fieldsOfStudyAcc,
+      institutions: institutionsAcc,
       location,
       startDateText,
       endDateText,

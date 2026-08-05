@@ -25,6 +25,8 @@ import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
 import { collectHeaderWindow, classifyWindow, looksLikeHeaderLine, type HeaderWindowLine } from "./headerWindow";
+import { splitMultiValueSegment, segmentLooksLikeCredential, detectProgramLabel } from "./multiAcademicValueParser";
+import { parseInlineCompositeHeader } from "./academicCompositeParser";
 import type { CredentialEntry, StructuredTextValue } from "./types";
 
 const BULLET_PREFIX_RE = /^[•\-*◦▪·‣⁃]\s+/;
@@ -135,6 +137,12 @@ export function extractCredentialEntries(sectionId: string, bodyBlocks: Semantic
     let issueDateText: StructuredTextValue | undefined;
     let expiryDateText: StructuredTextValue | undefined;
     let location: StructuredTextValue | undefined;
+    /* Phase 5D.3D - see EducationEntry's own comment: names/issuers
+       arrays are populated in parallel with the singular name/issuer
+       above, at the exact same assignment points, so names[0]/
+       issuers[0] always equal the singular fields by construction. */
+    const names: StructuredTextValue[] = [];
+    const issuers: StructuredTextValue[] = [];
 
     const hasDate = dateLines.length > 0;
     if (hasDate) {
@@ -169,36 +177,81 @@ export function extractCredentialEntries(sectionId: string, bodyBlocks: Semantic
     const afterId = afterLocation.filter((c) => c !== idCand);
 
     /* A generic AUTHORITY-category word ("Board", "Association",
-       "Registry", ...) identifies the issuing body line, mirroring
-       educationExtractor.ts's own institution-keyword convention. */
-    const issuerCand = afterId.find((c) => c.line.hasAuthorityKeyword);
+       "Registry", ...) OR an INSTITUTION-category word ("Institute",
+       "University", ...) identifies the issuing body line - a
+       certification/license is very commonly issued by an institution
+       ("Project Management Institute"), not only a board/association,
+       mirroring educationExtractor.ts's own institution-keyword
+       convention. Phase 5D.3D bugfix (f15 fixture evidence:
+       "Project Management Institute | Toronto, ON" / "Project
+       Management Professional") - without the institution-keyword
+       branch, this line was never recognized as the issuer at all, so
+       it stayed glued into `name` alongside the real credential title.
+       The issuer line itself may still be an inline Institution/
+       Location composite ("Institute | City, ST") - reused via
+       parseInlineCompositeHeader exactly like educationExtractor.ts's
+       own resolveInstitutionsFromText, so the embedded location is
+       recovered instead of becoming part of the issuer string. */
+    const issuerCand = afterId.find((c) => c.line.hasAuthorityKeyword || c.line.hasInstitutionKeyword);
     if (issuerCand) {
-      issuer = makeValue(issuerCand.text, sectionId, [issuerCand.line.block], 0.7);
-      reasonCodes.push("authority-keyword-disambiguated");
+      const issuerSplit = parseInlineCompositeHeader(issuerCand.text, "credential");
+      issuer = makeValue(issuerSplit.primaryText, sectionId, [issuerCand.line.block], 0.7);
+      issuers.push(issuer);
+      if (issuerSplit.location && !location) location = makeValue(issuerSplit.location, sectionId, [issuerCand.line.block], 0.65);
+      reasonCodes.push(issuerCand.line.hasAuthorityKeyword ? "authority-keyword-disambiguated" : "institution-keyword-disambiguated");
     }
     const remaining = afterId.filter((c) => c !== issuerCand);
+    const hasReinforcingLabel = remaining.some((c) => detectProgramLabel(c.text));
 
     if (remaining.length > 0) {
-      /* Multiple leftover lines (a wrapped credential name split across
-         2+ lines, e.g. "Certified Supply Chain\nProfessional") are
-         joined with a plain space - matches exactly how
-         structuredValidator.ts's own fact-preservation check
-         reconstructs a multi-block value's expected source text. */
-      const nameText = remaining.map((c) => c.text).join(" ");
-      if (nameText.length > 0) {
-        const remainingBlocks = remaining.map((c) => c.line.block);
-        if (issuer === undefined) {
-          const { name: n, issuer: trailingIssuer } = splitTrailingDashIssuer(nameText);
-          if (n.length > 0) name = makeValue(n, sectionId, remainingBlocks, 0.7);
-          if (trailingIssuer) {
-            issuer = makeValue(trailingIssuer, sectionId, remainingBlocks, 0.65);
-            reasonCodes.push("trailing-dash-issuer-disambiguated");
+      /* Phase 5D.3D - "Multiple certificates/licenses on one line"
+         (spec pattern 13): if EVERY remaining line/segment
+         independently looks credential-shaped, each becomes its own
+         names[] entry instead of being space-joined into one combined
+         string. Otherwise falls to the pre-5D.3D space-join (wrapped
+         credential name split across 2+ lines), with a same-line
+         multi-value delimiter split (pattern 1/2/3/4/12) tried first. */
+      if (remaining.length >= 2 && remaining.every((c) => segmentLooksLikeCredential(c.text))) {
+        reasonCodes.push("multi-credential-separate-lines");
+        for (const c of remaining) {
+          if (issuer === undefined) {
+            const { name: n, issuer: trailingIssuer } = splitTrailingDashIssuer(c.text);
+            if (n.length > 0) names.push(makeValue(n, sectionId, [c.line.block], 0.7));
+            if (trailingIssuer && issuer === undefined) {
+              issuer = makeValue(trailingIssuer, sectionId, [c.line.block], 0.65);
+              issuers.push(issuer);
+              reasonCodes.push("trailing-dash-issuer-disambiguated");
+            }
+          } else {
+            names.push(makeValue(c.text, sectionId, [c.line.block], 0.7));
           }
-        } else {
-          name = makeValue(nameText, sectionId, remainingBlocks, 0.7);
+        }
+      } else {
+        const nameText = remaining.map((c) => c.text).join(" ");
+        if (nameText.length > 0) {
+          const remainingBlocks = remaining.map((c) => c.line.block);
+          if (issuer === undefined) {
+            const split = splitMultiValueSegment(nameText, { segmentShapeTest: segmentLooksLikeCredential, hasReinforcingLabel });
+            if (split.values.length >= 2) {
+              reasonCodes.push("multi-credential-same-line-split", ...split.reasonCodes);
+              for (const v of split.values) names.push(makeValue(v, sectionId, remainingBlocks, 0.7));
+            } else {
+              const { name: n, issuer: trailingIssuer } = splitTrailingDashIssuer(nameText);
+              if (n.length > 0) names.push(makeValue(n, sectionId, remainingBlocks, 0.7));
+              if (trailingIssuer) {
+                issuer = makeValue(trailingIssuer, sectionId, remainingBlocks, 0.65);
+                issuers.push(issuer);
+                reasonCodes.push("trailing-dash-issuer-disambiguated");
+              }
+            }
+          } else {
+            names.push(makeValue(nameText, sectionId, remainingBlocks, 0.7));
+          }
         }
       }
     }
+    if (names.length >= 2) reasonCodes.push("multiple-names-preserved");
+    name = names[0];
 
     reasonCodes.push(hasDate ? "date-anchored-window" : "no-date-evidence-in-window");
 
@@ -214,6 +267,8 @@ export function extractCredentialEntries(sectionId: string, bodyBlocks: Semantic
       id: entryId(sectionId, "credential", index),
       name,
       issuer,
+      names,
+      issuers,
       credentialId,
       issueDateText,
       expiryDateText,

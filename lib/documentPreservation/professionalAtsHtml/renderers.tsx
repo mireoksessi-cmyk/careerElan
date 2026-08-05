@@ -276,19 +276,41 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
   const location = val(entry.location);
   const dateRange = val(entry.dateRangeText);
   const gpa = val(entry.gpa);
+  /* Phase 5D.3D - Generic Academic Composite Parsing. entry.credentials/
+     institutions[0] always equals entry.credential/institution (see
+     educationExtractor.ts's own comment), so isMultiCredential is
+     false and this renders IDENTICALLY to before 5D.3D for every
+     existing single-degree entry - only a genuine Double Degree/Joint
+     Program (2+ credentials or institutions) takes the new branch. */
+  const credentials = entry.credentials.map((c) => c.value);
+  const institutions = entry.institutions.map((i) => i.value);
+  const fieldsOfStudy = entry.fieldsOfStudy.map((f) => f.value);
+  const isMultiCredential = credentials.length >= 2 || institutions.length >= 2;
   const hasAnyStructuredField = credential || institution || field || location || dateRange || gpa || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="education-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
-          {(credential || institution) && (
-            <strong>
-              {credential}
-              {credential && institution ? ", " : ""}
-              {institution}
-            </strong>
+          {isMultiCredential ? (
+            <>
+              {institutions.length > 0 && <strong>{institutions.join(" / ")}</strong>}
+              {credentials.map((c, i) => (
+                <div key={i} data-multi-credential-index={i}>{fieldsOfStudy[i] ? `${c} — ${fieldsOfStudy[i]}` : c}</div>
+              ))}
+              {(location || dateRange || gpa) && <div>{joinContact([location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+            </>
+          ) : (
+            <>
+              {(credential || institution) && (
+                <strong>
+                  {credential}
+                  {credential && institution ? ", " : ""}
+                  {institution}
+                </strong>
+              )}
+              {(field || location || dateRange || gpa) && <div>{joinContact([field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+            </>
           )}
-          {(field || location || dateRange || gpa) && <div>{joinContact([field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
@@ -312,11 +334,17 @@ function CredentialView({ block, subRange, isContinuation, spacing = DEFAULT_SPA
   const location = val(entry.location);
   const dateRange = expiry ? [date, expiry].filter((d): d is string => !!d).join(" - ") : date;
   const hasAnyStructuredField = name || issuer || date || expiry || credentialId || location || items.length > 0;
+  /* Phase 5D.3D - "Multiple certificates/licenses on one line". names[0]
+     always equals name (see credentialExtractor.ts's own comment), so
+     this renders IDENTICALLY to before 5D.3D unless a genuine 2+
+     credential split occurred. */
+  const names = entry.names.map((n) => n.value);
+  const isMultiName = names.length >= 2;
   return (
     <div data-block-id={block.id} data-block-kind="credential-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
-          {name && <strong>{name}</strong>}
+          {isMultiName ? names.map((n, i) => <div key={i} data-multi-name-index={i}><strong>{n}</strong></div>) : name && <strong>{name}</strong>}
           {(issuer || dateRange || location) && <div>{joinContact([issuer, location, dateRange])}</div>}
           {credentialId && <div>{credentialId}</div>}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
@@ -338,11 +366,14 @@ function AwardView({ block, subRange, isContinuation, spacing = DEFAULT_SPACING 
   const issuer = val(entry.issuer);
   const date = val(entry.dateText);
   const hasAnyStructuredField = name || issuer || date || items.length > 0;
+  /* Phase 5D.3D - "Multiple awards on one composite line". */
+  const names = entry.names.map((n) => n.value);
+  const isMultiName = names.length >= 2;
   return (
     <div data-block-id={block.id} data-block-kind="award-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
-          {name && <strong>{name}</strong>}
+          {isMultiName ? names.map((n, i) => <div key={i} data-multi-name-index={i}><strong>{n}</strong></div>) : name && <strong>{name}</strong>}
           {(issuer || date) && <div>{joinContact([issuer, date])}</div>}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>

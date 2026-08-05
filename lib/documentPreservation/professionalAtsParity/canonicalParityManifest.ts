@@ -82,9 +82,15 @@ function tagExperienceLike(entry: ExperienceEntry | ProjectEntry): TaggedFragmen
 
 function tagEducation(entry: EducationEntry): TaggedFragment[] {
   const tagged: TaggedFragment[] = [];
-  if (nonEmpty(entry.institution?.value)) tagged.push({ value: entry.institution!.value.trim(), kind: "organization" });
-  if (nonEmpty(entry.credential?.value)) tagged.push({ value: entry.credential!.value.trim(), kind: "education" });
-  if (nonEmpty(entry.fieldOfStudy?.value)) tagged.push({ value: entry.fieldOfStudy!.value.trim(), kind: "education" });
+  /* Phase 5D.3D - iterate the full institutions[]/credentials[]/
+     fieldsOfStudy[] arrays (Double Degree/Double Major/Joint Program),
+     not just the singular institution/credential/fieldOfStudy fields
+     (always array[0] by construction) - otherwise a 2nd+ degree/
+     institution/major never gets cross-checked by this validator at
+     all, and would render correctly while silently going unverified. */
+  for (const i of entry.institutions) if (nonEmpty(i.value)) tagged.push({ value: i.value.trim(), kind: "organization" });
+  for (const c of entry.credentials) if (nonEmpty(c.value)) tagged.push({ value: c.value.trim(), kind: "education" });
+  for (const f of entry.fieldsOfStudy) if (nonEmpty(f.value)) tagged.push({ value: f.value.trim(), kind: "education" });
   if (nonEmpty(entry.location?.value)) tagged.push({ value: entry.location!.value.trim(), kind: "location" });
   if (nonEmpty(entry.dateRangeText?.value)) tagged.push({ value: entry.dateRangeText!.value.trim(), kind: "date" });
   if (nonEmpty(entry.gpa?.value)) tagged.push({ value: entry.gpa!.value.trim(), kind: "education" });
@@ -96,8 +102,11 @@ function tagEducation(entry: EducationEntry): TaggedFragment[] {
 
 function tagCredential(entry: CredentialEntry): TaggedFragment[] {
   const tagged: TaggedFragment[] = [];
-  if (nonEmpty(entry.name?.value)) tagged.push({ value: entry.name!.value.trim(), kind: "credential" });
-  if (nonEmpty(entry.issuer?.value)) tagged.push({ value: entry.issuer!.value.trim(), kind: "organization" });
+  /* Phase 5D.3D - iterate names[]/issuers[] (multiple certificates on
+     one line/window), not just the singular name/issuer fields - see
+     tagEducation's own comment for why. */
+  for (const n of entry.names) if (nonEmpty(n.value)) tagged.push({ value: n.value.trim(), kind: "credential" });
+  for (const i of entry.issuers) if (nonEmpty(i.value)) tagged.push({ value: i.value.trim(), kind: "organization" });
   if (nonEmpty(entry.credentialId?.value)) tagged.push({ value: entry.credentialId!.value.trim(), kind: "credential" });
   if (nonEmpty(entry.issueDateText?.value)) tagged.push({ value: entry.issueDateText!.value.trim(), kind: "date" });
   if (nonEmpty(entry.expiryDateText?.value)) tagged.push({ value: entry.expiryDateText!.value.trim(), kind: "date" });
@@ -109,7 +118,9 @@ function tagCredential(entry: CredentialEntry): TaggedFragment[] {
 
 function tagAward(entry: AwardEntry): TaggedFragment[] {
   const tagged: TaggedFragment[] = [];
-  if (nonEmpty(entry.name?.value)) tagged.push({ value: entry.name!.value.trim(), kind: "award" });
+  /* Phase 5D.3D - iterate names[] (multiple awards on one line), not
+     just the singular name field - see tagEducation's own comment. */
+  for (const n of entry.names) if (nonEmpty(n.value)) tagged.push({ value: n.value.trim(), kind: "award" });
   if (nonEmpty(entry.issuer?.value)) tagged.push({ value: entry.issuer!.value.trim(), kind: "organization" });
   if (nonEmpty(entry.dateText?.value)) tagged.push({ value: entry.dateText!.value.trim(), kind: "date" });
   for (const d of entry.details) if (nonEmpty(d.value)) tagged.push({ value: d.value.trim(), kind: "bullet" });
@@ -119,7 +130,11 @@ function tagAward(entry: AwardEntry): TaggedFragment[] {
 
 function tagPublication(entry: PublicationEntry): TaggedFragment[] {
   const tagged: TaggedFragment[] = [];
-  if (nonEmpty(entry.title?.value)) tagged.push({ value: entry.title!.value.trim(), kind: "publication" });
+  /* Phase 5D.3D - iterate titles[] (backward-compat array, currently
+     always [title] - see publicationExtractor.ts's own comment on why
+     same-line multi-title splitting isn't implemented this round), not
+     just the singular title field - see tagEducation's own comment. */
+  for (const t of entry.titles) if (nonEmpty(t.value)) tagged.push({ value: t.value.trim(), kind: "publication" });
   if (nonEmpty(entry.publisherOrVenue?.value)) tagged.push({ value: entry.publisherOrVenue!.value.trim(), kind: "organization" });
   if (nonEmpty(entry.dateText?.value)) tagged.push({ value: entry.dateText!.value.trim(), kind: "date" });
   if (nonEmpty(entry.urlOrDoi?.value)) tagged.push({ value: entry.urlOrDoi!.value.trim(), kind: "publication" });

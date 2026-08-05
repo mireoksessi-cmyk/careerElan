@@ -70,7 +70,14 @@ async function runFixture(fileName: string, format: "pdf" | "docx") {
     check(`${fileName}: Shape A resolves location`, entries[0].location?.value, "Denton, TX");
     check(`${fileName}: Shape B (Date/Institution/Location) resolves institution`, entries[1].institution?.value, "Wrenfield College");
     check(`${fileName}: Shape C (Degree/Institution/Date) resolves degree`, entries[2].credential?.value, "Bachelor of Arts");
-    check(`${fileName}: Shape D (Institution/Degree/Location/Date) resolves degree`, entries[3].credential?.value, "Diploma in Graphic Design");
+    /* Phase 5D.3D - resolveCredentialsFromText now recovers the embedded
+       "Degree in Major" pattern (splitDegreeInMajor) from a single
+       unsplit credential line, matching this round's generalized
+       Double Degree/Major field-of-study extraction (see
+       educationExtractor.test.ts's own "credential-first" case for the
+       same intentional behavior change). */
+    check(`${fileName}: Shape D (Institution/Degree/Location/Date) resolves degree`, entries[3].credential?.value, "Diploma");
+    check(`${fileName}: Shape D resolves fieldOfStudy from embedded "in Major" pattern`, entries[3].fieldOfStudy?.value, "Graphic Design");
     check(`${fileName}: Shape E (Degree/Major/Institution/Date) resolves major`, entries[4].fieldOfStudy?.value, "Environmental Studies");
     check(`${fileName}: Shape F (Degree/Major/Institution/Location/Date) resolves institution`, entries[5].institution?.value, "Silverpine University");
     check(`${fileName}: Shape L (Expected Graduation/Degree/Institution/Campus) resolves institution`, entries[6].institution?.value, "Thistledown University");
@@ -78,7 +85,11 @@ async function runFixture(fileName: string, format: "pdf" | "docx") {
     check(`${fileName}: Present keyword resolves date`, entries[12].dateRangeText?.value, "2022 - Present");
     check(`${fileName}: Current keyword resolves date`, entries[13].dateRangeText?.value, "2023 - Current");
     check(`${fileName}: Bracket-qualified degree preserves closing paren`, entries[27].credential?.value, "Bachelor of Engineering (Co-op)");
-    check(`${fileName}: Double Degree (comma-joined) is not mislabeled as fieldOfStudy`, entries[21].credential?.value, "Bachelor of Arts, Bachelor of Science");
+    // Phase 5D.3D - Generic Academic Composite Parsing generalizes this
+    // exact case further: instead of staying glued as one combined
+    // string (the 5D.3C interim behavior), each degree now resolves
+    // into its own credentials[] entry.
+    check(`${fileName}: Double Degree (comma-joined) splits into 2 credentials[]`, entries[21].credentials.map((c) => c.value), ["Bachelor of Arts", "Bachelor of Science"]);
     checkTrue(`${fileName}: Double Degree has no spurious fieldOfStudy`, entries[21].fieldOfStudy === undefined);
     check(`${fileName}: Multiple Locations resolves as location, not degree/major`, entries[23].location?.value, "Toronto, ON and Vancouver, BC");
     checkTrue(`${fileName}: Multiple Locations has no spurious credential/fieldOfStudy`, entries[23].credential === undefined && entries[23].fieldOfStudy === undefined);

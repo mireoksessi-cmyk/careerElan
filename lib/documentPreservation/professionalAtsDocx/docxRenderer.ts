@@ -223,20 +223,43 @@ function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips:
   const location = val(entry.location);
   const dateRange = val(entry.dateRangeText);
   const gpa = val(entry.gpa);
+  /* Phase 5D.3D - Generic Academic Composite Parsing. Mirrors
+     renderers.tsx's own EducationView isMultiCredential branch exactly
+     - identical rendering to before 5D.3D unless a genuine 2+
+     credential/institution split occurred. */
+  const credentials = entry.credentials.map((c) => c.value);
+  const institutions = entry.institutions.map((i) => i.value);
+  const fieldsOfStudy = entry.fieldsOfStudy.map((f) => f.value);
+  const isMultiCredential = credentials.length >= 2 || institutions.length >= 2;
 
-  const headerLine1: TextRun[] = [];
-  if (credential || institution) {
-    const text = [credential, institution].filter(Boolean).join(credential && institution ? ", " : "");
-    headerLine1.push(run(text, ctx, { bold: true }));
+  let headerLineCount = 0;
+  if (isMultiCredential) {
+    if (institutions.length > 0) {
+      pushParagraph(ctx, block.id, block.sourceEntryId, [run(institutions.join(" / "), ctx, { bold: true })], { spacingBeforeTwips: blockGapTwips, keepNext: true });
+      headerLineCount++;
+    }
+    credentials.forEach((c, i) => {
+      const text = fieldsOfStudy[i] ? `${c} — ${fieldsOfStudy[i]}` : c;
+      pushParagraph(ctx, block.id, block.sourceEntryId, [run(text, ctx)], { spacingBeforeTwips: headerLineCount === 0 ? blockGapTwips : 0, keepNext: true });
+      headerLineCount++;
+    });
+    if (headerLineCount > 0) ctx.entryHeadersWithKeepNext++;
+  } else {
+    const headerLine1: TextRun[] = [];
+    if (credential || institution) {
+      const text = [credential, institution].filter(Boolean).join(credential && institution ? ", " : "");
+      headerLine1.push(run(text, ctx, { bold: true }));
+    }
+    if (headerLine1.length > 0) {
+      pushParagraph(ctx, block.id, block.sourceEntryId, headerLine1, { spacingBeforeTwips: blockGapTwips, keepNext: true });
+      ctx.entryHeadersWithKeepNext++;
+      headerLineCount++;
+    }
   }
-  if (headerLine1.length > 0) {
-    pushParagraph(ctx, block.id, block.sourceEntryId, headerLine1, { spacingBeforeTwips: blockGapTwips, keepNext: true });
-    ctx.entryHeadersWithKeepNext++;
-  }
-  const meta = joinContact([field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined]);
+  const meta = joinContact(isMultiCredential ? [location, dateRange, gpa ? `GPA: ${gpa}` : undefined] : [field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined]);
   if (meta.length > 0) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(meta, ctx)], {
-      spacingBeforeTwips: headerLine1.length > 0 ? 0 : blockGapTwips,
+      spacingBeforeTwips: headerLineCount > 0 ? 0 : blockGapTwips,
       keepNext: items.length > 0,
     });
   }
@@ -244,7 +267,7 @@ function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips:
      entry would normally render (headerLine1, meta, items) is empty -
      show rawHeaderText verbatim instead of nothing. Mirrors
      renderers.tsx's own RawHeaderFallback exactly. */
-  if (headerLine1.length === 0 && meta.length === 0 && items.length === 0) {
+  if (headerLineCount === 0 && meta.length === 0 && items.length === 0) {
     renderRawHeaderFallback(block, ctx, blockGapTwips, entry.rawHeaderText);
   }
   renderHeaderBearingSubItems(block, ctx, items, true);
@@ -265,25 +288,30 @@ function renderDetailsEntry(
   block: AssemblyBlock,
   ctx: BuildContext,
   blockGapTwips: number,
-  header: { primary?: string; meta?: (string | undefined)[] },
+  header: { primary?: string; primaryLines?: string[]; meta?: (string | undefined)[] },
   items: string[],
   rawHeaderText: string
 ) {
-  const headerLine1: TextRun[] = [];
-  if (header.primary) headerLine1.push(run(header.primary, ctx, { bold: true }));
-  if (headerLine1.length > 0) {
-    pushParagraph(ctx, block.id, block.sourceEntryId, headerLine1, { spacingBeforeTwips: blockGapTwips, keepNext: true });
-    ctx.entryHeadersWithKeepNext++;
-  }
+  /* Phase 5D.3D - "Multiple certificates/licenses/awards on one
+     composite line". primaryLines (2+) renders each as its own bold
+     paragraph; otherwise identical to the pre-5D.3D single `primary`
+     line. */
+  const primaryLines = header.primaryLines && header.primaryLines.length >= 2 ? header.primaryLines : header.primary ? [header.primary] : [];
+  let headerLineCount = 0;
+  primaryLines.forEach((text, i) => {
+    pushParagraph(ctx, block.id, block.sourceEntryId, [run(text, ctx, { bold: true })], { spacingBeforeTwips: headerLineCount === 0 ? blockGapTwips : 0, keepNext: true });
+    headerLineCount++;
+  });
+  if (headerLineCount > 0) ctx.entryHeadersWithKeepNext++;
   const meta = joinContact(header.meta ?? []);
   if (meta.length > 0) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(meta, ctx)], {
-      spacingBeforeTwips: headerLine1.length > 0 ? 0 : blockGapTwips,
+      spacingBeforeTwips: headerLineCount > 0 ? 0 : blockGapTwips,
       keepNext: items.length > 0,
     });
   }
   /* Phase 5D.3B - see renderEducation's own comment above. */
-  if (headerLine1.length === 0 && meta.length === 0 && items.length === 0) {
+  if (headerLineCount === 0 && meta.length === 0 && items.length === 0) {
     renderRawHeaderFallback(block, ctx, blockGapTwips, rawHeaderText);
   }
   renderHeaderBearingSubItems(block, ctx, items, false);
@@ -298,14 +326,21 @@ function renderCredential(block: AssemblyBlock, ctx: BuildContext, blockGapTwips
     block,
     ctx,
     blockGapTwips,
-    { primary: val(entry.name), meta: [val(entry.issuer), val(entry.location), dateRange, val(entry.credentialId)] },
+    { primary: val(entry.name), primaryLines: entry.names.map((n) => n.value), meta: [val(entry.issuer), val(entry.location), dateRange, val(entry.credentialId)] },
     entry.details.map((d) => d.value),
     entry.rawHeaderText
   );
 }
 function renderAward(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as AwardEntry;
-  renderDetailsEntry(block, ctx, blockGapTwips, { primary: val(entry.name), meta: [val(entry.issuer), val(entry.dateText)] }, entry.details.map((d) => d.value), entry.rawHeaderText);
+  renderDetailsEntry(
+    block,
+    ctx,
+    blockGapTwips,
+    { primary: val(entry.name), primaryLines: entry.names.map((n) => n.value), meta: [val(entry.issuer), val(entry.dateText)] },
+    entry.details.map((d) => d.value),
+    entry.rawHeaderText
+  );
 }
 function renderPublication(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as PublicationEntry;

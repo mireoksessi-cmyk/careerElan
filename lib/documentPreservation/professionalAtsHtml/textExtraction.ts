@@ -94,7 +94,14 @@ export function extractExperienceEntryFragments(entry: ExperienceEntry): string[
 
 export function extractEducationEntryFragments(entry: EducationEntry): string[] {
   const fragments: string[] = [];
-  for (const f of [entry.institution, entry.credential, entry.fieldOfStudy, entry.location, entry.dateRangeText, entry.gpa]) {
+  /* Phase 5D.3D - iterate the full institutions[]/credentials[]/
+     fieldsOfStudy[] arrays (Double Degree/Double Major/Joint Program),
+     not just the singular institution/credential/fieldOfStudy fields
+     (always array[0] by construction) - otherwise a 2nd+ degree/
+     institution/major is never checked for missing-fragment presence,
+     so a future bug that drops it from the rendered output would go
+     undetected. */
+  for (const f of [...entry.institutions, ...entry.credentials, ...entry.fieldsOfStudy, entry.location, entry.dateRangeText, entry.gpa]) {
     const v = nonEmpty(f?.value);
     if (v) fragments.push(v);
   }
@@ -112,7 +119,9 @@ export function extractEducationEntryFragments(entry: EducationEntry): string[] 
 
 export function extractCredentialEntryFragments(entry: CredentialEntry): string[] {
   const fragments: string[] = [];
-  for (const f of [entry.name, entry.issuer, entry.credentialId, entry.issueDateText, entry.expiryDateText, entry.location]) {
+  /* Phase 5D.3D - iterate names[]/issuers[] - see
+     extractEducationEntryFragments's own comment. */
+  for (const f of [...entry.names, ...entry.issuers, entry.credentialId, entry.issueDateText, entry.expiryDateText, entry.location]) {
     const v = nonEmpty(f?.value);
     if (v) fragments.push(v);
   }
@@ -144,7 +153,9 @@ export function extractProjectEntryFragments(entry: ProjectEntry): string[] {
 
 export function extractAwardEntryFragments(entry: AwardEntry): string[] {
   const fragments: string[] = [];
-  for (const f of [entry.name, entry.issuer, entry.dateText]) {
+  /* Phase 5D.3D - iterate names[] - see
+     extractEducationEntryFragments's own comment. */
+  for (const f of [...entry.names, entry.issuer, entry.dateText]) {
     const v = nonEmpty(f?.value);
     if (v) fragments.push(v);
   }
@@ -158,7 +169,9 @@ export function extractAwardEntryFragments(entry: AwardEntry): string[] {
 
 export function extractPublicationEntryFragments(entry: PublicationEntry): string[] {
   const fragments: string[] = [];
-  for (const f of [entry.title, entry.publisherOrVenue, entry.dateText, entry.urlOrDoi]) {
+  /* Phase 5D.3D - iterate titles[] - see
+     extractEducationEntryFragments's own comment. */
+  for (const f of [...entry.titles, entry.publisherOrVenue, entry.dateText, entry.urlOrDoi]) {
     const v = nonEmpty(f?.value);
     if (v) fragments.push(v);
   }

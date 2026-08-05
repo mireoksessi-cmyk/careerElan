@@ -75,13 +75,13 @@ check("experience: entry with a bullet only -> visible", hasExperienceContent([{
 check("experience: entry with whitespace-only bullet -> hidden", hasExperienceContent([{ ...emptyExperienceEntry, bullets: [{ id: "b1", text: "   ", source: src }] }]), false);
 
 // ==================== Education ====================
-const emptyEducationEntry = { id: "e1", honors: [], details: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyEducationEntry = { id: "e1", credentials: [], fieldsOfStudy: [], institutions: [], honors: [], details: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("education: empty entries -> hidden", hasEducationContent([]), false);
 check("education: all fields empty -> hidden", hasEducationContent([emptyEducationEntry]), false);
 check("education: institution present -> visible", hasEducationContent([{ ...emptyEducationEntry, institution: tv("MIT") }]), true);
 
 // ==================== Credentials ====================
-const emptyCredentialEntry = { id: "c1", details: [], kind: "unknown" as const, rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyCredentialEntry = { id: "c1", names: [], issuers: [], details: [], kind: "unknown" as const, rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("credentials: empty entries -> hidden", hasCredentialsContent([]), false);
 check("credentials: all fields empty -> hidden", hasCredentialsContent([emptyCredentialEntry]), false);
 check("credentials: name present -> visible", hasCredentialsContent([{ ...emptyCredentialEntry, name: tv("PMP") }]), true);
@@ -93,13 +93,13 @@ check("projects: all fields empty -> hidden", hasProjectsContent([emptyProjectEn
 check("projects: name present -> visible", hasProjectsContent([{ ...emptyProjectEntry, name: tv("Tracker") }]), true);
 
 // ==================== Awards ====================
-const emptyAwardEntry = { id: "a1", details: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyAwardEntry = { id: "a1", names: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("awards: empty entries -> hidden", hasAwardsContent([]), false);
 check("awards: all fields empty -> hidden", hasAwardsContent([emptyAwardEntry]), false);
 check("awards: name present -> visible", hasAwardsContent([{ ...emptyAwardEntry, name: tv("Employee of the Year") }]), true);
 
 // ==================== Publications ====================
-const emptyPublicationEntry = { id: "pub1", authors: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
+const emptyPublicationEntry = { id: "pub1", titles: [], authors: [], details: [], content: [], rawHeaderText: "", source: src, isUncertain: true, reasonCodes: [] };
 check("publications: empty entries -> hidden", hasPublicationsContent([]), false);
 check("publications: all fields empty -> hidden", hasPublicationsContent([emptyPublicationEntry]), false);
 check("publications: title present -> visible", hasPublicationsContent([{ ...emptyPublicationEntry, title: tv("A Study") }]), true);

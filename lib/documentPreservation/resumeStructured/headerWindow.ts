@@ -28,18 +28,50 @@ import { looksLikeLocation } from "./splitOrganizationLocation";
 export const MAX_HEADER_WINDOW = 6;
 /*
   Bounds how many non-date lines may follow an already-captured date
-  group before the window closes - the only required shape with real
-  content AFTER its date is "Date, Institution, Location" (2 lines), so
-  2 is a structurally-justified bound (not an arbitrary constant): it
-  lets a genuine Date-first multi-line header keep going, while still
-  stopping the window from silently swallowing an unrelated NEXT entry's
-  own header lines indefinitely.
+  group before the window closes - the base required shape (5D.3C) is
+  "Date, Institution, Location" (2 lines), so 2 is a structurally-
+  justified bound (not an arbitrary constant): it lets a genuine Date-
+  first multi-line header keep going, while still stopping the window
+  from silently swallowing an unrelated NEXT entry's own header lines
+  indefinitely. Real regression evidence (this round's own f14 fixture,
+  "Date-first 3-line variant of Shape B" - date + degree + institution,
+  immediately followed by a completely separate entry's own institution
+  line): naively raising this constant to accommodate a longer required
+  shape elsewhere swallows that unrelated 4th line too, since nothing
+  distinguishes "one more line legitimately belongs to THIS entry" from
+  "the window is now eating the NEXT entry." See
+  MAX_LINES_AFTER_DATE_GROUP_WITH_LABEL below for the scoped exception
+  that avoids this.
 */
 const MAX_LINES_AFTER_DATE_GROUP = 2;
+/*
+  Phase 5D.3D - a Date-first Joint Program header ("Date, Joint Program:,
+  Institution A / Institution B, Degree") legitimately needs a 3rd line
+  after the date group - but ONLY when an explicit program-label line
+  (detectProgramLabel below) has already been seen within THIS window,
+  never unconditionally (see MAX_LINES_AFTER_DATE_GROUP's own comment
+  for the real regression this scoping avoids). The label is a strong,
+  explicit signal that this genuinely is a multi-line composite header
+  needing more room, not just "any date-first entry gets 3 lines for
+  free."
+*/
+const MAX_LINES_AFTER_DATE_GROUP_WITH_LABEL = 3;
 const MAX_HEADER_LINE_LENGTH = 100;
 const SENTENCE_END_RE = /[.!?]$/;
 
-export const DEGREE_KEYWORD_RE = /\b(bachelor|master|ph\.?d|doctorate|associate|diploma|certificate|b\.?a\.?|b\.?s\.?|b\.?comm\.?|m\.?a\.?|m\.?s\.?|m\.?b\.?a\.?)\b/i;
+export const DEGREE_KEYWORD_RE = /\b(bachelor|master|ph\.?d|doctorate|associate|diploma|certificate|b\.?a\.?|b\.?sc\.?|b\.?s\.?|b\.?comm\.?|m\.?a\.?|m\.?sc\.?|m\.?s\.?|m\.?b\.?a\.?)\b/i;
+/*
+  Phase 5D.3D - moved here (single source of truth) from
+  multiAcademicValueParser.ts, which now imports it instead of
+  redefining it - mirrors DEGREE_KEYWORD_RE's own import-not-redefine
+  fix (see that module's header comment) and is what lets
+  collectHeaderWindow below detect an explicit program-label line
+  directly, without a circular import between the two files.
+*/
+export const PROGRAM_LABEL_RE = /\b(double degree|dual degree|joint degree|joint program|concurrent program|combined degree|double major|dual major)\s*:?\s*$/i;
+export function detectProgramLabel(text: string): boolean {
+  return PROGRAM_LABEL_RE.test(text.trim());
+}
 /*
   A generic INSTITUTION-category signal (Phase 5D.3B), same kind of
   lexical class as DEGREE_KEYWORD_RE - matches GENERAL category words,
@@ -103,10 +135,24 @@ const MAX_WORDS_PER_SEGMENT = 6;
 */
 const SEGMENT_DELIMITER_RE = /[,|]|\s+(?:-|–|—|‒|―|－)\s+/;
 const PARENTHETICAL_RE = /\([^)]*\)?/g;
+/*
+  Phase 5D.3D bugfix - a trailing period is only "sentence-ending" when
+  the word right before it is a genuine word, not a short abbreviation
+  ("M.Sc.", "B.A.", "Ph.D.", "Assoc."). A real prose sentence almost
+  never ends in a short (<=4 letter) CAPITALIZED token - that shape is
+  specific to abbreviations/initialisms, never a common English
+  sentence-final word (which is typically lowercase and/or longer).
+  Purely structural, never a keyword or specific degree name - without
+  this, "B.Sc., M.Sc." (a same-line Double Degree, spec pattern 1) was
+  wrongly rejected as a full sentence and its whole header window
+  collapsed to zero lines, silently losing the degree pairing entirely.
+*/
+const ABBREVIATION_TAIL_RE = /\b[A-Z][A-Za-z]{0,3}\.$/;
 
 export function looksLikeHeaderLine(block: SemanticContentBlock): boolean {
   const text = block.text.trim();
-  if (block.blockType === "bullet" || text.length === 0 || text.length > MAX_HEADER_LINE_LENGTH || SENTENCE_END_RE.test(text)) return false;
+  if (block.blockType === "bullet" || text.length === 0 || text.length > MAX_HEADER_LINE_LENGTH) return false;
+  if (SENTENCE_END_RE.test(text) && !ABBREVIATION_TAIL_RE.test(text)) return false;
   const segments = text.split(SEGMENT_DELIMITER_RE);
   /* A parenthetical qualifier ("Certificate in Lean Six Sigma (Green
      Belt)") is common on an otherwise-short credential/degree segment -
@@ -151,9 +197,52 @@ export function looksLikeHeaderLine(block: SemanticContentBlock): boolean {
 const DATE_QUALIFIER_RE = /\b(issued?|expir(?:es?|y|ation)?|valid(?:\s+(?:through|until|thru))?|renewal|effective|through|until|thru)\b/gi;
 const NON_WORD_RE = /[:\-–—,.\s]/g;
 
-function hasSubstantialNonDateText(remainderBefore: string, remainderAfter: string): boolean {
-  const combined = `${remainderBefore} ${remainderAfter}`.replace(DATE_QUALIFIER_RE, "").replace(NON_WORD_RE, "");
+function hasSubstantialNonDateText(remainderBefore: string, remainderAfter: string, qualifierRe: RegExp = DATE_QUALIFIER_RE): boolean {
+  const combined = `${remainderBefore} ${remainderAfter}`.replace(qualifierRe, "").replace(NON_WORD_RE, "");
   return combined.length > 0;
+}
+
+/*
+  Phase 5D.3D bugfix (real evidence: the f15 fixture's own "Expected
+  Graduation 2026" cross-combination case, AND a real regression this
+  extension caused in the f14 fixture - see below) - "expected"/
+  "anticipated"/"graduation"/"completion" extend the qualifier-word
+  category ONLY for this narrower purpose: recognizing a standalone
+  "Expected Graduation <year>" line as a qualifier-only continuation
+  line in the Date-first lookahead check, and as qualifier-only
+  remainder text for field-assignment filtering (isQualifierOnlyText
+  below). Deliberately a SEPARATE regex from DATE_QUALIFIER_RE, not a
+  shared extension of it - DATE_QUALIFIER_RE is also used by the
+  adjacent-second-date-line Issue/Expiry continuation check above, and
+  extending it there wrongly let an unrelated "Expected Graduation
+  2027" line get treated as an expiry-style continuation of a
+  COMPLETELY DIFFERENT, PRECEDING entry's own date (real regression:
+  f14's own "Bachelor of Commerce / Marketing / Silverpine University /
+  Toronto, ON / 2017 - 2021" Shape F entry wrongly swallowed the NEXT
+  entry's "Expected Graduation 2027" line). "Expected Graduation" is
+  never a valid continuation of a PRIOR, unrelated date - it is always
+  this ENTRY's own single completion date - so it must never affect
+  that other check.
+*/
+const CONTINUATION_QUALIFIER_RE = /\b(issued?|expir(?:es?|y|ation)?|valid(?:\s+(?:through|until|thru))?|renewal|effective|through|until|thru|expected|anticipated|graduation|completion)\b/gi;
+
+/*
+  Phase 5D.3D bugfix - a caller-facing wrapper for the SAME check used
+  above (using the wider CONTINUATION_QUALIFIER_RE, not the narrower
+  DATE_QUALIFIER_RE - see that constant's own comment for why they must
+  stay separate): an already date-stripped remainder line ("Expected
+  Graduation", left over after "Expected Graduation 2026" gives up its
+  date) that is non-empty but consists ENTIRELY of generic date-
+  qualifier words carries no real institution/degree/major content of
+  its own. Exported so every academic-family extractor
+  (educationExtractor.ts's own candidateLines filter, alongside its
+  isPureLabelLine) can exclude such lines from field assignment instead
+  of re-deriving this same signal locally and risking the SAME kind of
+  cross-file drift DEGREE_KEYWORD_RE already had (see
+  multiAcademicValueParser.ts's own import-not-redefine fix).
+*/
+export function isQualifierOnlyText(text: string): boolean {
+  return text.trim().length > 0 && !hasSubstantialNonDateText("", text, CONTINUATION_QUALIFIER_RE);
 }
 
 /*
@@ -186,6 +275,12 @@ export function collectHeaderWindow(blocks: SemanticContentBlock[], start: numbe
      also look header-shaped. */
   let sawNonDateBeforeFirstDate = false;
   let linesAfterDateGroup = 0;
+  /* Phase 5D.3D - whether an explicit program-label line ("Joint
+     Program:") has already been accepted into THIS window - see
+     MAX_LINES_AFTER_DATE_GROUP_WITH_LABEL's own comment for why this
+     must be scoped to an explicit signal rather than a blanket cap
+     increase. */
+  let sawProgramLabelInWindow = false;
 
   for (let k = start; k < blocks.length && indices.length < MAX_HEADER_WINDOW; k++) {
     const block = blocks[k];
@@ -240,11 +335,29 @@ export function collectHeaderWindow(blocks: SemanticContentBlock[], start: numbe
            line if it does NOT itself look like it is about to pair
            with ITS OWN date on the very next line - that shape
            (Institution, Date) is a brand new entry's own 2-line header,
-           not a continuation of the current one. */
+           not a continuation of the current one.
+           Phase 5D.3D bugfix (f15 fixture evidence: "Bachelor of Arts"
+           immediately followed by "Expected Graduation 2026") - a bare
+           qualifier-only date line ("Expected Graduation 2026",
+           "Expires 2025") is NOT a new entry's own "Institution, Date"
+           pair - it has no institution-shaped text of its own, only
+           generic date-qualifier words (DATE_QUALIFIER_RE) alongside
+           its date. Requiring the pre-qualifier-strip remainder to be
+           NON-EMPTY keeps a genuinely bare date line ("2022 - Present",
+           no text at all) triggering the original break - only a line
+           that has SOME text, and that text is entirely qualifier
+           vocabulary, is treated as a continuation instead. */
         const next = blocks[k + 1];
-        if (next !== undefined && next.blockType !== "bullet" && hasDateEvidence(next.text)) break;
+        if (next !== undefined && next.blockType !== "bullet" && hasDateEvidence(next.text)) {
+          const nextAnchor = stripDateAnchor(next.text);
+          const nextRawRemainder = `${nextAnchor.beforeText} ${nextAnchor.afterText}`.trim();
+          const nextIsQualifierOnly = nextRawRemainder.length > 0 && !hasSubstantialNonDateText(nextAnchor.beforeText, nextAnchor.afterText, CONTINUATION_QUALIFIER_RE);
+          if (!nextIsQualifierOnly) break;
+        }
         linesAfterDateGroup++;
-        if (linesAfterDateGroup > MAX_LINES_AFTER_DATE_GROUP) break;
+        const effectiveCap = sawProgramLabelInWindow ? MAX_LINES_AFTER_DATE_GROUP_WITH_LABEL : MAX_LINES_AFTER_DATE_GROUP;
+        if (linesAfterDateGroup > effectiveCap) break;
+        if (detectProgramLabel(block.text)) sawProgramLabelInWindow = true;
       } else {
         sawNonDateBeforeFirstDate = true;
       }
@@ -285,14 +398,31 @@ export function classifyWindowLine(block: SemanticContentBlock): HeaderWindowLin
   const dateAnchor = stripDateAnchor(text);
   const hasDate = dateAnchor.dateRangeText.length > 0;
   const remainderText = cleanHeaderFragment([dateAnchor.beforeText, dateAnchor.afterText].filter((s) => s.length > 0).join(" "));
+  const hasDegreeKeyword = DEGREE_KEYWORD_RE.test(text);
+  const hasInstitutionKeyword = INSTITUTION_KEYWORD_RE.test(text);
+  /*
+    Phase 5D.3D bugfix (real-composite evidence: "Example Institute |
+    Downtown Campus | Vancouver, BC" - a Shape "Institution | Campus |
+    City, ST" line) - looksLikeLocation only inspects the trailing
+    comma-segment ("...BC"), so a composite Institution/Location line
+    was wrongly classified as a PURE location line and swallowed whole
+    into the entry's location field, stripping the institution out of
+    the window entirely. A genuine pure-location line ("Toronto, ON")
+    never independently carries an institution/degree keyword, so
+    requiring the ABSENCE of both here is purely structural and safe -
+    it only changes classification for a line that ALSO carries one of
+    those keywords, which academicCompositeParser.ts's own institution-
+    resolution path (parseInlineCompositeHeader) already knows how to
+    split into institution + embedded location correctly.
+  */
   return {
     block,
     dateAnchor,
     hasDate,
     remainderText,
-    looksLikeLocationShape: remainderText.length > 0 && looksLikeLocation(remainderText),
-    hasDegreeKeyword: DEGREE_KEYWORD_RE.test(text),
-    hasInstitutionKeyword: INSTITUTION_KEYWORD_RE.test(text),
+    looksLikeLocationShape: remainderText.length > 0 && !hasDegreeKeyword && !hasInstitutionKeyword && looksLikeLocation(remainderText),
+    hasDegreeKeyword,
+    hasInstitutionKeyword,
     hasAuthorityKeyword: AUTHORITY_KEYWORD_RE.test(text),
     hasIdCodeShape: remainderText.length > 0 && ID_CODE_RE.test(remainderText),
   };

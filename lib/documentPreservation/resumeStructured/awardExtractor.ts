@@ -20,7 +20,27 @@ import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
 import { collectHeaderWindow, classifyWindow, looksLikeHeaderLine, type HeaderWindowLine } from "./headerWindow";
+import { splitMultiValueSegment, detectProgramLabel } from "./multiAcademicValueParser";
 import type { AwardEntry, StructuredTextValue } from "./types";
+
+/* Phase 5D.3D - "Multiple awards on one composite line" (spec pattern
+   14). An award/publication name has no reliable lexical keyword of
+   its own (unlike a degree or institution) - this permissive shape
+   test (short, non-empty phrase) is only safe for the STRONG
+   delimiters (comma/slash/pipe/semicolon); every splitMultiValueSegment
+   call below passes weakConjunctionShapeTest: () => false so "and"/"&"
+   NEVER splits from this permissive shape test alone (it would happily
+   accept "Research" / "Development Award" as two individually
+   plausible-looking award names, exactly the false positive spec
+   pattern - "Research and Development Award" - requires staying whole)
+   - only an explicit reinforcing label can unlock a weak-conjunction
+   split, mirroring resolveFieldsOfStudyFromText's own guard for the
+   exact same reason (a real bench-fixture regression this round's own
+   f15 fixture caught). */
+function segmentLooksLikeAwardName(segment: string): boolean {
+  const trimmed = segment.trim();
+  return trimmed.length > 0 && trimmed.split(/\s+/).filter((w) => w.length > 0).length <= 8;
+}
 
 function makeValue(value: string, sectionId: string, blocks: SemanticContentBlock[], confidence: number): StructuredTextValue {
   return { value, confidence, extractionMethod: "pattern-rule", source: traceFromBlocks(sectionId, blocks) };
@@ -78,6 +98,7 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
     let name: StructuredTextValue | undefined;
     let issuer: StructuredTextValue | undefined;
     let dateText: StructuredTextValue | undefined;
+    const names: StructuredTextValue[] = [];
 
     const hasDate = dateLines.length > 0;
     if (hasDate) {
@@ -113,6 +134,7 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
 
     if (remaining.length > 0) {
       const nameText = remaining.map((c) => c.text).join(" ");
+      const hasReinforcingLabel = remaining.some((c) => detectProgramLabel(c.text));
       if (nameText.length > 0) {
         if (issuer === undefined) {
           /* Real-fixture shape: "Regional Innovation Award — Chamber
@@ -123,15 +145,49 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
           if (dashParts.length >= 2) {
             name = makeValue(dashParts.slice(0, -1).join(" - "), sectionId, remaining.map((c) => c.line.block), hasDate ? 0.7 : 0.55);
             issuer = makeValue(dashParts[dashParts.length - 1], sectionId, remaining.map((c) => c.line.block), 0.65);
+            names.push(name);
             reasonCodes.push("trailing-dash-issuer-disambiguated");
           } else {
-            name = makeValue(nameText, sectionId, remaining.map((c) => c.line.block), hasDate ? 0.7 : 0.55);
+            /* Phase 5D.3D - "Multiple awards on one composite line"
+               (spec pattern 14): a genuine multi-value delimiter split
+               (comma/slash/pipe/semicolon freely, "and"/"&" only with
+               a reinforcing label) recovers each award as its own
+               names[] entry instead of gluing them into one string. */
+            const split = splitMultiValueSegment(nameText, { segmentShapeTest: segmentLooksLikeAwardName, hasReinforcingLabel, weakConjunctionShapeTest: () => false });
+            if (split.values.length >= 2) {
+              reasonCodes.push("multi-award-same-line-split", ...split.reasonCodes);
+              for (const v of split.values) names.push(makeValue(v, sectionId, remaining.map((c) => c.line.block), hasDate ? 0.65 : 0.5));
+              name = names[0];
+            } else {
+              name = makeValue(nameText, sectionId, remaining.map((c) => c.line.block), hasDate ? 0.7 : 0.55);
+              names.push(name);
+            }
           }
         } else {
-          name = makeValue(nameText, sectionId, remaining.map((c) => c.line.block), hasDate ? 0.7 : 0.55);
+          /* Phase 5D.3D bugfix (f15 fixture evidence: "Excellence Award;
+             Innovation Award" with its OWN separate issuer line,
+             "Industry Recognition Council") - the multi-value split
+             above only ran when NO issuerCand line was found; when a
+             separate authority-keyword line already supplied `issuer`,
+             the remaining award-name line's own delimiter split was
+             skipped entirely and the whole unsplit text became one
+             name. Applying the same splitMultiValueSegment check here
+             too (issuer is already resolved from its own line, so there
+             is no dash-split-recovers-issuer step to run first) fixes
+             this without touching the dash-disambiguation branch above. */
+          const split = splitMultiValueSegment(nameText, { segmentShapeTest: segmentLooksLikeAwardName, hasReinforcingLabel, weakConjunctionShapeTest: () => false });
+          if (split.values.length >= 2) {
+            reasonCodes.push("multi-award-same-line-split", ...split.reasonCodes);
+            for (const v of split.values) names.push(makeValue(v, sectionId, remaining.map((c) => c.line.block), hasDate ? 0.7 : 0.55));
+            name = names[0];
+          } else {
+            name = makeValue(nameText, sectionId, remaining.map((c) => c.line.block), hasDate ? 0.7 : 0.55);
+            names.push(name);
+          }
         }
       }
     }
+    if (names.length >= 2) reasonCodes.push("multiple-names-preserved");
 
     reasonCodes.push(hasDate ? "date-anchored-window" : "no-date-evidence-in-window");
 
@@ -139,6 +195,7 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
       id: entryId(sectionId, "award", index),
       name,
       issuer,
+      names,
       dateText,
       details,
       // Phase 5D.3A - mirrors `details` 1:1 (see types.ts's own comment
