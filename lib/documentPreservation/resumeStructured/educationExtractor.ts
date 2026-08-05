@@ -20,6 +20,7 @@ import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
 import { hasDateEvidence, extractDateParts } from "./dateRangeParsing";
+import { splitOrganizationLocation } from "./splitOrganizationLocation";
 import type { EducationEntry, StructuredTextValue } from "./types";
 
 const DEGREE_KEYWORD_RE = /\b(bachelor|master|ph\.?d|doctorate|associate|diploma|certificate|b\.?a\.?|b\.?s\.?|b\.?comm\.?|m\.?a\.?|m\.?s\.?|m\.?b\.?a\.?)\b/i;
@@ -97,10 +98,17 @@ function stripDateAndTrailingPunctuation(text: string, dateRangeText: string): s
   return before.trim().replace(/[,–—|-]+$/, "").trim();
 }
 
+/*
+  Phase 5D.2A - delegates to the shared, general-purpose
+  splitOrganizationLocation (dash-separator detection first, gated on
+  looksLikeLocation, falling back to the pre-existing unconditional
+  comma-based split) and relabels its "organization" field as
+  "institution" - the same boundary concept, just a different field
+  name in this extractor's own output shape.
+*/
 function splitInstitutionLocation(text: string): { institution: string; location?: string } {
-  const parts = text.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-  if (parts.length <= 1) return { institution: text.trim() };
-  return { institution: parts[0], location: parts.slice(1).join(", ") };
+  const { organization, location } = splitOrganizationLocation(text);
+  return { institution: organization, location };
 }
 
 function splitCredentialField(text: string): { credential: string; fieldOfStudy?: string } {

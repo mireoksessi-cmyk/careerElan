@@ -35,6 +35,7 @@ import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId, bulletId } from "./ids";
 import { isDateRangeLine, extractDateParts as extractDatePartsShared } from "./dateRangeParsing";
+import { splitOrganizationLocation } from "./splitOrganizationLocation";
 import type { ExperienceEntry, StructuredTextValue } from "./types";
 
 const MAX_HEADER_LINE_LENGTH = 90;
@@ -133,21 +134,6 @@ function makeValue(value: string, sectionId: string, block: SemanticContentBlock
     extractionMethod: "pattern-rule",
     source: traceFromBlock(sectionId, block),
   };
-}
-
-/*
-  Splits a "Company, Location" style prefix (the date-range substring
-  already stripped out by the caller) into organization + location.
-  Only splits on the LAST comma group so a company name that itself
-  contains a comma-free multi-word name is never broken up - "Company,
-  City, ST" -> organization="Company", location="City, ST"; "Company"
-  alone (no comma) -> organization="Company", location=undefined.
-*/
-function splitOrganizationLocation(prefix: string): { organization: string; location?: string } {
-  const trimmed = prefix.trim().replace(/[,–—-]+$/, "").trim();
-  const parts = trimmed.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-  if (parts.length <= 1) return { organization: trimmed };
-  return { organization: parts[0], location: parts.slice(1).join(", ") };
 }
 
 const extractDateParts = extractDatePartsShared;
