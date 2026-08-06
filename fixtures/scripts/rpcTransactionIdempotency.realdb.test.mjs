@@ -441,10 +441,11 @@ async function main() {
         }),
       ),
     );
+    check("stress: all 10 concurrent same-key requests returned success", results.every((r) => r.data?.status === "success"), true);
     const ids = new Set(results.filter((r) => r.data?.status === "success").map((r) => r.data.overlayId));
-    check("stress: 10 concurrent requests sharing one idempotency key produce at most a small number of distinct ids (best-effort - see note)", ids.size <= 10, true);
+    check("stress: 10 concurrent requests sharing one idempotency key collapse to exactly 1 overlay id (advisory-lock race closed)", ids.size, 1);
     const { data: overlaysAfter } = await client.from("career_tailored_resumes").select("*");
-    checkTrue_isNumberAtLeast(overlaysAfter?.length ?? 0, 1);
+    check("stress: exactly 1 overlay row was actually inserted for the shared key (no race duplicate in the table itself)", overlaysAfter?.length ?? 0, 1);
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

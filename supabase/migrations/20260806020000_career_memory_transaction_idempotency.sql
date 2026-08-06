@@ -159,6 +159,19 @@ begin
     raise exception using errcode = '28000', message = 'AUTHENTICATION_REQUIRED';
   end if;
 
+  /* Same idempotency-key check-then-insert race as the other 4 RPCs
+     (see restore_canonical_version's comment below): this lock is keyed
+     by (user, key, operation), distinct from the profile-id lock further
+     down (which exists solely for the optimistic-concurrency check and
+     runs too late to protect this earlier idempotency check). Without
+     it, two concurrent calls sharing the same idempotency key can both
+     read "not found" here, then both insert a version row - the second
+     one committing after the first has already released the profile-id
+     lock, so that lock alone does not serialize this check. */
+  if p_idempotency_key is not null then
+    perform pg_advisory_xact_lock(hashtext(v_user_id::text || ':' || p_idempotency_key || ':save_canonical_runtime'));
+  end if;
+
   if p_idempotency_key is not null then
     select response_body into v_idem_response
       from public.career_idempotency_keys
@@ -329,6 +342,16 @@ begin
     raise exception using errcode = '28000', message = 'AUTHENTICATION_REQUIRED';
   end if;
 
+  /* Same real concurrency bug class as save_canonical_runtime() (see
+     that function's own comment) - two concurrent calls sharing the
+     same idempotency key could both pass the "not found" check before
+     either commits its own idempotency row, both performing a real
+     write. Locking on (user, key, operation) before the check
+     serializes them. */
+  if p_idempotency_key is not null then
+    perform pg_advisory_xact_lock(hashtext(v_user_id::text || ':' || p_idempotency_key || ':restore_canonical_version'));
+  end if;
+
   if p_idempotency_key is not null then
     select response_body into v_idem_response
       from public.career_idempotency_keys
@@ -417,6 +440,10 @@ begin
   end if;
 
   if p_idempotency_key is not null then
+    perform pg_advisory_xact_lock(hashtext(v_user_id::text || ':' || p_idempotency_key || ':create_canonical_overlay'));
+  end if;
+
+  if p_idempotency_key is not null then
     select response_body into v_idem_response
       from public.career_idempotency_keys
       where user_id = v_user_id and request_key = p_idempotency_key and operation = 'create_canonical_overlay' and expires_at > now();
@@ -492,6 +519,10 @@ begin
   end if;
 
   if p_idempotency_key is not null then
+    perform pg_advisory_xact_lock(hashtext(v_user_id::text || ':' || p_idempotency_key || ':register_canonical_source_document'));
+  end if;
+
+  if p_idempotency_key is not null then
     select response_body into v_idem_response
       from public.career_idempotency_keys
       where user_id = v_user_id and request_key = p_idempotency_key and operation = 'register_canonical_source_document' and expires_at > now();
@@ -562,6 +593,10 @@ declare
 begin
   if v_user_id is null then
     raise exception using errcode = '28000', message = 'AUTHENTICATION_REQUIRED';
+  end if;
+
+  if p_idempotency_key is not null then
+    perform pg_advisory_xact_lock(hashtext(v_user_id::text || ':' || p_idempotency_key || ':create_canonical_generated_document'));
   end if;
 
   if p_idempotency_key is not null then
