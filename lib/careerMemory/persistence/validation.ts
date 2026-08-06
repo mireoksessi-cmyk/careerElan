@@ -194,15 +194,20 @@ export function validateCanonicalCoverage(resume: ResumeStructuredModel): Valida
   if (!resume.slotAvailability || typeof resume.slotAvailability !== "object") errors.push("missing field: resume.slotAvailability");
   if (!resume.validation || typeof resume.validation !== "object") errors.push("missing field: resume.validation");
 
+  /* Array.isArray() guards here, not `?? []` - a non-array truthy value
+     (e.g. a caller passing a string where professionalExperience should
+     be) already produced a "not an array" error above; without this
+     guard `.forEach()` below would throw a raw TypeError instead of
+     letting validateCanonicalCoverage return a clean error list. */
   const entryArrays: Array<{ name: string; entries: Array<{ id: string }> }> = [
-    { name: "professionalExperience", entries: resume.professionalExperience ?? [] },
-    { name: "volunteerExperience", entries: resume.volunteerExperience ?? [] },
-    { name: "education", entries: resume.education ?? [] },
-    { name: "credentials", entries: resume.credentials ?? [] },
-    { name: "projects", entries: resume.projects ?? [] },
-    { name: "awards", entries: resume.awards ?? [] },
-    { name: "publications", entries: resume.publications ?? [] },
-    { name: "customSections", entries: resume.customSections ?? [] },
+    { name: "professionalExperience", entries: Array.isArray(resume.professionalExperience) ? resume.professionalExperience : [] },
+    { name: "volunteerExperience", entries: Array.isArray(resume.volunteerExperience) ? resume.volunteerExperience : [] },
+    { name: "education", entries: Array.isArray(resume.education) ? resume.education : [] },
+    { name: "credentials", entries: Array.isArray(resume.credentials) ? resume.credentials : [] },
+    { name: "projects", entries: Array.isArray(resume.projects) ? resume.projects : [] },
+    { name: "awards", entries: Array.isArray(resume.awards) ? resume.awards : [] },
+    { name: "publications", entries: Array.isArray(resume.publications) ? resume.publications : [] },
+    { name: "customSections", entries: Array.isArray(resume.customSections) ? resume.customSections : [] },
   ];
   for (const { name, entries } of entryArrays) {
     entries.forEach((entry, i) => {
@@ -212,10 +217,10 @@ export function validateCanonicalCoverage(resume: ResumeStructuredModel): Valida
     dupIds.forEach((id) => errors.push(`duplicate id: resume.${name} has more than one entry with id "${id}"`));
   }
 
-  for (const entry of resume.professionalExperience ?? []) {
+  for (const entry of Array.isArray(resume.professionalExperience) ? resume.professionalExperience : []) {
     validateHierarchicalNodes(entry.hierarchicalContent, `professionalExperience[id=${entry.id}]`, errors);
   }
-  for (const entry of resume.volunteerExperience ?? []) {
+  for (const entry of Array.isArray(resume.volunteerExperience) ? resume.volunteerExperience : []) {
     validateHierarchicalNodes(entry.hierarchicalContent, `volunteerExperience[id=${entry.id}]`, errors);
   }
 
