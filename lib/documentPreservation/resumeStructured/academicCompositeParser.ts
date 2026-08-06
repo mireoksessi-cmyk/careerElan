@@ -44,8 +44,13 @@ export type InlineCompositeContext = "organization" | "education" | "credential"
   segment is location-shaped, not institution-shaped), so it safely
   falls through here where the last-segment-looks-like-a-location gate
   below correctly recognizes it as Institution/Location instead.
+
+  Phase 5D.4A adds colon, ">>", and the arrow glyph "→" to this same
+  set - three more delimiter forms real Institution/Organization header
+  lines use, requested explicitly for this round. Every existing form
+  above is kept unchanged; these are additive only.
 */
-const COMPOSITE_DELIMITER_RE = /\s*(?:\||·|•|\/)\s*/g;
+const COMPOSITE_DELIMITER_RE = /\s*(?:\||·|•|\/|:|>>|→)\s*/g;
 /*
   "Institution (City, Country)" - a parenthetical suffix whose content
   independently looks like a location. Distinct from a parenthetical
@@ -89,13 +94,32 @@ export function parseInlineCompositeHeader(text: string, _context: InlineComposi
 
   const parts = trimmed.split(COMPOSITE_DELIMITER_RE).map((s) => s.trim()).filter((s) => s.length > 0);
   if (parts.length >= 2) {
-    const last = parts[parts.length - 1];
-    if (looksLikeLocation(last)) {
-      const detailParts = parts.slice(1, -1);
+    /*
+      Phase 5D.4A - try the NARROWEST trailing window first (just the
+      last delimited segment - the pre-existing, single check below),
+      then progressively WIDEN by folding in earlier segments (joined
+      with ", ", since a multi-segment composite like "Institute |
+      Berlin | Germany" expresses the exact same "City, Country" shape
+      one delimiter at a time instead of inside a single segment - a
+      bare "Germany" alone is never trusted per looksLikeLocation's own
+      no-bare-country rule, but "Berlin, Germany" is the identical,
+      already-proven comma shape). Narrowest-first is what preserves the
+      existing "Institute | Downtown Campus | Vancouver, BC" behavior
+      unchanged: "Vancouver, BC" alone already satisfies looksLikeLocation,
+      so the search stops there and never even considers folding
+      "Downtown Campus" into the location. The window never reaches
+      index 0, so primaryText is never swallowed. Still shape-only - no
+      new dictionary, no name, just reusing the same location-shape test
+      across a wider candidate string.
+    */
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const candidate = parts.slice(i).join(", ");
+      if (!looksLikeLocation(candidate)) continue;
+      const detailParts = parts.slice(1, i);
       return {
         primaryText: parts[0],
         detailText: detailParts.length > 0 ? detailParts.join(" | ") : undefined,
-        location: last,
+        location: candidate,
         delimiter: "pipe-dot-bullet",
         confidence: 0.72,
         reasonCodes: ["delimiter-location-split"],

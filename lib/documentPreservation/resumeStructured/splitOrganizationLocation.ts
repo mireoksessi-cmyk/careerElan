@@ -17,6 +17,21 @@
   after any dash looks like a location, the text is left untouched by
   this step and falls through to the pre-existing comma-only behavior,
   which is unchanged.
+
+  Phase 5D.4A - Generic Inline Composite Institution/Organization
+  Boundary Hardening. Real evidence: a Phase 5D.4 QA negative-control
+  case, "Example University | San Francisco, California, USA" (a
+  3-part "City, Province, Country" location), was corrupted because
+  looksLikeLocation only ever inspected commaParts[1] under a
+  commaParts.length===2 gate - a 3-part location failed that gate, fell
+  through to splitOnTrailingComma's unconditional split of the WHOLE
+  original string (still containing the pipe character), and produced
+  institution="Example University | San Francisco" (pipe glued in) and
+  location="California, USA" (wrong, missing "San Francisco"). Fixed by
+  generalizing the gate to accept any comma-part count while judging
+  only the trailing qualifier - see looksLikeLocation below. Still
+  shape-only: no city/institution/company name, no country dictionary
+  beyond the pre-existing closed set, no whitelist/blacklist.
 */
 
 /*
@@ -113,8 +128,15 @@ const KNOWN_COUNTRY_NAMES = new Set(
 // them by name.
 const REGION_CODE_RE = /^[A-Z]{2}$/;
 
-const REMOTE_HYBRID_RE = /^(remote|hybrid)$/i;
-const REMOTE_HYBRID_WITH_QUALIFIER_RE = new RegExp(`^(remote|hybrid)\\s*(?:,|${DASH_SEPARATOR_RE})\\s*(.+)$`, "i");
+/*
+  Phase 5D.4A - the same generic WORK-MODE vocabulary as Remote/Hybrid,
+  extended with the two other shape-only qualifiers the round's own
+  spec names (On-site, Worldwide) - never a name, always a closed,
+  general-purpose word set describing HOW/WHERE work happens, not WHO
+  or WHAT city/company it is.
+*/
+const WORK_MODE_RE = /^(remote|hybrid|on-?site|worldwide)$/i;
+const WORK_MODE_WITH_QUALIFIER_RE = new RegExp(`^(remote|hybrid|on-?site|worldwide)\\s*(?:,|${DASH_SEPARATOR_RE})\\s*(.+)$`, "i");
 /*
   Phase 5D.3C - a generic conjunction/slash joiner between two or more
   otherwise-independent location clauses ("Toronto, ON and Vancouver,
@@ -149,15 +171,27 @@ export function looksLikeLocation(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length === 0) return false;
 
-  if (REMOTE_HYBRID_RE.test(trimmed)) return true;
+  if (WORK_MODE_RE.test(trimmed)) return true;
 
-  const remoteMatch = trimmed.match(REMOTE_HYBRID_WITH_QUALIFIER_RE);
-  if (remoteMatch && isKnownCountryName(remoteMatch[2])) return true;
+  const workModeMatch = trimmed.match(WORK_MODE_WITH_QUALIFIER_RE);
+  if (workModeMatch && isKnownCountryName(workModeMatch[2])) return true;
 
+  /*
+    Phase 5D.4A - generalized from the pre-existing commaParts.length===2
+    check (which only ever recognized exactly "X, Region/Country" and
+    missed "City, Province, Country") to accept ANY comma-part count,
+    judging only the TRAILING segment - the same single shape test
+    (bare 2-letter region code, or an exact match against the closed
+    country-name set) applied identically regardless of how many parts
+    came before it. This is still never a city/name lookup: every part
+    before the trailing qualifier is trusted implicitly, exactly as the
+    2-part case already trusted commaParts[0] without inspecting it.
+  */
   const commaParts = trimmed.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-  if (commaParts.length === 2) {
-    if (REGION_CODE_RE.test(commaParts[1])) return true;
-    if (isKnownCountryName(commaParts[1])) return true;
+  if (commaParts.length >= 2) {
+    const trailingQualifier = commaParts[commaParts.length - 1];
+    if (REGION_CODE_RE.test(trailingQualifier)) return true;
+    if (isKnownCountryName(trailingQualifier)) return true;
   }
 
   /* Phase 5D.3C - Multiple Locations shape: every conjunction-joined
