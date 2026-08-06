@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
+import { withCanonicalAuth, readJsonBody, requireIdempotencyKey, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { assertOverlayShapeIsPlainObject, CanonicalOverlayService } from "@/lib/careerMemory/services/canonicalOverlayService";
@@ -16,6 +16,9 @@ export function makeHandleListOverlays(request: Request) {
 
 export function makeHandleCreateOverlay(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
+    const idempotency = requireIdempotencyKey(request);
+    if (!idempotency.ok) return idempotency.response;
+
     const parsed = await readJsonBody(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body as { profileId?: unknown; resumeVersionId?: unknown; applicationId?: unknown; templateId?: unknown; aiModel?: unknown; promptVersion?: unknown; overlay?: unknown };
@@ -32,6 +35,7 @@ export function makeHandleCreateOverlay(request: Request) {
       aiModel: typeof body.aiModel === "string" ? body.aiModel : null,
       promptVersion: typeof body.promptVersion === "string" ? body.promptVersion : null,
       overlay: body.overlay,
+      idempotencyKey: idempotency.key,
     });
     return jsonResponse({ overlay: result.row, appliedEntryIds: result.appliedEntryIds, rejections: result.rejections }, 201);
   };

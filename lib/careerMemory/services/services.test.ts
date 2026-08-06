@@ -249,7 +249,7 @@ async function main() {
     check("generated document list: returns the created row", listed.length, 1);
   }
 
-  // ==================== 22. Partial failure / compensating rollback ====================
+  // ==================== 22. Partial failure / transaction rollback (Phase 6D.1 - real RPC transaction, not the old compensating-rollback) ====================
   {
     const { repos, userId, client } = createBareScenario("rollback-user-1");
     const service = new CanonicalCareerMemoryService(repos);
@@ -263,13 +263,13 @@ async function main() {
     } catch {
       threw = true;
     }
-    checkTrue("compensating rollback: save fails when a mid-workflow step errors", threw);
+    checkTrue("transaction rollback: save fails when a mid-workflow step errors", threw);
 
     const profile = await repos.profiles.getByUserId(userId);
-    checkTrue("compensating rollback: profile WAS created before the failing step (not rolled back - profile creation precedes the gated write)", profile !== null);
+    checkTrue("transaction rollback: profile WAS created before the failing step (not rolled back - profile creation precedes the RPC's own transaction)", profile !== null);
 
     const versionsAfterFailure = profile ? await repos.resumeVersions.listByProfileId(profile.id) : [];
-    check("compensating rollback: the version row inserted before the failure was compensated away", versionsAfterFailure.length, 0);
+    check("transaction rollback: the version row inserted inside the RPC's transaction was rolled back with everything else", versionsAfterFailure.length, 0);
   }
 
   // ==================== 24/25. Unicode/French accents + long URL round-trip via service ====================

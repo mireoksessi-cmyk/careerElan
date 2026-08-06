@@ -229,6 +229,296 @@ export class FakeSupabaseClient {
     if (!this.tables.has(table)) this.tables.set(table, []);
     return new FakeQueryBuilder(table, this.tables.get(table)!, this.uniqueConstraints, this.failNextOnTable);
   }
+
+  private rowsFor(table: string): FakeRow[] {
+    if (!this.tables.has(table)) this.tables.set(table, []);
+    return this.tables.get(table)!;
+  }
+
+  private authRequired(): FakeResult<never> | null {
+    if (!this.currentUser) return { data: null, error: { message: "AUTHENTICATION_REQUIRED", code: "28000" } };
+    return null;
+  }
+
+  private checkIdempotency(operation: string, key: unknown): FakeRow | null {
+    if (typeof key !== "string") return null;
+    const userId = this.currentUser!.id;
+    return (
+      this.rowsFor("career_idempotency_keys").find(
+        (r) => r.user_id === userId && r.request_key === key && r.operation === operation && new Date(r.expires_at as string).getTime() > Date.now(),
+      ) ?? null
+    );
+  }
+
+  private storeIdempotency(operation: string, key: unknown, response: unknown): void {
+    if (typeof key !== "string") return;
+    const userId = this.currentUser!.id;
+    this.rowsFor("career_idempotency_keys").push({
+      id: nextFakeId(),
+      user_id: userId,
+      request_key: key,
+      operation,
+      response_body: response,
+      created_at: nextFakeTimestamp(),
+      expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    });
+  }
+
+  /*
+    Phase 6D.1 - JS mirror of the 5 SQL functions in
+    supabase/migrations/20260806020000_career_memory_transaction_idempotency.sql.
+    This is a CONTRACT mimic (same status/shape of return values, same
+    idempotency-key/ownership/conflict logic, same all-or-nothing
+    rollback on a forced mid-workflow failure) - it does NOT prove real
+    Postgres transaction semantics; that proof lives in
+    fixtures/scripts/_rpcSmokeTest.mjs, which runs these exact 5
+    operations against a live local Supabase instance. Tests using this
+    fake client verify the calling TypeScript code's own logic/wiring
+    quickly and deterministically; they do not substitute for the real-
+    DB proof.
+  */
+  async rpc(fnName: string, params: Record<string, unknown>): Promise<FakeResult<unknown>> {
+    switch (fnName) {
+      case "save_canonical_runtime":
+        return this.rpcSaveCanonicalRuntime(params);
+      case "restore_canonical_version":
+        return this.rpcRestoreVersion(params);
+      case "create_canonical_overlay":
+        return this.rpcCreateOverlay(params);
+      case "register_canonical_source_document":
+        return this.rpcRegisterSourceDocument(params);
+      case "create_canonical_generated_document":
+        return this.rpcCreateGeneratedDocument(params);
+      default:
+        return { data: null, error: { message: `function ${fnName} does not exist`, code: "42883" } };
+    }
+  }
+
+  private rpcSaveCanonicalRuntime(p: Record<string, unknown>): FakeResult<unknown> {
+    const authErr = this.authRequired();
+    if (authErr) return authErr;
+    const userId = this.currentUser!.id;
+
+    const idemHit = this.checkIdempotency("save_canonical_runtime", p.p_idempotency_key);
+    if (idemHit) return { data: idemHit.response_body, error: null };
+
+    const profileDefaults = p.p_profile_defaults as { schema_version: string; serializer_version: string };
+    let profile = this.rowsFor("career_profiles").find((r) => r.user_id === userId);
+    if (!profile) {
+      profile = {
+        id: nextFakeId(),
+        user_id: userId,
+        schema_version: profileDefaults.schema_version,
+        serializer_version: profileDefaults.serializer_version,
+        identity: {},
+        preferences: {},
+        summary_text: null,
+        created_at: nextFakeTimestamp(),
+        updated_at: nextFakeTimestamp(),
+      };
+      this.rowsFor("career_profiles").push(profile);
+    }
+
+    const versions = this.rowsFor("career_resume_versions").filter((r) => r.profile_id === profile!.id);
+    const currentLatest = [...versions].sort((a, b) => ((a.created_at as string) < (b.created_at as string) ? 1 : -1))[0] ?? null;
+
+    if (p.p_check_expected_version) {
+      const actualId = currentLatest?.id ?? null;
+      if (actualId !== (p.p_expected_current_version_id ?? null)) {
+        return { data: { status: "conflict", expectedCurrentVersionId: p.p_expected_current_version_id ?? null, actualCurrentVersionId: actualId }, error: null };
+      }
+    }
+
+    const tablesTouched = ["career_resume_versions", "career_experiences", "career_projects", "career_credentials", "career_awards", "career_publications"];
+    const snapshots = new Map(tablesTouched.map((t) => [t, [...this.rowsFor(t)]]));
+
+    const forcedVersion = this.failNextOnTable.get("career_resume_versions");
+    if (forcedVersion) {
+      this.failNextOnTable.delete("career_resume_versions");
+      return { data: null, error: forcedVersion };
+    }
+
+    const versionInput = p.p_version_input as Record<string, unknown>;
+    const newVersion: FakeRow = {
+      id: nextFakeId(),
+      profile_id: profile.id,
+      source_document_id: versionInput.source_document_id ?? null,
+      parent_version_id: currentLatest?.id ?? null,
+      reason: versionInput.reason,
+      snapshot: versionInput.snapshot,
+      schema_version: versionInput.schema_version,
+      serializer_version: versionInput.serializer_version,
+      created_at: nextFakeTimestamp(),
+      updated_at: nextFakeTimestamp(),
+    };
+    this.rowsFor("career_resume_versions").push(newVersion);
+
+    const childSpecs: Array<{ table: string; items: unknown }> = [
+      { table: "career_experiences", items: p.p_experiences },
+      { table: "career_projects", items: p.p_projects },
+      { table: "career_credentials", items: p.p_credentials },
+      { table: "career_awards", items: p.p_awards },
+      { table: "career_publications", items: p.p_publications },
+    ];
+
+    for (const { table, items } of childSpecs) {
+      const forced = this.failNextOnTable.get(table);
+      if (forced) {
+        this.failNextOnTable.delete(table);
+        for (const t of tablesTouched) {
+          const arr = this.rowsFor(t);
+          arr.length = 0;
+          arr.push(...(snapshots.get(t) ?? []));
+        }
+        return { data: null, error: forced };
+      }
+      const arr = this.rowsFor(table);
+      const remaining = arr.filter((r) => r.profile_id !== profile!.id);
+      arr.length = 0;
+      arr.push(...remaining);
+      const list = Array.isArray(items) ? (items as Array<Record<string, unknown>>) : [];
+      for (const item of list) {
+        arr.push({ ...item, id: nextFakeId(), profile_id: profile.id, created_at: nextFakeTimestamp(), updated_at: nextFakeTimestamp() });
+      }
+    }
+
+    const result = { status: "success", profileId: profile.id, versionId: newVersion.id, parentVersionId: newVersion.parent_version_id, createdAt: newVersion.created_at };
+    if (p.p_idempotency_key) this.storeIdempotency("save_canonical_runtime", p.p_idempotency_key, result);
+    return { data: result, error: null };
+  }
+
+  private rpcRestoreVersion(p: Record<string, unknown>): FakeResult<unknown> {
+    const authErr = this.authRequired();
+    if (authErr) return authErr;
+    const userId = this.currentUser!.id;
+
+    const idemHit = this.checkIdempotency("restore_canonical_version", p.p_idempotency_key);
+    if (idemHit) return { data: idemHit.response_body, error: null };
+
+    const profile = this.rowsFor("career_profiles").find((r) => r.id === p.p_profile_id && r.user_id === userId);
+    if (!profile) return { data: { status: "not_found", reason: "profile" }, error: null };
+
+    const target = this.rowsFor("career_resume_versions").find((r) => r.id === p.p_target_version_id && r.profile_id === profile.id);
+    if (!target) return { data: { status: "not_found", reason: "target_version" }, error: null };
+
+    const versions = this.rowsFor("career_resume_versions").filter((r) => r.profile_id === profile.id);
+    const latest = [...versions].sort((a, b) => ((a.created_at as string) < (b.created_at as string) ? 1 : -1))[0] ?? null;
+
+    const newVersion: FakeRow = {
+      id: nextFakeId(),
+      profile_id: profile.id,
+      source_document_id: target.source_document_id,
+      parent_version_id: latest?.id ?? null,
+      reason: "restore",
+      snapshot: target.snapshot,
+      schema_version: target.schema_version,
+      serializer_version: target.serializer_version,
+      created_at: nextFakeTimestamp(),
+      updated_at: nextFakeTimestamp(),
+    };
+    this.rowsFor("career_resume_versions").push(newVersion);
+
+    const result = { status: "success", versionId: newVersion.id, restoredFromVersionId: target.id, parentVersionId: newVersion.parent_version_id, createdAt: newVersion.created_at };
+    if (p.p_idempotency_key) this.storeIdempotency("restore_canonical_version", p.p_idempotency_key, result);
+    return { data: result, error: null };
+  }
+
+  private rpcCreateOverlay(p: Record<string, unknown>): FakeResult<unknown> {
+    const authErr = this.authRequired();
+    if (authErr) return authErr;
+    const userId = this.currentUser!.id;
+
+    const idemHit = this.checkIdempotency("create_canonical_overlay", p.p_idempotency_key);
+    if (idemHit) return { data: idemHit.response_body, error: null };
+
+    const profile = this.rowsFor("career_profiles").find((r) => r.id === p.p_profile_id && r.user_id === userId);
+    if (!profile) return { data: { status: "not_found", reason: "profile" }, error: null };
+
+    const row: FakeRow = {
+      id: nextFakeId(),
+      profile_id: profile.id,
+      application_id: p.p_application_id ?? null,
+      resume_version_id: p.p_resume_version_id ?? null,
+      overlay: p.p_overlay_record,
+      template_id: p.p_template_id ?? null,
+      ai_model: p.p_ai_model ?? null,
+      prompt_version: p.p_prompt_version ?? null,
+      created_at: nextFakeTimestamp(),
+      updated_at: nextFakeTimestamp(),
+    };
+    this.rowsFor("career_tailored_resumes").push(row);
+
+    const result = { status: "success", overlayId: row.id, createdAt: row.created_at };
+    if (p.p_idempotency_key) this.storeIdempotency("create_canonical_overlay", p.p_idempotency_key, result);
+    return { data: result, error: null };
+  }
+
+  private rpcRegisterSourceDocument(p: Record<string, unknown>): FakeResult<unknown> {
+    const authErr = this.authRequired();
+    if (authErr) return authErr;
+    const userId = this.currentUser!.id;
+
+    const idemHit = this.checkIdempotency("register_canonical_source_document", p.p_idempotency_key);
+    if (idemHit) return { data: idemHit.response_body, error: null };
+
+    const profile = this.rowsFor("career_profiles").find((r) => r.id === p.p_profile_id && r.user_id === userId);
+    if (!profile) return { data: { status: "not_found", reason: "profile" }, error: null };
+
+    const existing = this.rowsFor("career_source_documents").find((r) => r.profile_id === profile.id && r.content_hash === p.p_content_hash);
+    let result: { status: string; sourceDocumentId: unknown; createdAt: unknown };
+    if (existing) {
+      result = { status: "success", sourceDocumentId: existing.id, createdAt: existing.created_at };
+    } else {
+      const row: FakeRow = {
+        id: nextFakeId(),
+        profile_id: profile.id,
+        storage_bucket: p.p_storage_bucket,
+        storage_path: p.p_storage_path,
+        original_file_name: p.p_original_file_name ?? null,
+        mime_type: p.p_mime_type ?? null,
+        byte_size: p.p_byte_size ?? null,
+        content_hash: p.p_content_hash,
+        parser_version: p.p_parser_version ?? null,
+        file_type: p.p_file_type,
+        analysis_status: "pending",
+        created_at: nextFakeTimestamp(),
+        updated_at: nextFakeTimestamp(),
+      };
+      this.rowsFor("career_source_documents").push(row);
+      result = { status: "success", sourceDocumentId: row.id, createdAt: row.created_at };
+    }
+    if (p.p_idempotency_key) this.storeIdempotency("register_canonical_source_document", p.p_idempotency_key, result);
+    return { data: result, error: null };
+  }
+
+  private rpcCreateGeneratedDocument(p: Record<string, unknown>): FakeResult<unknown> {
+    const authErr = this.authRequired();
+    if (authErr) return authErr;
+    const userId = this.currentUser!.id;
+
+    const idemHit = this.checkIdempotency("create_canonical_generated_document", p.p_idempotency_key);
+    if (idemHit) return { data: idemHit.response_body, error: null };
+
+    const tailored = this.rowsFor("career_tailored_resumes").find((r) => r.id === p.p_tailored_resume_id && r.profile_id === p.p_profile_id);
+    if (!tailored) return { data: { status: "not_found", reason: "tailored_resume" }, error: null };
+    const profile = this.rowsFor("career_profiles").find((r) => r.id === tailored.profile_id && r.user_id === userId);
+    if (!profile) return { data: { status: "not_found", reason: "tailored_resume" }, error: null };
+
+    const row: FakeRow = {
+      id: nextFakeId(),
+      tailored_resume_id: tailored.id,
+      storage_bucket: p.p_storage_bucket,
+      storage_path: p.p_storage_path,
+      file_type: p.p_file_type,
+      created_at: nextFakeTimestamp(),
+      updated_at: nextFakeTimestamp(),
+    };
+    this.rowsFor("generated_resume_documents").push(row);
+
+    const result = { status: "success", generatedDocumentId: row.id, createdAt: row.created_at };
+    if (p.p_idempotency_key) this.storeIdempotency("create_canonical_generated_document", p.p_idempotency_key, result);
+    return { data: result, error: null };
+  }
 }
 
 export function createFakeCareerMemorySupabaseClient(): FakeSupabaseClient {

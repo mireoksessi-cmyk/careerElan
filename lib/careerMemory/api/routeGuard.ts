@@ -64,6 +64,27 @@ export async function withCanonicalAuth(handler: (ctx: CanonicalRouteContext) =>
   return runWithAuthenticatedContext(supabase, handler);
 }
 
+export const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+
+/*
+  Phase 6D.1 - every write route backed by one of the 5 idempotency-key-
+  aware SQL RPCs requires this header; a request without it gets 400
+  before touching the database (the header exists so the SAME key can
+  be re-sent by the caller after a network failure/timeout, matching
+  the RPC's own dedup contract - see career_idempotency_keys in
+  supabase/migrations/20260806020000_career_memory_transaction_idempotency.sql).
+*/
+export function requireIdempotencyKey(request: Request): { ok: true; key: string } | { ok: false; response: NextResponse } {
+  const key = request.headers.get(IDEMPOTENCY_KEY_HEADER);
+  if (!key || key.trim().length === 0) {
+    return { ok: false, response: NextResponse.json({ error: { code: "VALIDATION_FAILED", message: `"${IDEMPOTENCY_KEY_HEADER}" header is required.` } }, { status: 400, headers: { "cache-control": "no-store" } }) };
+  }
+  if (key.length > 200) {
+    return { ok: false, response: NextResponse.json({ error: { code: "VALIDATION_FAILED", message: `"${IDEMPOTENCY_KEY_HEADER}" header must be 200 characters or fewer.` } }, { status: 400, headers: { "cache-control": "no-store" } }) };
+  }
+  return { ok: true, key };
+}
+
 /*
   Parses and size-guards the request body in one step - a request
   whose body exceeds MAX_REQUEST_BODY_BYTES or isn't valid JSON gets a

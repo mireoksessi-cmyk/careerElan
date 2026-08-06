@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
+import { withCanonicalAuth, readJsonBody, requireIdempotencyKey, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { CanonicalGeneratedDocumentService } from "@/lib/careerMemory/services/canonicalGeneratedDocumentService";
@@ -20,6 +20,9 @@ export function makeHandleListGeneratedDocuments(request: Request) {
 
 export function makeHandleCreateGeneratedDocument(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
+    const idempotency = requireIdempotencyKey(request);
+    if (!idempotency.ok) return idempotency.response;
+
     const parsed = await readJsonBody(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body as { profileId?: unknown; tailoredResumeId?: unknown; storageBucket?: unknown; storagePath?: unknown; fileType?: unknown };
@@ -37,6 +40,7 @@ export function makeHandleCreateGeneratedDocument(request: Request) {
       storageBucket: body.storageBucket,
       storagePath: body.storagePath,
       fileType: body.fileType,
+      idempotencyKey: idempotency.key,
     });
     return jsonResponse({ generatedDocument: document }, 201);
   };

@@ -25,7 +25,7 @@ import { CanonicalGeneratedDocumentService } from "./canonicalGeneratedDocumentS
 import { requireOwnedProfile } from "./profileAccess";
 import { runWithAuthenticatedContext } from "../api/routeGuard";
 import { errorResponse } from "../api/httpErrorMapping";
-import { makeHandleCreateVersion, WRITE_ACK_HEADER, WRITE_ACK_VALUE } from "../../../app/api/internal/canonical-career-memory/versions/route";
+import { makeHandleCreateVersion } from "../../../app/api/internal/canonical-career-memory/versions/route";
 import { makeHandleRegisterSourceDocument } from "../../../app/api/internal/canonical-career-memory/source-documents/route";
 
 let pass = 0;
@@ -50,8 +50,16 @@ async function expectThrows(label: string, fn: () => Promise<unknown>, ctor: new
 function pristineCanonicalRuntime(runtime: ReturnType<typeof buildFixtureRuntime>) {
   return { ...runtime, sourceDocuments: [], overlayState: { ...runtime.overlayState, history: [] } };
 }
-function jsonRequest(url: string, opts: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Request {
-  const init: RequestInit = { method: opts.method ?? "GET", headers: { "content-type": "application/json", ...(opts.headers ?? {}) } };
+let idemKeyCounter = 0;
+const WRITE_METHODS = ["POST", "PATCH", "PUT", "DELETE"];
+function jsonRequest(url: string, opts: { method?: string; body?: unknown; headers?: Record<string, string>; omitIdempotencyKey?: boolean } = {}): Request {
+  const method = opts.method ?? "GET";
+  const headers: Record<string, string> = { "content-type": "application/json", ...(opts.headers ?? {}) };
+  if (WRITE_METHODS.includes(method) && !opts.omitIdempotencyKey && !("idempotency-key" in headers)) {
+    idemKeyCounter += 1;
+    headers["idempotency-key"] = `test-idem-key-${idemKeyCounter}`;
+  }
+  const init: RequestInit = { method, headers };
   if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
   return new Request(url, init);
 }
@@ -341,11 +349,11 @@ async function main() {
     const { client, userId } = createBareScenario("noack-user");
     void userId;
     client.setCurrentUser({ id: "noack-user" });
-    const request = jsonRequest("http://localhost/x", { method: "POST", body: { runtime: pristineCanonicalRuntime(buildFixtureRuntime()) } });
+    const request = jsonRequest("http://localhost/x", { method: "POST", body: { runtime: pristineCanonicalRuntime(buildFixtureRuntime()) }, omitIdempotencyKey: true });
     const response = await runWithAuthenticatedContext(client as never, makeHandleCreateVersion(request));
-    check("transaction unavailable: version create without the write-ack header never touches the database (503)", response.status, 503);
+    check("idempotency required: version create without the Idempotency-Key header never touches the database (400)", response.status, 400);
     const body = await response.json();
-    check("transaction unavailable: error code is TRANSACTION_UNAVAILABLE", body.error.code, "TRANSACTION_UNAVAILABLE");
+    check("idempotency required: error code is VALIDATION_FAILED", body.error.code, "VALIDATION_FAILED");
   }
   {
     checkTrue("transaction unavailable: errorResponse maps TransactionUnavailableError to 503 directly", (await (async () => { const r = errorResponse(new (await import("../errors/domainErrors")).TransactionUnavailableError("op")); return r.status === 503; })()));
@@ -369,14 +377,14 @@ async function main() {
     const { client } = createBareScenario("oversized-user-2");
     client.setCurrentUser({ id: "oversized-user-2" });
     const bigBody = { profileId: "x", fileName: "a.pdf", fileType: "pdf", contentHash: "abcdefgh", storageBucket: "b", storagePath: "p", note: "x".repeat(300 * 1024) };
-    const request = new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(bigBody) });
+    const request = new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "oversized-user-2-key" }, body: JSON.stringify(bigBody) });
     const response = await runWithAuthenticatedContext(client as never, makeHandleRegisterSourceDocument(request));
     check("oversized body: a body exceeding the byte cap is rejected by actual length, not just the content-length header", response.status, 413);
   }
   {
     const { client } = createBareScenario("malformed-user-2");
     client.setCurrentUser({ id: "malformed-user-2" });
-    const request = new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: "[1, 2," });
+    const request = new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "malformed-user-2-key" }, body: "[1, 2," });
     const response = await runWithAuthenticatedContext(client as never, makeHandleRegisterSourceDocument(request));
     check("malformed JSON: truncated JSON array body -> 400", response.status, 400);
   }

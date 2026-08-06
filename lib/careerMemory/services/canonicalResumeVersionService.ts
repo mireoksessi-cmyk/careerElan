@@ -56,25 +56,25 @@ export class CanonicalResumeVersionService {
     too must separately call the same gated write path
     saveCanonicalRuntime() uses.
   */
-  async restoreVersion(userId: string, profileId: string, targetVersionId: string): Promise<{ newVersion: CareerResumeVersionRow; restoredFromVersionId: string }> {
+  /*
+    Phase 6D.1 - runs through the restore_canonical_version() SQL RPC
+    (see supabase/migrations/20260806020000_career_memory_transaction_idempotency.sql)
+    instead of a direct insert - `idempotencyKey`, when provided, makes
+    a retried restore replay the SAME new version row rather than
+    creating a second one.
+  */
+  async restoreVersion(userId: string, profileId: string, targetVersionId: string, idempotencyKey: string | null = null): Promise<{ newVersion: CareerResumeVersionRow; restoredFromVersionId: string }> {
     await requireOwnedProfile(this.repos, userId, profileId);
 
-    const target = await this.repos.resumeVersions.getById(targetVersionId);
-    if (!target || target.profile_id !== profileId) throw new NotFoundError("Resume version to restore from");
+    const rpcResult = await this.repos.transactions.restoreVersion({ profileId, targetVersionId, idempotencyKey });
+    if (rpcResult.status === "not_found") {
+      throw new NotFoundError(rpcResult.reason === "profile" ? "Career profile" : "Resume version to restore from");
+    }
 
-    const latest = await this.repos.resumeVersions.getLatestByProfileId(profileId);
+    const newVersion = await this.repos.resumeVersions.getById(rpcResult.versionId);
+    if (!newVersion) throw new NotFoundError("Restored resume version");
 
-    const newVersion = await this.repos.resumeVersions.insert({
-      profile_id: profileId,
-      source_document_id: target.source_document_id,
-      parent_version_id: latest?.id ?? null,
-      reason: "restore",
-      snapshot: target.snapshot,
-      schema_version: target.schema_version,
-      serializer_version: target.serializer_version,
-    });
-
-    return { newVersion, restoredFromVersionId: target.id };
+    return { newVersion, restoredFromVersionId: rpcResult.restoredFromVersionId };
   }
 
   /*

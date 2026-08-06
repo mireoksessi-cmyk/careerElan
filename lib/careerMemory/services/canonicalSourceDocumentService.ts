@@ -5,7 +5,7 @@
   확인하지 않는다": storageBucket/storagePath are recorded as-given,
   never verified against a real bucket.
 */
-import { ValidationError } from "../errors/domainErrors";
+import { NotFoundError, ValidationError } from "../errors/domainErrors";
 import type { CareerSourceDocumentRow, SourceDocumentAnalysisStatus, SourceDocumentFileType } from "../persistence/types";
 import type { CanonicalRepositoryBundle } from "../repositories/createRepositories";
 import { requireOwnedProfile } from "./profileAccess";
@@ -20,6 +20,7 @@ export type RegisterSourceDocumentInput = {
   storageBucket: string;
   storagePath: string;
   parserVersion?: string | null;
+  idempotencyKey?: string | null;
 };
 
 const ALLOWED_FILE_TYPES: SourceDocumentFileType[] = ["pdf", "docx"];
@@ -40,31 +41,33 @@ export class CanonicalSourceDocumentService {
   constructor(private readonly repos: CanonicalRepositoryBundle) {}
 
   /*
-    Idempotent via career_source_documents' own real partial UNIQUE
-    index on (profile_id, content_hash) (Phase 6B migration) - a retry
-    with the same content hash returns the EXISTING row instead of
-    inserting a duplicate. This is genuine DB-level idempotency, not an
-    in-memory approximation.
+    Phase 6D.1 - runs through the register_canonical_source_document()
+    SQL RPC. Doubly idempotent: the real partial UNIQUE index on
+    (profile_id, content_hash) (Phase 6B) still dedupes by content, and
+    the RPC's own idempotency-key check dedupes a retry that hasn't
+    computed a hash-bearing request identically twice.
   */
   async registerSourceDocument(userId: string, input: RegisterSourceDocumentInput): Promise<CareerSourceDocumentRow> {
     validateRegisterInput(input);
     await requireOwnedProfile(this.repos, userId, input.profileId);
 
-    const existing = await this.repos.sourceDocuments.findByContentHash(input.profileId, input.contentHash);
-    if (existing) return existing;
-
-    return this.repos.sourceDocuments.insert({
-      profile_id: input.profileId,
-      storage_bucket: input.storageBucket,
-      storage_path: input.storagePath,
-      original_file_name: input.fileName,
-      mime_type: input.mimeType ?? null,
-      byte_size: input.byteSize ?? null,
-      content_hash: input.contentHash,
-      parser_version: input.parserVersion ?? null,
-      file_type: input.fileType,
-      analysis_status: "pending",
+    const rpcResult = await this.repos.transactions.registerSourceDocument({
+      profileId: input.profileId,
+      storageBucket: input.storageBucket,
+      storagePath: input.storagePath,
+      originalFileName: input.fileName,
+      mimeType: input.mimeType ?? null,
+      byteSize: input.byteSize ?? null,
+      contentHash: input.contentHash,
+      parserVersion: input.parserVersion ?? null,
+      fileType: input.fileType,
+      idempotencyKey: input.idempotencyKey ?? null,
     });
+    if (rpcResult.status === "not_found") throw new NotFoundError("Career profile");
+
+    const row = await this.repos.sourceDocuments.getById(rpcResult.sourceDocumentId);
+    if (!row) throw new NotFoundError("Registered source document");
+    return row;
   }
 
   async listSourceDocuments(userId: string, profileId: string): Promise<CareerSourceDocumentRow[]> {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
+import { withCanonicalAuth, readJsonBody, requireIdempotencyKey, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { CanonicalSourceDocumentService, type RegisterSourceDocumentInput } from "@/lib/careerMemory/services/canonicalSourceDocumentService";
@@ -16,6 +16,9 @@ export function makeHandleListSourceDocuments(request: Request) {
 
 export function makeHandleRegisterSourceDocument(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
+    const idempotency = requireIdempotencyKey(request);
+    if (!idempotency.ok) return idempotency.response;
+
     const parsed = await readJsonBody(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body as Partial<RegisterSourceDocumentInput>;
@@ -38,6 +41,7 @@ export function makeHandleRegisterSourceDocument(request: Request) {
       storageBucket: body.storageBucket,
       storagePath: body.storagePath,
       parserVersion: body.parserVersion ?? null,
+      idempotencyKey: idempotency.key,
     });
     return jsonResponse({ sourceDocument: document }, 201);
   };

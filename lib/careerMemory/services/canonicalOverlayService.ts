@@ -26,6 +26,7 @@ export type CreateOverlayInput = {
   aiModel?: string | null;
   promptVersion?: string | null;
   overlay: unknown;
+  idempotencyKey?: string | null;
 };
 
 export type CreateOverlayResult = {
@@ -55,6 +56,12 @@ async function buildRuntimeForOverlayValidation(repos: CanonicalRepositoryBundle
 export class CanonicalOverlayService {
   constructor(private readonly repos: CanonicalRepositoryBundle) {}
 
+  /*
+    Phase 6D.1 - the overlay MERGE computation stays entirely in
+    TypeScript (unchanged, still applyOverlay() from overlayRuntime.ts);
+    only the actual row WRITE now runs through the
+    create_canonical_overlay() SQL RPC, idempotency-key aware.
+  */
   async createOverlay(userId: string, input: CreateOverlayInput): Promise<CreateOverlayResult> {
     assertOverlayShapeIsPlainObject(input.overlay);
     await requireOwnedProfile(this.repos, userId, input.profileId);
@@ -70,7 +77,21 @@ export class CanonicalOverlayService {
       promptVersion: input.promptVersion ?? null,
     });
 
-    const row = await this.repos.tailoredResumes.insert(insertInput);
+    const rpcResult = await this.repos.transactions.createOverlay({
+      profileId: input.profileId,
+      applicationId: insertInput.application_id ?? null,
+      resumeVersionId: insertInput.resume_version_id ?? null,
+      templateId: insertInput.template_id ?? null,
+      aiModel: insertInput.ai_model ?? null,
+      promptVersion: insertInput.prompt_version ?? null,
+      overlayRecord: insertInput.overlay,
+      idempotencyKey: input.idempotencyKey ?? null,
+    });
+    if (rpcResult.status === "not_found") throw new NotFoundError("Career profile");
+
+    const row = await this.repos.tailoredResumes.getById(rpcResult.overlayId);
+    if (!row) throw new NotFoundError("Created overlay");
+
     return { row, appliedEntryIds: applied.appliedEntryIds, rejections: applied.rejections };
   }
 

@@ -21,7 +21,8 @@ import { canonicalRuntimeToInsertBundle } from "../persistence/mappers";
 import { buildFixtureRuntime } from "../persistence/testFixtures";
 
 import { handleGetProfile, makeHandleCreateProfile } from "../../../app/api/internal/canonical-career-memory/profile/route";
-import { makeHandleListVersions, makeHandleCreateVersion, WRITE_ACK_HEADER, WRITE_ACK_VALUE } from "../../../app/api/internal/canonical-career-memory/versions/route";
+import { makeHandleListVersions, makeHandleCreateVersion } from "../../../app/api/internal/canonical-career-memory/versions/route";
+import { IDEMPOTENCY_KEY_HEADER } from "./routeGuard";
 import { makeHandleGetVersion } from "../../../app/api/internal/canonical-career-memory/versions/[id]/route";
 import { makeHandleRestoreVersion } from "../../../app/api/internal/canonical-career-memory/versions/[id]/restore/route";
 import { makeHandleListSourceDocuments, makeHandleRegisterSourceDocument } from "../../../app/api/internal/canonical-career-memory/source-documents/route";
@@ -47,8 +48,16 @@ function pristineCanonicalRuntime(runtime: ReturnType<typeof buildFixtureRuntime
   return { ...runtime, sourceDocuments: [], overlayState: { ...runtime.overlayState, history: [] } };
 }
 
-function jsonRequest(url: string, opts: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Request {
-  const init: RequestInit = { method: opts.method ?? "GET", headers: { "content-type": "application/json", ...(opts.headers ?? {}) } };
+let idemKeyCounter = 0;
+const WRITE_METHODS = ["POST", "PATCH", "PUT", "DELETE"];
+function jsonRequest(url: string, opts: { method?: string; body?: unknown; headers?: Record<string, string>; omitIdempotencyKey?: boolean } = {}): Request {
+  const method = opts.method ?? "GET";
+  const headers: Record<string, string> = { "content-type": "application/json", ...(opts.headers ?? {}) };
+  if (WRITE_METHODS.includes(method) && !opts.omitIdempotencyKey && !(IDEMPOTENCY_KEY_HEADER in headers)) {
+    idemKeyCounter += 1;
+    headers[IDEMPOTENCY_KEY_HEADER] = `test-idem-key-${idemKeyCounter}`;
+  }
+  const init: RequestInit = { method, headers };
   if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
   return new Request(url, init);
 }
@@ -196,9 +205,9 @@ async function main() {
     const response422 = await runWithAuthenticatedContext(client as never, makeHandleListVersions(requestNoProfileId));
     check("status mapping: missing required query param -> 422", response422.status, 422);
 
-    const requestNoAck = jsonRequest("http://localhost/api/internal/canonical-career-memory/versions", { method: "POST", body: { runtime: {} } });
-    const response503 = await runWithAuthenticatedContext(client as never, makeHandleCreateVersion(requestNoAck));
-    check("status mapping: version create without write-ack header -> 503", response503.status, 503);
+    const requestNoIdemKey = jsonRequest("http://localhost/api/internal/canonical-career-memory/versions", { method: "POST", body: { runtime: {} }, omitIdempotencyKey: true });
+    const response400NoIdem = await runWithAuthenticatedContext(client as never, makeHandleCreateVersion(requestNoIdemKey));
+    check("status mapping: version create without Idempotency-Key header -> 400", response400NoIdem.status, 400);
 
     const seededDup = await seedProfileWithVersion("dup-user");
     const dupRequest = jsonRequest("http://localhost/api/internal/canonical-career-memory/source-documents", {
@@ -238,16 +247,16 @@ async function main() {
   {
     const seeded = await seedProfileWithVersion("happy-user-4");
     const corrupted = { ...seeded.runtime, resume: { ...seeded.runtime.resume, professionalExperience: "not-an-array" } };
-    const request = jsonRequest("http://localhost/x", { method: "POST", body: { runtime: corrupted }, headers: { [WRITE_ACK_HEADER]: WRITE_ACK_VALUE } });
+    const request = jsonRequest("http://localhost/x", { method: "POST", body: { runtime: corrupted }, headers: { [IDEMPOTENCY_KEY_HEADER]: "idem-happy-4" } });
     const response = await runWithAuthenticatedContext(seeded.client as never, makeHandleCreateVersion(request));
     check("route: POST version with invalid runtime.resume -> 422 (validated before service call)", response.status, 422);
   }
   {
     const runtime = pristineCanonicalRuntime(buildFixtureRuntime());
     const { client } = await freshClient("happy-user-5");
-    const request = jsonRequest("http://localhost/x", { method: "POST", body: { runtime }, headers: { [WRITE_ACK_HEADER]: WRITE_ACK_VALUE } });
+    const request = jsonRequest("http://localhost/x", { method: "POST", body: { runtime }, headers: { [IDEMPOTENCY_KEY_HEADER]: "idem-happy-5" } });
     const response = await runWithAuthenticatedContext(client as never, makeHandleCreateVersion(request));
-    check("route: POST version with write-ack + valid runtime -> 201", response.status, 201);
+    check("route: POST version with Idempotency-Key + valid runtime -> 201", response.status, 201);
     const body = await response.json();
     checkTrue("route: POST version response carries roundTripValid=true", body.roundTripValid === true);
   }

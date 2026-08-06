@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
+import { withCanonicalAuth, readJsonBody, requireIdempotencyKey, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { requireOwnedProfile } from "@/lib/careerMemory/services/profileAccess";
@@ -8,16 +8,16 @@ import { validateCanonicalCoverage } from "@/lib/careerMemory/persistence/valida
 import type { CanonicalResumeRuntime } from "@/lib/careerMemory/runtime/types";
 
 /*
-  GET is always safe (read-only). POST writes 1 version row + up to 6
-  child tables with NO real multi-table atomicity this round (see
-  lib/careerMemory/transactions/README.md's own TRANSACTION_SCHEMA_GAP
-  disclosure) - it requires the caller to send
-  `x-canonical-write-ack: transaction-gap-acknowledged`, otherwise it
-  returns 503 without touching the database at all.
+  Phase 6D.1 - GET is always safe (read-only). POST now writes the full
+  bundle (1 version row + up to 5 child tables) through the
+  save_canonical_runtime() SQL RPC in a single real Postgres
+  transaction - see lib/careerMemory/transactions/README.md's updated
+  status (the Phase 6D TRANSACTION_SCHEMA_GAP this route used to guard
+  with `x-canonical-write-ack` is closed; that header/gate is removed).
+  An Idempotency-Key header is required instead, so a client retry
+  after a network failure/timeout replays the original result rather
+  than creating a duplicate version.
 */
-export const WRITE_ACK_HEADER = "x-canonical-write-ack";
-export const WRITE_ACK_VALUE = "transaction-gap-acknowledged";
-
 export function makeHandleListVersions(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
     const profileId = new URL(request.url).searchParams.get("profileId");
@@ -30,9 +30,8 @@ export function makeHandleListVersions(request: Request) {
 
 export function makeHandleCreateVersion(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
-    if (request.headers.get(WRITE_ACK_HEADER) !== WRITE_ACK_VALUE) {
-      return jsonResponse({ error: { code: "TRANSACTION_UNAVAILABLE", message: `This write is not atomic across its 1+6 tables (TRANSACTION_SCHEMA_GAP). Resend with "${WRITE_ACK_HEADER}: ${WRITE_ACK_VALUE}" to proceed anyway.` } }, 503);
-    }
+    const idempotency = requireIdempotencyKey(request);
+    if (!idempotency.ok) return idempotency.response;
 
     const parsed = await readJsonBody(request);
     if (!parsed.ok) return parsed.response;
@@ -46,7 +45,7 @@ export function makeHandleCreateVersion(request: Request) {
     const expectedCurrentVersionId = body.expectedCurrentVersionId === undefined ? undefined : body.expectedCurrentVersionId === null ? null : String(body.expectedCurrentVersionId);
 
     const service = new CanonicalCareerMemoryService(ctx.repos);
-    const result = await service.saveCanonicalRuntimeAcknowledgingGap(ctx.userId, { runtime, expectedCurrentVersionId });
+    const result = await service.saveCanonicalRuntimeAcknowledgingGap(ctx.userId, { runtime, expectedCurrentVersionId, idempotencyKey: idempotency.key });
     return jsonResponse({ version: result.version, roundTripValid: result.roundTripValid }, 201);
   };
 }
