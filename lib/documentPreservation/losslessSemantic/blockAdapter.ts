@@ -111,12 +111,66 @@ function lineBounds(line: ElementMetadata[]): SemanticBlockBBox | undefined {
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+/*
+  Phase 5D.6D TASK D2 - Ligature/Glyph/Native Text Hardening. Real bug
+  (see this file's own gate test for the empirical reproduction): this
+  function used to join every same-line element with an unconditional
+  literal space, regardless of the real horizontal gap between them.
+  pdfjs-dist's own getTextContent() sometimes reports a single word as
+  TWO adjacent TextItems with a near-zero (or even slightly negative,
+  kerning-pulled) gap between them - a known behavior at font/glyph-run
+  boundaries, notably around ligature-substituted letter pairs like
+  "fi"/"fl". Root-cause diagnosis (per the round's own 13-layer
+  comparison framework) placed this squarely in case D - our OWN
+  structured-token reconstruction, not pdfjs's raw extraction, not
+  Chromium print/font-shaping (this join happens long before any HTML/
+  CSS exists) - since pdfLayoutAnalyzer.ts already captures each
+  element's real x/width (item.transform[4]/item.width) but this
+  function never consulted them.
+
+  Fix: only insert a space between two consecutive elements when their
+  real horizontal gap is large enough to plausibly BE a real space
+  character - never for a touching/zero/negative gap. The threshold is
+  a small fraction of the shorter element's own font size/height
+  (SPACE_GAP_RATIO), not a fixed pixel constant, so it scales correctly
+  across font sizes/densities. A genuine word-space is typically ~20-35%
+  of the em size; a split ligature run's gap is typically ~0 or
+  negative (kerning) - SPACE_GAP_RATIO sits safely below that real
+  range, so this never swallows a real, intentional space (the
+  round's own "office file"/"profile file"/"staff office" word-boundary
+  acceptance cases), it only stops MANUFACTURING one where the source
+  never had one. Missing x/width (bbox unavailable) falls back to the
+  old always-space behavior - never a guess in the other direction.
+*/
+const SPACE_GAP_RATIO = 0.08;
+
 function lineText(line: ElementMetadata[]): string {
-  return line
-    .map((e) => e.text ?? "")
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  let joined = "";
+  for (let i = 0; i < line.length; i++) {
+    const element = line[i];
+    const text = element.text ?? "";
+    if (i === 0) {
+      joined = text;
+      continue;
+    }
+    const prev = line[i - 1];
+    const needsSpace = shouldInsertSpaceBetween(prev, element);
+    joined += (needsSpace ? " " : "") + text;
+  }
+  return joined.replace(/\s+/g, " ").trim();
+}
+
+function shouldInsertSpaceBetween(prev: ElementMetadata, next: ElementMetadata): boolean {
+  if (prev.x === null || prev.width === null || next.x === null) return true;
+  const prevHeight = prev.height ?? prev.fontSize ?? null;
+  const nextHeight = next.height ?? next.fontSize ?? null;
+  if (prevHeight === null || nextHeight === null) return true;
+
+  const shorterHeight = Math.min(prevHeight, nextHeight);
+  if (shorterHeight <= 0) return true;
+
+  const gap = next.x - (prev.x + prev.width);
+  return gap > shorterHeight * SPACE_GAP_RATIO;
 }
 
 function styleFromElement(element: ElementMetadata | undefined): SemanticBlockStyle | undefined {
