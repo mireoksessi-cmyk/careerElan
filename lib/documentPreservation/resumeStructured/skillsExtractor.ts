@@ -62,56 +62,109 @@ function splitSkillList(text: string): string[] {
 const LIST_TERMINAL_RE = /[,;:.)]$/;
 
 /*
-  Phase 5D.6D D1.3 - PDF narrow-column line-wrap detection. A single
-  skill list can legitimately span two adjacent Phase 1 blocks (each
-  block is already one physical PDF line - see blockAdapter.ts's
-  groupIntoLines) when a line runs out of column width mid-list - e.g.
-  "...Microsoft Word, Excel & Google" wraps to "Sheets • Email &..." on
-  the next line. Naively treating every block boundary as a hard skill
-  separator then reproduces exactly that split (see this file's own
-  gate test, and the round's own real 10-resume UAT, which is what
-  actually caught this).
+  Phase 5D.6D D1.3 / Phase 5D.6E TASK B - PDF narrow-column line-wrap
+  detection. A single skill list can legitimately span two adjacent
+  Phase 1 blocks (each block is already one physical PDF line - see
+  blockAdapter.ts's groupIntoLines) when a line runs out of column
+  width mid-list - e.g. "...Microsoft Word, Excel & Google" wraps to
+  "Sheets • Email &..." on the next line. Naively treating every block
+  boundary as a hard skill separator then reproduces exactly that split
+  (see this file's own gate test, and the round's own real 10-resume
+  UAT, which is what actually caught this).
 
-  Real-world correction: an earlier version of this check additionally
-  required the second block's bbox to be MEASURABLY NARROWER than the
-  first's, on the assumption a wrap continuation is always a short
-  leftover fragment. A real private-resume fixture disproved that
-  assumption - a long "•"-delimited skills list can wrap across TWO
-  nearly full-width lines (521px then 512px, well within a few percent
-  of each other), not a short tail, so that width check silently
-  suppressed the exact merge this function exists to perform. Removed;
-  the remaining checks (terminal punctuation + tight vertical spacing)
-  are the real safety net.
+  Phase 5D.6D's fix (terminal punctuation + tight vertical spacing
+  only, no width-ratio guard) over-corrected: it also merges two
+  genuinely INDEPENDENT adjacent lines whenever they're vertically
+  close and the first has no trailing punctuation - real bug, found via
+  the round's own 10-resume UAT on r08's Board & Leadership Activities
+  section, where "Board Director" (a role title) and "BC Manufacturing
+  Association - 2021 - Present" (an unrelated org+date line directly
+  below it, same vertical rhythm as any other bullet-adjacent line)
+  fused into one bogus "skill".
 
-  Two blocks are only ever treated as ONE continued list (never as two
-  independent list lines) when ALL of:
-    - neither is a bullet block (bullets are already their own items)
-    - the earlier block does not end in list-terminal punctuation
-      (a block ending "...Excel," or "...Sheets." already reads as
-      complete - never a wrap victim)
-    - both blocks report real bbox geometry
-    - the vertical gap between them is small (consecutive single-line
-      spacing, not a paragraph/section gap) - this is what actually
-      distinguishes "next line of the same list" from "start of an
-      unrelated block below it"
-  Any missing signal defaults to NOT merging - never guessing a split
-  is real when the geometry is ambiguous or unavailable. Known residual
-  trade-off (disclosed in the final report): two genuinely independent
-  one-line skill lists stacked with ordinary single-line spacing and no
-  terminal punctuation on the first can now also merge - accepted since
-  the round's own named failure (a compound skill severed by a real
-  line wrap) is the more visible, more harmful defect of the two.
+  classifyWrappedContinuation replaces a single width-ratio guard with
+  multiple independent structural signals - no product/company-name
+  dictionary, no per-string special case. A genuine continuation has to
+  show a POSITIVE signal that prev is already mid-list (contains a
+  comma or an unresolved trailing conjunction - i.e. the exact shape a
+  tokenizeSkillList-recognized list uses); a genuine new, unrelated
+  entry shows its own POSITIVE signal instead (next carries a date-
+  range shape, or prev itself is already a short, clean, Title Case
+  phrase with no internal delimiter - "Board Director" is exactly
+  that: complete-looking on its own, nothing dangling). Either
+  "separate" signal overrides any "merge" signal - the two Board/
+  Association-shaped cases in the round's own false-continuation list
+  ("skill + institution", "title + location", "credential + issuer")
+  all reduce to the same "next line has a date, or prev already reads
+  as a finished short title" pattern, so this stays generic rather than
+  chasing each shape individually.
+
+  Uncertain (neither signal fires) defaults to "separate" - false
+  merges are wrong data (two real facts fused into one), false splits
+  merely lose a compound-phrase join that D1's tokenizer already
+  guards against reintroducing; the round explicitly prioritizes
+  eliminating false merges this round, so ties break toward separate.
 */
-function looksLikeWrappedContinuation(prev: SemanticContentBlock, next: SemanticContentBlock): boolean {
-  if (prev.blockType === "bullet" || next.blockType === "bullet") return false;
+const DATE_RANGE_SHAPE_RE = /\b(19|20)\d{2}\b\s*[-–—]\s*(\b(19|20)\d{2}\b|present|current)\b|\b(19|20)\d{2}\b\s*[-–—]\s*$/i;
+const TITLE_CASE_CONNECTOR_WORDS = new Set(["of", "the", "for", "and", "in", "on", "at", "to", "a", "an", "&"]);
+
+function looksLikeCleanShortTitlePhrase(text: string): boolean {
+  const words = text.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0 || words.length > 4) return false;
+  if (/[,;:/&]/.test(text)) return false;
+  if (!/^[A-Z]/.test(text)) return false;
+  // A phrase that itself dangles on a trailing connector ("Research
+  // and") is never "complete" by construction - a real job/role title
+  // never ends on a bare conjunction, so this can't be conflated with
+  // a genuinely finished short title even though "and" is otherwise an
+  // allowed connector word mid-phrase (e.g. "Director of Operations").
+  if (/\b(and|or)\s*$/i.test(text)) return false;
+  return words.every((w) => TITLE_CASE_CONNECTOR_WORDS.has(w.toLowerCase()) || /^[A-Z]/.test(w));
+}
+
+function hasDanglingListSignal(text: string): boolean {
+  if (text.includes(",")) return true;
+  return /(&|\band\b)\s*$/i.test(text) || /\b(&|and)\s+[A-Z][a-z]*$/.test(text);
+}
+
+export type WrappedContinuationDecision = "merge" | "separate" | "uncertain";
+export type WrappedContinuationResult = { decision: WrappedContinuationDecision; confidence: number; reasonCodes: string[] };
+
+export function classifyWrappedContinuation(prev: SemanticContentBlock, next: SemanticContentBlock): WrappedContinuationResult {
+  if (prev.blockType === "bullet" || next.blockType === "bullet") {
+    return { decision: "separate", confidence: 0.95, reasonCodes: ["bullet-block-excluded"] };
+  }
   const prevText = stripBullet(prev.text);
-  if (prevText.length === 0 || LIST_TERMINAL_RE.test(prevText)) return false;
-  if (!prev.bbox || !next.bbox) return false;
+  const nextText = stripBullet(next.text);
+  if (prevText.length === 0 || LIST_TERMINAL_RE.test(prevText)) {
+    return { decision: "separate", confidence: 0.9, reasonCodes: ["prev-terminal-punctuation-or-empty"] };
+  }
+  if (!prev.bbox || !next.bbox) {
+    return { decision: "separate", confidence: 0.7, reasonCodes: ["missing-bbox-geometry"] };
+  }
 
   const lineHeight = prev.bbox.height || next.bbox.height || 0;
-  if (lineHeight <= 0) return false;
+  if (lineHeight <= 0) return { decision: "separate", confidence: 0.7, reasonCodes: ["invalid-line-height"] };
   const verticalGap = next.bbox.y - (prev.bbox.y + prev.bbox.height);
-  return verticalGap >= -lineHeight * 0.5 && verticalGap <= lineHeight * 0.75;
+  const tightVerticalGap = verticalGap >= -lineHeight * 0.5 && verticalGap <= lineHeight * 0.75;
+  if (!tightVerticalGap) {
+    return { decision: "separate", confidence: 0.85, reasonCodes: ["vertical-gap-out-of-range"] };
+  }
+
+  const separateReasons: string[] = [];
+  if (DATE_RANGE_SHAPE_RE.test(nextText)) separateReasons.push("next-has-date-range-shape");
+  if (looksLikeCleanShortTitlePhrase(prevText)) separateReasons.push("prev-is-clean-short-title-phrase");
+  if (separateReasons.length > 0) {
+    return { decision: "separate", confidence: 0.85, reasonCodes: separateReasons };
+  }
+
+  const mergeReasons: string[] = [];
+  if (hasDanglingListSignal(prevText)) mergeReasons.push("prev-already-list-like");
+  if (mergeReasons.length > 0) {
+    return { decision: "merge", confidence: 0.75, reasonCodes: mergeReasons };
+  }
+
+  return { decision: "separate", confidence: 0.5, reasonCodes: ["uncertain-defaults-to-separate"] };
 }
 
 export function extractSkillGroups(sectionId: string, bodyBlocks: SemanticContentBlock[]): SkillGroup[] {
@@ -175,9 +228,9 @@ export function extractSkillGroups(sectionId: string, bodyBlocks: SemanticConten
     }
 
     const prevRunBlock = pendingRunBlocks[pendingRunBlocks.length - 1];
-    if (prevRunBlock && looksLikeWrappedContinuation(prevRunBlock, block)) {
+    if (prevRunBlock && classifyWrappedContinuation(prevRunBlock, block).decision === "merge") {
       // A genuine PDF line-wrap continuation of the SAME skill list line
-      // (see looksLikeWrappedContinuation's own comment) - join into the
+      // (see classifyWrappedContinuation's own comment) - join into the
       // pending run's text instead of tokenizing this block on its own,
       // so a word split across two lines (e.g. "...Google" / "Sheets")
       // is tokenized once as one continuous line, never as two
