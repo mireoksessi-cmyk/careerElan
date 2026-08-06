@@ -47,6 +47,7 @@ import type {
   MetricGrid,
   StructuredTextValue,
   EntryContentBlock,
+  HierarchicalContentNode,
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 import { PROFESSIONAL_ATS_SECTION_LABELS } from "../professionalAtsAssembly/sectionLabels";
@@ -193,6 +194,94 @@ function renderOrderedContentBlocks(content: EntryContentBlock[], subRange: SubR
   return rendered;
 }
 
+/*
+  Phase 5D.7 TASK C - hierarchical counterpart to renderOrderedContentBlocks
+  above. Renders ExperienceEntry.hierarchicalContent (a parallel tree view
+  over the SAME content[] blocks - see hierarchicalGrouping.ts's own header
+  comment) instead of the flat content[] array, used only when
+  entry.hasHierarchicalStructure is true. Every node's `id` is identical to
+  its corresponding content[] block's `id` (built from the same source
+  blocks in the same order), so `indexMap` recovers the original global
+  content[] index for data-sub-index/subRange - pagination and measurement
+  keep working exactly as they do for the flat path, unchanged. Runs same
+  bullet-grouping-into-<ul> logic as renderOrderedContentBlocks, recursing
+  into a subheading node's children with one extra indent step per depth.
+*/
+function buildContentIndexMap(content: EntryContentBlock[]): Map<string, number> {
+  const map = new Map<string, number>();
+  content.forEach((b, i) => map.set(b.id, i));
+  return map;
+}
+
+const HIERARCHY_INDENT_PX = 16;
+
+function renderHierarchicalNodes(
+  nodes: HierarchicalContentNode[],
+  indexMap: Map<string, number>,
+  subRange: SubRange | undefined,
+  isContinuation: boolean,
+  spacing: DensitySpacingTokens,
+  depth: number,
+  seenRef: { count: number }
+): React.ReactNode[] {
+  type Run = { isBullet: boolean; items: { node: HierarchicalContentNode; index: number }[] };
+  const runs: Run[] = [];
+  nodes.forEach((node) => {
+    const index = indexMap.get(node.id) ?? -1;
+    if (!inRange(index, subRange)) return;
+    const isBullet = node.kind === "bullet";
+    const last = runs[runs.length - 1];
+    if (last && last.isBullet === isBullet) last.items.push({ node, index });
+    else runs.push({ isBullet, items: [{ node, index }] });
+  });
+
+  const rendered: React.ReactNode[] = [];
+  const indentPx = depth * HIERARCHY_INDENT_PX;
+
+  for (const run of runs) {
+    if (run.isBullet) {
+      const isFirstOverall = seenRef.count === 0;
+      rendered.push(
+        <ul key={`ul-${run.items[0].index}`} style={{ margin: 0, marginLeft: indentPx, marginTop: isFirstOverall && isContinuation ? 0 : spacing.bulletGapPx }}>
+          {run.items.map(({ node, index }, localIdx) => (
+            <li key={index} data-sub-index={index} style={{ marginTop: gapMarginTop(localIdx, spacing.bulletGapPx) }}>
+              {node.text}
+            </li>
+          ))}
+        </ul>
+      );
+      seenRef.count += run.items.length;
+      run.items.forEach(({ node }) => {
+        if (node.children.length > 0) rendered.push(...renderHierarchicalNodes(node.children, indexMap, subRange, isContinuation, spacing, depth + 1, seenRef));
+      });
+    } else {
+      run.items.forEach(({ node, index }, localIdx) => {
+        const isFirstRendered = seenRef.count === 0 && localIdx === 0;
+        rendered.push(
+          <p
+            key={index}
+            data-sub-index={index}
+            data-hierarchy-depth={depth}
+            style={{
+              margin: 0,
+              marginLeft: indentPx,
+              marginTop: isFirstRendered && isContinuation ? 0 : spacing.bulletGapPx,
+              fontWeight: node.kind === "subheading" ? 600 : undefined,
+            }}
+          >
+            {node.text}
+          </p>
+        );
+        seenRef.count += 1;
+        if (node.children.length > 0) {
+          rendered.push(...renderHierarchicalNodes(node.children, indexMap, subRange, isContinuation, spacing, depth + 1, seenRef));
+        }
+      });
+    }
+  }
+  return rendered;
+}
+
 function IdentityView({ block }: { block: AssemblyBlock }) {
   const identity = block.payload as ResumeIdentity;
   const name = val(identity.fullName);
@@ -263,7 +352,9 @@ function ExperienceLikeView({ block, subRange, isContinuation, spacing = DEFAULT
           {(location || dateRange) && <div>{joinContact([location, dateRange])}</div>}
         </div>
       )}
-      {renderOrderedContentBlocks(entry.content, subRange, isContinuation, spacing)}
+      {"hasHierarchicalStructure" in entry && entry.hasHierarchicalStructure && entry.hierarchicalContent.length > 0
+        ? renderHierarchicalNodes(entry.hierarchicalContent, buildContentIndexMap(entry.content), subRange, isContinuation, spacing, 0, { count: 0 })
+        : renderOrderedContentBlocks(entry.content, subRange, isContinuation, spacing)}
     </div>
   );
 }

@@ -64,8 +64,8 @@ function emptyModel(): ResumeStructuredModel {
   model.identity = { fullName: tv("Jane Doe"), otherContactLines: [] };
   model.professionalSummary = { text: "Experienced generalist.", source: src };
   model.skillGroups = [{ skills: ["Excel"], source: src }];
-  model.professionalExperience = [{ id: "exp-0", organization: tv("Acme"), bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isVolunteer: false, isUncertain: false, reasonCodes: [] }];
-  model.volunteerExperience = [{ id: "vol-0", organization: tv("Food Bank"), bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isVolunteer: true, isUncertain: false, reasonCodes: [] }];
+  model.professionalExperience = [{ id: "exp-0", organization: tv("Acme"), bullets: [], descriptionParagraphs: [], content: [], hierarchicalContent: [], hasHierarchicalStructure: false, rawHeaderText: "", source: src, isVolunteer: false, isUncertain: false, reasonCodes: [] }];
+  model.volunteerExperience = [{ id: "vol-0", organization: tv("Food Bank"), bullets: [], descriptionParagraphs: [], content: [], hierarchicalContent: [], hasHierarchicalStructure: false, rawHeaderText: "", source: src, isVolunteer: true, isUncertain: false, reasonCodes: [] }];
   model.education = [{ id: "edu-0", institution: tv("MIT"), credentials: [], fieldsOfStudy: [], institutions: [tv("MIT")], honors: [], details: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
   model.credentials = [{ id: "cred-0", name: tv("PMP"), names: [tv("PMP")], issuers: [], details: [], kind: "certification", rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];
   model.projects = [{ id: "proj-0", name: tv("Tracker"), technologies: [], bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: src, isUncertain: false, reasonCodes: [] }];

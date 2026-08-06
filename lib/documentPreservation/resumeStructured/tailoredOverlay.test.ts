@@ -53,6 +53,8 @@ function makeModel(): ResumeStructuredModel {
           { id: "entry-exp-0-content-0", kind: "bullet", text: "Managed weekly logistics reporting.", source: src },
           { id: "entry-exp-0-content-1", kind: "bullet", text: "Coordinated cross-team scheduling.", source: src },
         ],
+        hierarchicalContent: [],
+        hasHierarchicalStructure: false,
         rawHeaderText: "Coordinator\nAcme Corp - 2019 - 2022",
         source: src,
         isVolunteer: false,

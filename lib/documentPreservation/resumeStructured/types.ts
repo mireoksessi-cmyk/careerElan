@@ -127,6 +127,50 @@ export type SkillGroup = {
   source: SourceTrace;
 };
 
+/*
+  Phase 5D.7 TASK C - Generic Hierarchical Experience Grouping. A
+  sub-grouped view of the SAME blocks already flattened into
+  ExperienceEntry.content - never a replacement, never a second
+  extraction pass over different source blocks. content[] stays the
+  complete, flat, order-preserving list of every body block (so every
+  existing consumer - contentUnits.ts's unit math, breakPolicy.ts's
+  split-strategy decision, textExtraction.ts's expected-fragment
+  computation - keeps working unchanged, seeing exactly the text it
+  always saw). hierarchicalContent[] is an ADDITIVE tree-shaped
+  re-grouping of those same blocks, built purely from structural
+  signals (numbering-format shape, left-indent relative to
+  surrounding blocks, font size/weight where available, immediate
+  adjacency to more-indented bullets) - never from company/section-
+  name text matching. A flat entry (the common case - a single company/
+  role/date header followed by an ordinary bullet list) produces an
+  EMPTY hierarchicalContent[] and hasHierarchicalStructure: false;
+  renderers/validators fall back to the existing content[] rendering
+  path unchanged in that case - this is by construction the safe
+  default, not a special case to remember.
+*/
+export type HierarchicalContentNodeKind = "subheading" | "bullet" | "paragraph";
+
+export type HierarchicalContentNode = {
+  id: string;
+  kind: HierarchicalContentNodeKind;
+  text: string;
+  /* 0 = a direct child of the entry header (same level a flat entry's
+     content[] items would be at); 1 = nested one level under a
+     subheading; 2+ = a subheading nested under another subheading
+     (Nested Program / multi-level outline shape). Purely structural -
+     never inferred from word content. */
+  depth: number;
+  /* The raw leading numbering token exactly as it appeared in the
+     source ("1.", "II.", "A)", etc.) when this subheading was
+     detected via a numbering-format signal - undefined when detected
+     by indent/style alone (the "Heading Only, No Numbering" shape) or
+     when this node is a bullet/paragraph, never itself carrying a
+     number. Preserved verbatim, never re-formatted or invented. */
+  numberingLabel?: string;
+  children: HierarchicalContentNode[];
+  source: SourceTrace;
+};
+
 export type ExperienceEntry = {
   id: string;
 
@@ -146,6 +190,12 @@ export type ExperienceEntry = {
      bullets/descriptionParagraphs stay populated unchanged for every
      other existing consumer. */
   content: EntryContentBlock[];
+
+  /* Phase 5D.7 TASK C - see HierarchicalContentNode's own comment.
+     Empty array (never undefined) when no sub-grouping was detected -
+     the overwhelmingly common case. */
+  hierarchicalContent: HierarchicalContentNode[];
+  hasHierarchicalStructure: boolean;
 
   /* The raw entry-header line(s) this entry was segmented from, kept
      verbatim regardless of how much structure was confidently

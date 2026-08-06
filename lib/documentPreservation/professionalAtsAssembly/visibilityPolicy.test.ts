@@ -62,6 +62,8 @@ const emptyExperienceEntry = {
   bullets: [],
   descriptionParagraphs: [],
   content: [],
+  hierarchicalContent: [],
+  hasHierarchicalStructure: false,
   rawHeaderText: "",
   source: src,
   isVolunteer: false,

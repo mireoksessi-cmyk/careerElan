@@ -59,6 +59,7 @@ import type {
   MetricGrid,
   StructuredTextValue,
   EntryContentBlock,
+  HierarchicalContentNode,
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 import type { AssemblyDensity } from "../professionalAtsAssembly/types";
@@ -101,7 +102,16 @@ function pushParagraph(
   blockId: string,
   sourceEntryId: string | undefined,
   children: TextRun[],
-  opts: { spacingBeforeTwips?: number; spacingAfterTwips?: number; keepNext?: boolean; keepLines?: boolean; bullet?: boolean; alignment?: (typeof AlignmentType)[keyof typeof AlignmentType] }
+  opts: {
+    spacingBeforeTwips?: number;
+    spacingAfterTwips?: number;
+    keepNext?: boolean;
+    keepLines?: boolean;
+    bullet?: boolean;
+    bulletLevel?: number;
+    indentTwips?: number;
+    alignment?: (typeof AlignmentType)[keyof typeof AlignmentType];
+  }
 ) {
   ctx.paragraphs.push(
     new Paragraph({
@@ -109,7 +119,8 @@ function pushParagraph(
       spacing: { before: opts.spacingBeforeTwips ?? 0, after: opts.spacingAfterTwips ?? 0, line: undefined },
       keepNext: opts.keepNext,
       keepLines: opts.keepLines,
-      bullet: opts.bullet ? { level: 0 } : undefined,
+      bullet: opts.bullet ? { level: opts.bulletLevel ?? 0 } : undefined,
+      indent: opts.indentTwips ? { left: opts.indentTwips } : undefined,
       alignment: opts.alignment,
     })
   );
@@ -189,6 +200,32 @@ function renderOrderedContentSubItems(block: AssemblyBlock, ctx: BuildContext, c
   });
 }
 
+/*
+  Phase 5D.7 TASK C - DOCX counterpart to renderOrderedContentSubItems
+  above, for entry.hierarchicalContent (see renderers.tsx's own
+  renderHierarchicalNodes and hierarchicalGrouping.ts's header comment).
+  Each depth level gets one extra indent step; bullet nodes additionally
+  use the docx `bullet.level` shortcut so Word's own nested-list
+  numbering/indent takes over for bulleted sub-items, matching how a
+  real Word document nests bullets under a sub-heading.
+*/
+const HIERARCHY_INDENT_TWIPS = 360;
+
+function renderHierarchicalContentSubItems(block: AssemblyBlock, ctx: BuildContext, nodes: HierarchicalContentNode[], depth: number) {
+  nodes.forEach((node) => {
+    if (node.text.trim()) {
+      pushParagraph(ctx, block.id, block.sourceEntryId, [run(node.text, ctx, { bold: node.kind === "subheading" })], {
+        spacingBeforeTwips: ctx.bulletGapTwips,
+        keepLines: true,
+        bullet: node.kind === "bullet",
+        bulletLevel: node.kind === "bullet" ? depth : undefined,
+        indentTwips: node.kind !== "bullet" ? depth * HIERARCHY_INDENT_TWIPS : undefined,
+      });
+    }
+    if (node.children.length > 0) renderHierarchicalContentSubItems(block, ctx, node.children, depth + 1);
+  });
+}
+
 function renderExperienceLike(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as ExperienceEntry | ProjectEntry;
   const role = val("role" in entry ? entry.role : undefined);
@@ -212,7 +249,11 @@ function renderExperienceLike(block: AssemblyBlock, ctx: BuildContext, blockGapT
       keepNext: entry.content.length > 0,
     });
   }
-  renderOrderedContentSubItems(block, ctx, entry.content);
+  if ("hasHierarchicalStructure" in entry && entry.hasHierarchicalStructure && entry.hierarchicalContent.length > 0) {
+    renderHierarchicalContentSubItems(block, ctx, entry.hierarchicalContent, 0);
+  } else {
+    renderOrderedContentSubItems(block, ctx, entry.content);
+  }
 }
 
 function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {

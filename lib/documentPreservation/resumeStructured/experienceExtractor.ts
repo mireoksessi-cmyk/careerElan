@@ -36,6 +36,8 @@ import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId, bulletId } from "./ids";
 import { isDateRangeLine, extractDateParts as extractDatePartsShared } from "./dateRangeParsing";
 import { splitOrganizationLocation } from "./splitOrganizationLocation";
+import { normalizeBulletPresentation } from "./bulletPresentation";
+import { buildHierarchicalContent } from "./hierarchicalGrouping";
 import type { ExperienceEntry, StructuredTextValue } from "./types";
 
 const MAX_HEADER_LINE_LENGTH = 90;
@@ -279,11 +281,15 @@ export function extractExperienceEntries(sectionId: string, bodyBlocks: Semantic
 
     const bullets = bodyRunBlocks
       .filter((b) => b.blockType === "bullet" && b.rawText.length > 0)
-      .map((b, bi) => ({ id: bulletId(entryId(sectionId, "experience", index), bi), text: b.rawText, source: traceFromBlock(sectionId, b) }));
+      .map((b, bi) => ({
+        id: bulletId(entryId(sectionId, "experience", index), bi),
+        text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
+        source: traceFromBlock(sectionId, b),
+      }));
 
     const descriptionParagraphs = bodyRunBlocks
       .filter((b) => b.blockType !== "bullet" && b.rawText.length > 0)
-      .map((b) => makeValue(b.rawText, sectionId, b, 0.6));
+      .map((b) => makeValue(normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText, sectionId, b, 0.6));
 
     // Phase 5D.3A - same bodyRunBlocks, in their original order, each
     // tagged with its own blockType instead of split into the two
@@ -291,15 +297,31 @@ export function extractExperienceEntries(sectionId: string, bodyBlocks: Semantic
     // this instead of bullets/descriptionParagraphs.
     const content = bodyRunBlocks
       .filter((b) => b.rawText.length > 0)
-      .map((b, ci) => ({
-        id: `${entryId(sectionId, "experience", index)}-content-${ci}`,
-        kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
-        text: b.rawText,
-        source: traceFromBlock(sectionId, b),
-      }));
+      .map((b, ci) => {
+        const normalized = normalizeBulletPresentation(b.rawText, { blockType: b.blockType });
+        return {
+          id: `${entryId(sectionId, "experience", index)}-content-${ci}`,
+          kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
+          text: normalized.displayText,
+          source: traceFromBlock(sectionId, b),
+        };
+      });
 
     const allEntryBlocks = [...headerBlocks, ...bodyRunBlocks];
     const isUncertain = fields.organization === undefined || fields.role === undefined;
+
+    // Phase 5D.7 TASK C - built from the SAME bodyRunBlocks/content
+    // arrays above (same order, same indices) - see
+    // hierarchicalGrouping.ts's own header comment. Additive only:
+    // content[] above stays the complete flat list every existing
+    // consumer already relies on.
+    const bodyContentBlocks = bodyRunBlocks
+      .filter((b) => b.rawText.length > 0)
+      .map((b, ci) => ({ id: `${entryId(sectionId, "experience", index)}-content-${ci}`, text: content[ci]?.text ?? b.rawText, source: traceFromBlock(sectionId, b) }));
+    const hierarchy = buildHierarchicalContent(
+      bodyRunBlocks.filter((b) => b.rawText.length > 0),
+      bodyContentBlocks
+    );
 
     return {
       id: entryId(sectionId, "experience", index),
@@ -312,6 +334,8 @@ export function extractExperienceEntries(sectionId: string, bodyBlocks: Semantic
       bullets,
       descriptionParagraphs,
       content,
+      hierarchicalContent: hierarchy.nodes,
+      hasHierarchicalStructure: hierarchy.hasHierarchy,
       rawHeaderText: headerBlocks.map((b) => b.rawText).join("\n"),
       source: mergeTraces(traceFromBlocks(sectionId, allEntryBlocks)),
       isVolunteer,

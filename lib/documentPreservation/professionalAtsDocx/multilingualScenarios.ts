@@ -129,6 +129,8 @@ function experienceEntry(id: string, role: string, org: string, bulletTexts: str
     bullets: bulletTexts.map((t, i) => bullet(t, `${id}-b${i}`)),
     descriptionParagraphs: [],
     content: bulletTexts.map((t, i) => ({ id: `${id}-content-${i}`, kind: "bullet" as const, text: t, source: trace(id) })),
+    hierarchicalContent: [],
+    hasHierarchicalStructure: false,
     rawHeaderText: `${role} | ${org}`,
     source: trace(id),
     isVolunteer: false,
