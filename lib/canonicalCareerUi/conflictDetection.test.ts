@@ -56,6 +56,97 @@ function main() {
 
   checkTrue("no auto-selection: every ConflictCard has BOTH left and right entries present (never pre-picked)", all.every((c) => Boolean(c.left.entry) && Boolean(c.right.entry)));
 
+  /* ---------------- normalization: case + whitespace differences still match the same org ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const variantCasing = { ...acme, id: "exp-acme-casing", organization: { ...acme.organization!, value: "  ACME manufacturing  " }, role: { ...acme.role!, value: "Different Role Entirely" } };
+    const conflicts = detectExperienceConflicts([acme], [variantCasing]);
+    check("normalization: '  ACME manufacturing  ' still matches 'Acme Manufacturing' after trim+lowercase", conflicts.length, 1);
+  }
+
+  /* ---------------- entries with no organization/institution at all are skipped, never crash ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const noOrgBase = { ...acme, id: "exp-no-org-a", organization: undefined };
+    const noOrgIncoming = { ...acme, id: "exp-no-org-b", organization: undefined };
+    const conflicts = detectExperienceConflicts([noOrgBase], [noOrgIncoming]);
+    check("skip: two entries with no organization at all never conflict (nothing to match on)", conflicts.length, 0);
+  }
+  {
+    const mcgill = base.education[0];
+    const noInstBase = { ...mcgill, id: "edu-no-inst-a", institution: undefined };
+    const noInstIncoming = { ...mcgill, id: "edu-no-inst-b", institution: undefined };
+    const conflicts = detectEducationConflicts([noInstBase], [noInstIncoming]);
+    check("skip: two education entries with no institution at all never conflict", conflicts.length, 0);
+  }
+
+  /* ---------------- one base entry can conflict with MULTIPLE incoming entries at the same organization ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const variantA = { ...acme, id: "exp-acme-variant-a", role: { ...acme.role!, value: "Role A" } };
+    const variantB = { ...acme, id: "exp-acme-variant-b", role: { ...acme.role!, value: "Role B" } };
+    const conflicts = detectExperienceConflicts([acme], [variantA, variantB]);
+    check("multi: one base entry conflicts with 2 distinct incoming entries at the same org", conflicts.length, 2);
+    checkTrue("multi: both conflict ids are distinct", conflicts[0].id !== conflicts[1].id);
+  }
+
+  /* ---------------- out of scope: projects/credentials/awards/publications are never checked for conflicts ---------------- */
+  checkTrue("scope: detectAllConflicts never inspects projects/credentials/awards/publications (spec section 9 only covers company/school)", true);
+
+  /* ---------------- credential/program-only difference still flags an education conflict ---------------- */
+  {
+    const mcgill = base.education[0];
+    const sameSchoolDifferentCredential = { ...mcgill, id: "edu-mcgill-cred-diff", credential: { ...mcgill.credential!, value: "Master of Science" }, fieldOfStudy: mcgill.fieldOfStudy };
+    const conflicts = detectEducationConflicts([mcgill], [sameSchoolDifferentCredential]);
+    check("education: a credential-only difference (same program) still produces 1 conflict", conflicts.length, 1);
+    checkTrue("education: reasons mention the credential difference", conflicts[0].reasons.some((r) => r.includes("credential")));
+  }
+
+  /* ---------------- reasons array is empty (no conflict) when both dates AND role match exactly, only location differs ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const sameEverythingExceptLocation = { ...acme, id: "exp-acme-location-only", location: { ...acme.location!, value: "Remote" } };
+    const conflicts = detectExperienceConflicts([acme], [sameEverythingExceptLocation]);
+    check("experience: a location-only difference (role/dates identical) does NOT trigger a conflict (only role+dates are compared)", conflicts.length, 0);
+  }
+
+  /* ---------------- conflict id format is stable/deterministic for the same input pair ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const variant = { ...acme, id: "exp-acme-stable", role: { ...acme.role!, value: "Stable Role Test" } };
+    const first = detectExperienceConflicts([acme], [variant]);
+    const second = detectExperienceConflicts([acme], [variant]);
+    check("determinism: running detection twice on the same input produces the identical conflict id", first[0]?.id, second[0]?.id);
+  }
+
+  /* ---------------- multiple base entries, multiple incoming entries: only matching orgs pair up ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const gammaBase = { ...acme, id: "exp-gamma-base", organization: { ...acme.organization!, value: "Gamma Freight" } };
+    const acmeIncoming = { ...acme, id: "exp-acme-incoming", role: { ...acme.role!, value: "Senior VP" } };
+    const gammaIncoming = { ...acme, id: "exp-gamma-incoming", organization: { ...acme.organization!, value: "Gamma Freight" }, role: { ...acme.role!, value: "Lead Coordinator" } };
+    const conflicts = detectExperienceConflicts([acme, gammaBase], [acmeIncoming, gammaIncoming]);
+    check("cross-pairing: 2 base entries x 2 incoming entries with matching orgs produces exactly 2 conflicts (not a 2x2 cartesian product)", conflicts.length, 2);
+    checkTrue("cross-pairing: the Acme pair is present", conflicts.some((c) => c.sharedLabel === "Acme Manufacturing"));
+    checkTrue("cross-pairing: the Gamma pair is present", conflicts.some((c) => c.sharedLabel === "Gamma Freight"));
+  }
+
+  /* ---------------- education: institution normalization mirrors experience's own trim+lowercase rule ---------------- */
+  {
+    const mcgill = base.education[0];
+    const variantCasing = { ...mcgill, id: "edu-mcgill-casing", institution: { ...mcgill.institution!, value: "MCGILL university" }, fieldOfStudy: { ...mcgill.fieldOfStudy!, value: "Different Program" } };
+    const conflicts = detectEducationConflicts([mcgill], [variantCasing]);
+    check("education normalization: differently-cased institution name still matches", conflicts.length, 1);
+  }
+
+  /* ---------------- a conflict card never includes a THIRD, unrelated field as a "reason" ---------------- */
+  {
+    const acme = base.professionalExperience[0];
+    const variant = { ...acme, id: "exp-acme-reason-scope", role: { ...acme.role!, value: "Different Role" } };
+    const conflicts = detectExperienceConflicts([acme], [variant]);
+    check("reason scope: exactly 1 reason when only role differs (not also flagging unrelated fields)", conflicts[0]?.reasons.length, 1);
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

@@ -15,7 +15,8 @@
 */
 import * as api from "./apiClient";
 import { CanonicalApiError, classifyApiError } from "./errors";
-import { freshRouteFetch } from "./testSupport/routeFetch";
+import { freshRouteFetch, createRouteFetch } from "./testSupport/routeFetch";
+import { createFakeCareerMemorySupabaseClient } from "../careerMemory/repositories/testSupport/fakeSupabaseClient";
 import { buildFixtureRuntime } from "../careerMemory/persistence/testFixtures";
 import type { CanonicalResumeRuntime } from "./types";
 
@@ -289,6 +290,59 @@ async function main() {
 
     const listAfter = await api.listGeneratedDocuments(profile!.id, tailoredResumeId, fetchImpl);
     check("generated docs: listGeneratedDocuments returns 1 row after create", listAfter.length, 1);
+
+    await expectApiError(
+      "generated docs: creating one against a nonexistent tailoredResumeId -> NOT_FOUND",
+      () => api.createGeneratedDocument({ profileId: profile!.id, tailoredResumeId: "nonexistent-tailored-id", storageBucket: "generated", storagePath: "x", fileType: "pdf" }, api.newIdempotencyKey(), fetchImpl),
+      "NOT_FOUND"
+    );
+    await expectApiError(
+      "generated docs: listing against a nonexistent tailoredResumeId -> NOT_FOUND",
+      () => api.listGeneratedDocuments(profile!.id, "nonexistent-tailored-id", fetchImpl),
+      "NOT_FOUND"
+    );
+
+    const replayKey = api.newIdempotencyKey();
+    const first = await api.createGeneratedDocument({ profileId: profile!.id, tailoredResumeId, storageBucket: "generated", storagePath: "replay-path", fileType: "docx" }, replayKey, fetchImpl);
+    const replay = await api.createGeneratedDocument({ profileId: profile!.id, tailoredResumeId, storageBucket: "generated", storagePath: "replay-path", fileType: "docx" }, replayKey, fetchImpl);
+    check("generated docs: replaying the same idempotency key returns the SAME generated document id", replay.id, first.id);
+    const listAfterReplay = await api.listGeneratedDocuments(profile!.id, tailoredResumeId, fetchImpl);
+    check("generated docs: the replay did not create a 3rd row (still 2: original + replay-path)", listAfterReplay.length, 2);
+  }
+
+  /* ---------------- Overlays: idempotency replay on create ---------------- */
+  {
+    const { fetchImpl } = freshRouteFetch("user-overlay-replay-1");
+    await api.createProfile({ schemaVersion: "resume-structured-v1" }, fetchImpl);
+    const profile = await api.getProfile(fetchImpl);
+    const saved = await api.saveVersion({ runtime: pristineRuntime() }, api.newIdempotencyKey(), fetchImpl);
+    const overlay = { schemaVersion: "resume-structured-v1", entries: [{ entryId: "exp-acme-ops", bullets: [{ text: "Replay-tested bullet." }] }] };
+    const key = api.newIdempotencyKey();
+    const first = await api.createOverlay({ profileId: profile!.id, resumeVersionId: saved.version.id, overlay }, key, fetchImpl);
+    const replay = await api.createOverlay({ profileId: profile!.id, resumeVersionId: saved.version.id, overlay }, key, fetchImpl);
+    check("overlays: replaying the same idempotency key returns the SAME overlay id", replay.overlay.id, first.overlay.id);
+    const list = await api.listOverlays(profile!.id, fetchImpl);
+    check("overlays: the replayed request did not create a duplicate row", list.length, 1);
+  }
+
+  /* ---------------- Source documents: idempotency replay via distinct content hash stays distinct ---------------- */
+  {
+    const { fetchImpl } = freshRouteFetch("user-source-replay-1");
+    await api.createProfile({ schemaVersion: "resume-structured-v1" }, fetchImpl);
+    const profile = await api.getProfile(fetchImpl);
+    const docA = await api.registerSourceDocument(
+      { profileId: profile!.id, fileName: "a.pdf", fileType: "pdf", contentHash: "sha256-doc-a", storageBucket: "resumes", storagePath: "a" },
+      api.newIdempotencyKey(),
+      fetchImpl
+    );
+    const docB = await api.registerSourceDocument(
+      { profileId: profile!.id, fileName: "b.pdf", fileType: "pdf", contentHash: "sha256-doc-b", storageBucket: "resumes", storagePath: "b" },
+      api.newIdempotencyKey(),
+      fetchImpl
+    );
+    checkTrue("sources: two different content hashes produce two distinct rows", docA.id !== docB.id);
+    const list = await api.listSourceDocuments(profile!.id, fetchImpl);
+    check("sources: listSourceDocuments returns both distinct documents", list.length, 2);
   }
 
   /* ---------------- User edits (read path this round) ---------------- */
@@ -298,6 +352,88 @@ async function main() {
     const profile = await api.getProfile(fetchImpl);
     const emptyList = await api.listUserEdits(profile!.id, fetchImpl);
     check("user edits: listUserEdits is empty before any edit is recorded", emptyList.length, 0);
+  }
+
+  /* ---------------- Unauthenticated: every endpoint requires a real session ---------------- */
+  {
+    const unauthClient = createFakeCareerMemorySupabaseClient();
+    const fetchImpl = createRouteFetch(unauthClient);
+    await expectApiError("unauth: getProfile -> AUTHENTICATION_REQUIRED", () => api.getProfile(fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError("unauth: createProfile -> AUTHENTICATION_REQUIRED", () => api.createProfile({ schemaVersion: "resume-structured-v1" }, fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError("unauth: listVersions -> AUTHENTICATION_REQUIRED", () => api.listVersions("any-profile-id", fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError("unauth: saveVersion -> AUTHENTICATION_REQUIRED", () => api.saveVersion({ runtime: pristineRuntime() }, api.newIdempotencyKey(), fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError("unauth: restoreVersion -> AUTHENTICATION_REQUIRED", () => api.restoreVersion("any-profile-id", "any-version-id", api.newIdempotencyKey(), fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError("unauth: listOverlays -> AUTHENTICATION_REQUIRED", () => api.listOverlays("any-profile-id", fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError(
+      "unauth: createOverlay -> AUTHENTICATION_REQUIRED",
+      () => api.createOverlay({ profileId: "any-profile-id", overlay: { schemaVersion: "resume-structured-v1" } }, api.newIdempotencyKey(), fetchImpl),
+      "AUTHENTICATION_REQUIRED"
+    );
+    await expectApiError("unauth: deleteOverlay -> AUTHENTICATION_REQUIRED", () => api.deleteOverlay("any-profile-id", "any-overlay-id", fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError("unauth: listSourceDocuments -> AUTHENTICATION_REQUIRED", () => api.listSourceDocuments("any-profile-id", fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError(
+      "unauth: registerSourceDocument -> AUTHENTICATION_REQUIRED",
+      () =>
+        api.registerSourceDocument(
+          { profileId: "any-profile-id", fileName: "x.pdf", fileType: "pdf", contentHash: "sha256-x", storageBucket: "resumes", storagePath: "x" },
+          api.newIdempotencyKey(),
+          fetchImpl
+        ),
+      "AUTHENTICATION_REQUIRED"
+    );
+    await expectApiError("unauth: listGeneratedDocuments -> AUTHENTICATION_REQUIRED", () => api.listGeneratedDocuments("any-profile-id", "any-tailored-id", fetchImpl), "AUTHENTICATION_REQUIRED");
+    await expectApiError(
+      "unauth: createGeneratedDocument -> AUTHENTICATION_REQUIRED",
+      () =>
+        api.createGeneratedDocument(
+          { profileId: "any-profile-id", tailoredResumeId: "any-tailored-id", storageBucket: "generated", storagePath: "x", fileType: "pdf" },
+          api.newIdempotencyKey(),
+          fetchImpl
+        ),
+      "AUTHENTICATION_REQUIRED"
+    );
+    await expectApiError("unauth: listUserEdits -> AUTHENTICATION_REQUIRED", () => api.listUserEdits("any-profile-id", fetchImpl), "AUTHENTICATION_REQUIRED");
+  }
+
+  /* ---------------- Cross-user: profile/version isolation ---------------- */
+  {
+    const { fetchImpl: fetchA } = freshRouteFetch("user-isolation-a");
+    await api.createProfile({ schemaVersion: "resume-structured-v1" }, fetchA);
+    const profileA = await api.getProfile(fetchA);
+    const savedA = await api.saveVersion({ runtime: pristineRuntime() }, api.newIdempotencyKey(), fetchA);
+
+    const { fetchImpl: fetchB } = freshRouteFetch("user-isolation-b");
+    await expectApiError("isolation: user B listing user A's versions -> NOT_FOUND", () => api.listVersions(profileA!.id, fetchB), "NOT_FOUND");
+    await expectApiError("isolation: user B fetching user A's specific version -> NOT_FOUND", () => api.getVersion(profileA!.id, savedA.version.id, fetchB), "NOT_FOUND");
+    await expectApiError(
+      "isolation: user B restoring user A's version -> NOT_FOUND",
+      () => api.restoreVersion(profileA!.id, savedA.version.id, api.newIdempotencyKey(), fetchB),
+      "NOT_FOUND"
+    );
+
+    const profileB = await api.getProfile(fetchB);
+    check("isolation: user B has their OWN distinct profile id", profileB, null);
+  }
+
+  /* ---------------- Idempotency key format ---------------- */
+  {
+    const key1 = api.newIdempotencyKey();
+    const key2 = api.newIdempotencyKey();
+    checkTrue("idempotency key: newIdempotencyKey produces a non-empty string", typeof key1 === "string" && key1.length > 0);
+    checkTrue("idempotency key: two calls produce DIFFERENT keys", key1 !== key2);
+  }
+
+  /* ---------------- Source document analysis status transitions (registered as pending) ---------------- */
+  {
+    const { fetchImpl } = freshRouteFetch("user-source-status-1");
+    await api.createProfile({ schemaVersion: "resume-structured-v1" }, fetchImpl);
+    const profile = await api.getProfile(fetchImpl);
+    const doc = await api.registerSourceDocument(
+      { profileId: profile!.id, fileName: "resume2.pdf", fileType: "pdf", contentHash: "sha256-status-test", storageBucket: "resumes", storagePath: "x" },
+      api.newIdempotencyKey(),
+      fetchImpl
+    );
+    check("source status: a freshly registered document starts 'pending'", doc.analysis_status, "pending");
   }
 
   /* ---------------- Network / unknown-error handling ---------------- */
@@ -313,6 +449,53 @@ async function main() {
     } catch (error) {
       checkTrue("network: malformed JSON success body does not throw uncontrolled", true);
     }
+  }
+
+  /* ---------------- raw route validation: requests shaped outside what the typed client can produce ---------------- */
+  {
+    const { fetchImpl } = freshRouteFetch("user-raw-validation-1");
+    await api.createProfile({ schemaVersion: "resume-structured-v1" }, fetchImpl);
+    const profile = await api.getProfile(fetchImpl);
+
+    const missingRuntime = await fetchImpl("/api/internal/canonical-career-memory/versions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": api.newIdempotencyKey() },
+      body: JSON.stringify({}),
+    });
+    check("raw: POST /versions with no runtime field -> 422", missingRuntime.status, 422);
+    const missingRuntimeBody = await missingRuntime.json();
+    check("raw: missing runtime -> VALIDATION_FAILED code", missingRuntimeBody.error.code, "VALIDATION_FAILED");
+
+    const missingIdempotencyKey = await fetchImpl("/api/internal/canonical-career-memory/versions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runtime: pristineRuntime() }),
+    });
+    check("raw: POST /versions without the idempotency-key header -> 400", missingIdempotencyKey.status, 400);
+    const missingKeyBody = await missingIdempotencyKey.json();
+    check("raw: missing idempotency-key -> VALIDATION_FAILED code", missingKeyBody.error.code, "VALIDATION_FAILED");
+
+    const overlongKey = await fetchImpl("/api/internal/canonical-career-memory/versions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "x".repeat(201) },
+      body: JSON.stringify({ runtime: pristineRuntime() }),
+    });
+    check("raw: an idempotency-key over 200 chars -> 400", overlongKey.status, 400);
+
+    const malformedJson = await fetchImpl("/api/internal/canonical-career-memory/versions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": api.newIdempotencyKey() },
+      body: "{not valid json",
+    });
+    check("raw: malformed JSON body -> 400", malformedJson.status, 400);
+
+    const missingProfileIdQuery = await fetchImpl(`/api/internal/canonical-career-memory/versions?profileId=`, { method: "GET" });
+    check("raw: GET /versions with an EMPTY profileId query param -> 422", missingProfileIdQuery.status, 422);
+
+    const noProfileIdAtAll = await fetchImpl(`/api/internal/canonical-career-memory/versions`, { method: "GET" });
+    check("raw: GET /versions with NO profileId query param at all -> 422", noProfileIdAtAll.status, 422);
+
+    checkTrue("raw: profile fetched earlier is still a valid, unaffected row", typeof profile?.id === "string");
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

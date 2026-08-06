@@ -46,12 +46,36 @@ function entryLabel(kind: "experience" | "education" | "project" | "credential",
   return textOf(e.name) || e.rawHeaderText || e.id;
 }
 
-function contentFingerprint(entry: ExperienceEntry | EducationEntry | ProjectEntry | CredentialEntry): string {
+/*
+  Per-kind scalar field lists - NOT a blanket introspection of every
+  object property. Two real reasons: (1) each `source` trace is a
+  provenance pointer (sourceSectionId/sourceBlockIds/sourceElementIds),
+  not user-visible content - two extractions of the IDENTICAL text can
+  legitimately land a different trace, and a blanket walk would wrongly
+  flag that as "changed"; (2) confidence/extractionMethod/isUncertain/
+  reasonCodes describe the extractor's own certainty, not what the
+  reader sees. Listing exactly the fields a change actually shows up
+  in keeps the diff honest without either of those false positives.
+*/
+const SCALAR_FIELDS_BY_KIND: Record<"experience" | "education" | "project" | "credential", string[]> = {
+  experience: ["organization", "role", "location", "startDateText", "endDateText", "dateRangeText"],
+  education: ["institution", "credential", "fieldOfStudy", "location", "startDateText", "endDateText", "dateRangeText", "gpa"],
+  project: ["name", "role", "dateRangeText"],
+  credential: ["name", "issuer", "credentialId", "issueDateText", "expiryDateText", "location"],
+};
+
+function contentFingerprint(kind: "experience" | "education" | "project" | "credential", entry: ExperienceEntry | EducationEntry | ProjectEntry | CredentialEntry): string {
+  const record = entry as unknown as Record<string, { value: string } | undefined>;
   const parts: string[] = [entry.rawHeaderText];
+  for (const field of SCALAR_FIELDS_BY_KIND[kind]) {
+    parts.push(record[field]?.value ?? "");
+  }
   const withContent = entry as { content?: { text: string }[] };
   if (Array.isArray(withContent.content)) parts.push(...withContent.content.map((c) => c.text));
   const withDetails = entry as { details?: { value: string }[] };
   if (Array.isArray(withDetails.details)) parts.push(...withDetails.details.map((d) => d.value));
+  const withTechnologies = entry as { technologies?: { value: string }[] };
+  if (Array.isArray(withTechnologies.technologies)) parts.push(...withTechnologies.technologies.map((t) => t.value));
   return parts.join("\n");
 }
 
@@ -76,7 +100,7 @@ function diffEntryList<T extends { id: string }>(
       rows.push({ section, label: entryLabel(kind, entry as never), change: "added", after: entryLabel(kind, entry as never) });
       continue;
     }
-    const changed = contentFingerprint(beforeEntry as never) !== contentFingerprint(entry as never);
+    const changed = contentFingerprint(kind, beforeEntry as never) !== contentFingerprint(kind, entry as never);
     rows.push({
       section,
       label: entryLabel(kind, entry as never),
