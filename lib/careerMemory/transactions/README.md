@@ -20,9 +20,9 @@ supabase-js's `.rpc()` calls it) runs inside one implicit transaction: any
 unhandled exception raised partway through rolls back every write that
 function invocation had already made. This is real Postgres atomicity, not
 simulated in application code - verified against a live local database in
-`fixtures/scripts/_rpcSmokeTest.mjs` (rollback, optimistic-conflict,
-concurrent-request, and idempotency-replay scenarios all pass against a
-real Postgres instance, not a fake client).
+`fixtures/scripts/rpcTransactionIdempotency.realdb.test.mjs` (rollback,
+optimistic-conflict, concurrent-request, and idempotency-replay scenarios
+all pass against a real Postgres instance, not a fake client).
 
 Repository code (`lib/careerMemory/repositories/CanonicalTransactionRepository.ts`)
 is the only place any of these 5 RPCs are called from - service code never
@@ -51,6 +51,17 @@ response back, not an error. This matches standard idempotency-key
 semantics (the key is the caller's own promise that "same key = same
 intended result") - this layer does not hash-compare the request body
 against what the key was first used for.
+
+**Concurrency**: the idempotency check ("has this key been used before?")
+and the eventual insert into `career_idempotency_keys` are two separate
+statements, so without a lock, concurrent callers sharing the same key
+could all observe "not found" and each perform a real write. Each RPC
+takes a `pg_advisory_xact_lock` keyed by `(user_id, idempotency_key,
+operation)` before its idempotency check, serializing same-key concurrent
+callers so only the first actually writes and every later one replays
+that result. A 10-concurrent-request stress test with one shared key
+(`fixtures/scripts/rpcTransactionIdempotency.realdb.test.mjs`) asserts
+exactly one surviving row against the live database.
 
 ## History
 
