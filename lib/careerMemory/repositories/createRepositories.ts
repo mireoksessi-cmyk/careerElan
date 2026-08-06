@@ -28,6 +28,7 @@ import { SupabaseCareerSourceDocumentRepository } from "./SupabaseCareerSourceDo
 import { SupabaseCareerTailoredResumeRepository } from "./SupabaseCareerTailoredResumeRepository";
 import { SupabaseCareerUserEditRepository } from "./SupabaseCareerUserEditRepository";
 import { SupabaseGeneratedResumeDocumentRepository } from "./SupabaseGeneratedResumeDocumentRepository";
+import { CanonicalTransactionRepository } from "./CanonicalTransactionRepository";
 
 export type CanonicalRepositoryBundle = Omit<CareerMemoryRepositories, "sourceDocuments" | "experiences" | "languages" | "projects" | "credentials" | "awards" | "publications"> & {
   sourceDocuments: ExtendedCareerSourceDocumentRepository;
@@ -37,6 +38,7 @@ export type CanonicalRepositoryBundle = Omit<CareerMemoryRepositories, "sourceDo
   credentials: ExtendedCareerCredentialRepository;
   awards: ExtendedCareerAwardRepository;
   publications: ExtendedCareerPublicationRepository;
+  transactions: CanonicalTransactionRepository;
 };
 
 export function createCanonicalRepositories(client: SupabaseClient): CanonicalRepositoryBundle {
@@ -53,5 +55,6 @@ export function createCanonicalRepositories(client: SupabaseClient): CanonicalRe
     tailoredResumes: new SupabaseCareerTailoredResumeRepository(client),
     userEdits: new SupabaseCareerUserEditRepository(client),
     generatedResumeDocuments: new SupabaseGeneratedResumeDocumentRepository(client),
+    transactions: new CanonicalTransactionRepository(client),
   };
 }

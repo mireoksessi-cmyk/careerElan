@@ -147,10 +147,22 @@ export function validateRuntimeRoundTrip(original: CanonicalResumeRuntime, recon
     }
   }
 
-  if (original.version.id !== reconstructed.version.id) errors.push(`version lineage mismatch: version.id "${original.version.id}" !== "${reconstructed.version.id}"`);
+  /*
+    Phase 6D.1 - version.id/createdAt/parentVersionId are no longer
+    caller-preserved: save_canonical_runtime() (see
+    supabase/migrations/20260806020000_career_memory_transaction_idempotency.sql)
+    always assigns a fresh server-side id and now() for a newly-saved
+    version, and computes parent_version_id from the actual current
+    latest version rather than trusting whatever the caller's own
+    Runtime object happened to carry - this is what closed the Phase
+    6D "version-1 self-reference" bug (a caller reusing the same
+    version id across two saves). Round-trip validity here is about
+    CONTENT fidelity (resume data, schema/serializer versions, source
+    documents), not identity-field preservation for fields the server
+    now deliberately reassigns - only version.reason is still expected
+    to match verbatim (the RPC passes it through unchanged).
+  */
   if (original.version.reason !== reconstructed.version.reason) errors.push(`version lineage mismatch: version.reason "${original.version.reason}" !== "${reconstructed.version.reason}"`);
-  if (original.version.createdAt !== reconstructed.version.createdAt) errors.push(`version lineage mismatch: version.createdAt "${original.version.createdAt}" !== "${reconstructed.version.createdAt}"`);
-  if ((original.version.parentVersionId ?? null) !== (reconstructed.version.parentVersionId ?? null)) errors.push("version lineage mismatch: parentVersionId diverged");
 
   if (original.metadata.schemaVersion !== reconstructed.metadata.schemaVersion) errors.push("schema version mismatch: metadata.schemaVersion diverged");
   if (original.metadata.serializerVersion !== reconstructed.metadata.serializerVersion) errors.push("serializer version mismatch: metadata.serializerVersion diverged");
