@@ -63,6 +63,7 @@ import type {
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 import type { AssemblyDensity } from "../professionalAtsAssembly/types";
 import type { PaperSize } from "../professionalAtsHtml/types";
+import { resolveMultiFieldOfStudyDisplay } from "../professionalAtsHtml/textExtraction";
 import type { DocxSourceMapping, ProfessionalAtsDocxStructureSummary, DocxPaginationIntentResult } from "./types";
 
 function val(v: StructuredTextValue | undefined): string | undefined {
@@ -231,6 +232,9 @@ function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips:
   const institutions = entry.institutions.map((i) => i.value);
   const fieldsOfStudy = entry.fieldsOfStudy.map((f) => f.value);
   const isMultiCredential = credentials.length >= 2 || institutions.length >= 2;
+  /* Phase 5D.6E TASK A - mirrors renderers.tsx's own fix exactly, see
+     resolveMultiFieldOfStudyDisplay's own comment. */
+  const fieldDisplay = resolveMultiFieldOfStudyDisplay(entry) ?? field;
 
   let headerLineCount = 0;
   if (isMultiCredential) {
@@ -256,7 +260,7 @@ function renderEducation(block: AssemblyBlock, ctx: BuildContext, blockGapTwips:
       headerLineCount++;
     }
   }
-  const meta = joinContact(isMultiCredential ? [location, dateRange, gpa ? `GPA: ${gpa}` : undefined] : [field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined]);
+  const meta = joinContact(isMultiCredential ? [location, dateRange, gpa ? `GPA: ${gpa}` : undefined] : [fieldDisplay, location, dateRange, gpa ? `GPA: ${gpa}` : undefined]);
   if (meta.length > 0) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(meta, ctx)], {
       spacingBeforeTwips: headerLineCount > 0 ? 0 : blockGapTwips,

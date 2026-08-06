@@ -104,7 +104,20 @@ export function validateBlockTextPreservation(block: AssemblyBlock, renderedBloc
   }
 
   for (const safe of SAFE_LEFTOVER_TOKENS) leftover = leftover.split(safe).join(" ");
-  leftover = leftover.replace(/[·,\-—:]/g, " ").replace(/\s+/g, " ").trim();
+  /* Phase 5D.6E TASK A - "/" added to the known-safe structural-join
+     punctuation set. renderers.tsx/docxRenderer.ts already legitimately
+     join multi-value education fields (institutions, and now
+     fieldsOfStudy - see resolveMultiFieldOfStudyDisplay) with " / "
+     when that IS the original document's own delimiter (preserved
+     verbatim from rawHeaderText, never invented) - this validator's
+     own safe-punctuation set just never accounted for that character,
+     so a legitimately-reused "/" was flagged as invented text (real
+     bug, found via r07's own education-7 fixture: "Example College /
+     Example Institute"). "/" carries no risk of masking a genuinely
+     invented WORD the way a missing letter/fragment would - only ever
+     a structural join character, exactly like the "," "-" "—" ":"
+     already in this same set. */
+  leftover = leftover.replace(/[·,\-—:/]/g, " ").replace(/\s+/g, " ").trim();
 
   return { blockId: block.id, missing, leftoverAfterRemoval: leftover, inventedSuspected: leftover.length > 0 };
 }

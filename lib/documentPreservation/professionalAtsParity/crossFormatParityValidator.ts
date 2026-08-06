@@ -54,7 +54,21 @@ function findInventedFragments(manifest: CanonicalParityManifest, snapshot: Norm
     if (!normalized) continue;
     leftover = leftover.replace(fragmentSearchPattern(normalized, "g"), " ");
   }
-  leftover = leftover.replace(/[\s.,;:·•\-–—'"()]+/g, " ").trim();
+  /* Phase 5D.6E TASK A - "/" added to the known-safe structural-join
+     punctuation set, mirroring professionalAtsHtml/
+     textPreservationValidator.ts's own identical fix. This module runs
+     the same "remove every expected fragment, whatever's left over is
+     invented" check but at the whole-document cross-format level, and
+     shares the same gap: renderers.tsx/docxRenderer.ts legitimately
+     join multi-institution/multi-fieldOfStudy education values with
+     " / " when that's the source document's own delimiter (see
+     resolveMultiFieldOfStudyDisplay) - this leftover regex just never
+     accounted for that character either, so the same real "/ / /"
+     invented-fragment failure (r07's own education-heavy fixture,
+     multiple multi-value education entries on one page) showed up
+     here too, one layer up from the per-block validator already
+     fixed. */
+  leftover = leftover.replace(/[\s.,;:·•\-–—'"()/]+/g, " ").trim();
   if (leftover.length === 0) return [];
   return [
     {

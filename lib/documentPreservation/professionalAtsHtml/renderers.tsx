@@ -50,6 +50,7 @@ import type {
 } from "../resumeStructured/types";
 import type { AssemblyBlock, ProfessionalAtsAssemblyDocument, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 import { PROFESSIONAL_ATS_SECTION_LABELS } from "../professionalAtsAssembly/sectionLabels";
+import { resolveMultiFieldOfStudyDisplay } from "./textExtraction";
 import { DENSITY_SPACING, type DensitySpacingTokens } from "./designTokens";
 
 type SubRange = { startIndex: number; endIndex: number };
@@ -286,7 +287,16 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
   const institutions = entry.institutions.map((i) => i.value);
   const fieldsOfStudy = entry.fieldsOfStudy.map((f) => f.value);
   const isMultiCredential = credentials.length >= 2 || institutions.length >= 2;
-  const hasAnyStructuredField = credential || institution || field || location || dateRange || gpa || items.length > 0;
+  /* Phase 5D.6E TASK A - a double major/minor/concentration under a
+     SINGLE credential+institution (fieldsOfStudy.length >= 2 but
+     isMultiCredential false) never took the multi-credential branch
+     below, so only field (fieldsOfStudy[0]) ever rendered - see
+     resolveMultiFieldOfStudyDisplay's own comment for the real bug
+     this fixes (r07's "Political Science"). undefined here (0-1
+     fieldsOfStudy) falls through to the existing singular `field`. */
+  const multiFieldDisplay = resolveMultiFieldOfStudyDisplay(entry);
+  const fieldDisplay = multiFieldDisplay ?? field;
+  const hasAnyStructuredField = credential || institution || fieldDisplay || location || dateRange || gpa || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="education-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
@@ -308,7 +318,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
                   {institution}
                 </strong>
               )}
-              {(field || location || dateRange || gpa) && <div>{joinContact([field, location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+              {(fieldDisplay || location || dateRange || gpa) && <div>{joinContact([fieldDisplay, location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
             </>
           )}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}

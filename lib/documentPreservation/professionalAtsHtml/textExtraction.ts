@@ -117,6 +117,44 @@ export function extractEducationEntryFragments(entry: EducationEntry): string[] 
   return fragments;
 }
 
+/*
+  Phase 5D.6E TASK A - Generic Academic Field Preservation. When an
+  education entry has 2+ fieldsOfStudy values (double major/minor/
+  concentration) under a SINGLE credential/institution, renderers.tsx's
+  EducationView single-credential branch (and docxRenderer.ts's
+  equivalent) only ever displayed entry.fieldOfStudy (index 0 by
+  construction) - every fieldOfStudy value past the first was silently
+  dropped from render, since the "multi" branch only activates on
+  credentials.length>=2 or institutions.length>=2, not on fieldsOfStudy
+  count. Real bug, found via r07's own "Political Science" missing-
+  fragment failure (a "Bachelor of Arts" in "Economics / Political
+  Science" from one institution - 1 credential, 1 institution, 2
+  fieldsOfStudy). This resolves the DISPLAY text for that case
+  generically:
+    1. Prefer the entry's own rawHeaderText verbatim line that already
+       contains every fieldsOfStudy value as a substring - this uses
+       the EXACT original delimiter (comma, slash, "and", whatever the
+       source actually had) with zero invention, per spec section 2.2's
+       "원본에 존재한 delimiter 정보가 있으면 보존" rule.
+    2. If no single rawHeaderText line contains all values (fields
+       genuinely split across lines, or a normalization mismatch), fall
+       back to a generic " / " join - the same join character this
+       module's own institutions.join(" / ") convention already uses
+       for exactly this "multiple structured values, no better join
+       signal" situation, so it stays internally consistent with the
+       existing renderer rather than inventing a second convention.
+  Returns undefined when fieldsOfStudy has 0-1 values - callers fall
+  back to their own singular entry.fieldOfStudy in that case, so every
+  existing single-major entry's render path is completely untouched.
+*/
+export function resolveMultiFieldOfStudyDisplay(entry: EducationEntry): string | undefined {
+  const values = entry.fieldsOfStudy.map((f) => f.value).filter((v) => v.trim().length > 0);
+  if (values.length < 2) return undefined;
+  const lines = entry.rawHeaderText.split("\n").map((l) => l.trim());
+  const verbatimLine = lines.find((line) => values.every((v) => line.includes(v)));
+  return verbatimLine ?? values.join(" / ");
+}
+
 export function extractCredentialEntryFragments(entry: CredentialEntry): string[] {
   const fragments: string[] = [];
   /* Phase 5D.3D - iterate names[]/issuers[] - see
