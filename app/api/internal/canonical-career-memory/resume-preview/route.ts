@@ -1,12 +1,43 @@
 import { NextResponse } from "next/server";
+import * as cheerio from "cheerio";
 import { withCanonicalAuth, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
-import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError, CanonicalProfileUnavailableForTemplateError, CanonicalVersionUnavailableError, TemplateRenderingError } from "@/lib/careerMemory/errors/domainErrors";
 import { resolveCanonicalTemplateId } from "@/lib/careerMemory/orchestration/canonicalRenderService";
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
 import { renderTemplateFromRuntime } from "@/lib/resumeTemplates/engine/renderTemplate";
 import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/types";
 import type { TemplateDensity } from "@/lib/resumeTemplates/contracts/types";
+
+/*
+  Phase 6I.3 - all 4 templates render a full standalone HTML document
+  whose <body> is a flat sequence of sibling page-wrapper elements, one
+  per physical page (confirmed for all 4: professional-ats's own
+  buildPaginatedPageHtml produces `<body>{page divs}</body>`; the other
+  3 share renderHtmlDocument, whose bodyHtml is the same flat sibling
+  structure - see paginatedHtmlString.ts / documentShell.tsx). Taking
+  "body's first element child" is therefore a genuinely template-
+  agnostic way to isolate page 1 for a thumbnail - no per-template
+  class-name special-casing (`.ats-page` vs `.page`) needed.
+
+  Also injects an explicit light color-scheme + white background at
+  the very start of <head><style> - none of the 4 templates set
+  `color-scheme` themselves, and 2 of the 4 (modern-sidebar, executive-
+  minimal - see their own pageStyles()) never set a body background at
+  all, leaving them exposed to a browser/OS "force dark" override that
+  ignores un-styled elements. This never touches any template's own
+  content or design; it only forecloses an unstyled default from being
+  overridden by a viewer-side dark mode.
+*/
+export function extractFirstPageDocument(fullHtml: string): string {
+  const $ = cheerio.load(fullHtml);
+  const firstPage = $("body").children().first();
+  const pageHtml = firstPage.length > 0 ? ($.html(firstPage) ?? "") : ($("body").html() ?? "");
+  const existingStyle = $("head style").first().html() ?? "";
+  const title = $("head title").first().text() || "Resume preview";
+  const lang = $("html").attr("lang") || "en";
+  const guardStyle = "html,body{margin:0;background:#ffffff;color-scheme:light;}";
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8" /><meta name="color-scheme" content="light" /><title>${title}</title><style>${guardStyle}${existingStyle}</style></head><body>${pageHtml}</body></html>`;
+}
 
 /*
   Phase 6I.2 - the untailored, PRE-generation counterpart to
@@ -54,6 +85,16 @@ export function makeHandleResumePreview(request: Request) {
       throw new ValidationError([`density "${rawDensity}" is not supported (expected "compact", "comfortable", or "spacious")`]);
     }
     const locale = url.searchParams.get("locale") ?? "en";
+    /*
+      Phase 6I.3 - thumbnail variant: page-1-only, for the 4-template
+      picker's small preview cards (spec section 3/4). Full multi-page
+      HTML (variant unset/"full") stays the default, used by the
+      Career Memory full-size preview (spec section 5).
+    */
+    const rawVariant = url.searchParams.get("variant") ?? "full";
+    if (rawVariant !== "full" && rawVariant !== "thumbnail") {
+      throw new ValidationError([`variant "${rawVariant}" is not supported (expected "full" or "thumbnail")`]);
+    }
 
     const templateId = resolveCanonicalTemplateId(rawTemplateId);
 
@@ -70,8 +111,21 @@ export function makeHandleResumePreview(request: Request) {
 
     try {
       if (rawFormat === "html") {
+        /*
+          Phase 6I.3 - raw text/html, NOT jsonResponse(). Every current
+          caller of format=html embeds this URL directly as
+          <iframe src="...">, which requires the HTTP response to BE an
+          HTML document. Returning JSON here (the pre-6I.3 shape) made
+          the browser render its own JSON viewer inside the iframe
+          instead of the resume - the exact, proven root cause of the
+          broken 4-template picker thumbnails (see this route's own
+          git history / the Phase 6I.3 report for the full diagnosis).
+          No current caller consumes format=html via fetch().json() -
+          confirmed by grep across the repo before making this change.
+        */
         const result = await renderTemplateFromRuntime(runtime, renderOptions, "html");
-        return jsonResponse({ html: result.html, pageCount: result.pageCount, templateId });
+        const html = rawVariant === "thumbnail" ? extractFirstPageDocument(result.html) : result.html;
+        return new NextResponse(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
       }
       const result = rawFormat === "pdf" ? await renderTemplateFromRuntime(runtime, renderOptions, "pdf") : await renderTemplateFromRuntime(runtime, renderOptions, "docx");
       const contentType = rawFormat === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

@@ -19,6 +19,29 @@
   all work without any extra handling.
 */
 import type { TemplateCapabilities, TemplateId } from "@/lib/resumeTemplates/contracts/types";
+import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
+
+/*
+  Phase 6I.3 - deterministic thumbnail scaling (spec section 3/4). The
+  previous version scaled an iframe by an arbitrary 357%/0.28 factor
+  with no relation to the template's actual page pixel size - this
+  computes scale = min(thumbW/pageW, thumbH/pageH) against the SAME
+  real page dimensions every template renders at (letter: 816x1056,
+  see lib/resumeTemplates/shared/paperSizes.ts - professional-ats's
+  own "8.5in"/"11in" CSS units resolve to the identical pixel size at
+  the standard 96 CSS px/inch, so this is accurate for all 4
+  templates, not just the 3 that already use this module's px values).
+  THUMBNAIL_HEIGHT_PX is derived FROM the real aspect ratio, so the
+  thumbnail box exactly matches the scaled page with no letterboxing
+  and no clipping - a fixed pixel size (not percentage-of-container)
+  is what makes the formula usable without a runtime ResizeObserver;
+  the grid below wraps to as many fixed-size columns as fit.
+*/
+const PAGE_WIDTH_PX = PAPER_DIMENSIONS.letter.widthPx;
+const PAGE_HEIGHT_PX = PAPER_DIMENSIONS.letter.heightPx;
+const THUMBNAIL_WIDTH_PX = 280;
+const THUMBNAIL_HEIGHT_PX = Math.round(THUMBNAIL_WIDTH_PX * (PAGE_HEIGHT_PX / PAGE_WIDTH_PX));
+const THUMBNAIL_SCALE = Math.min(THUMBNAIL_WIDTH_PX / PAGE_WIDTH_PX, THUMBNAIL_HEIGHT_PX / PAGE_HEIGHT_PX);
 
 export type CanonicalTemplatePickerProps = {
   templates: TemplateCapabilities[];
@@ -42,7 +65,7 @@ export type CanonicalTemplatePickerProps = {
 
 export default function CanonicalTemplatePicker({ templates, selectedTemplateId, onSelect, disabled = false, livePreviewUrl }: CanonicalTemplatePickerProps) {
   return (
-    <div role="radiogroup" aria-label="Choose a resume template" className="grid gap-4 sm:grid-cols-2">
+    <div role="radiogroup" aria-label="Choose a resume template" className="grid justify-center gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
       {templates.map((template) => {
         const isSelected = selectedTemplateId === template.id;
         return (
@@ -53,18 +76,20 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
             aria-checked={isSelected}
             disabled={disabled}
             onClick={() => onSelect(template.id)}
+            style={{ width: THUMBNAIL_WIDTH_PX }}
             className={`flex flex-col overflow-hidden rounded-2xl border-2 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
               isSelected ? "border-blue-600 bg-blue-50/60 ring-2 ring-blue-200" : "border-slate-200 bg-white hover:border-blue-300"
             }`}
           >
-            <div className="relative aspect-[3/4] overflow-hidden bg-slate-50">
+            <div className="relative overflow-hidden bg-white" style={{ width: THUMBNAIL_WIDTH_PX, height: THUMBNAIL_HEIGHT_PX }}>
               {livePreviewUrl ? (
                 <iframe
                   src={livePreviewUrl(template.id)}
                   title={`${template.name} live preview`}
                   loading="lazy"
+                  scrolling="no"
                   className="pointer-events-none absolute left-0 top-0 origin-top-left border-0"
-                  style={{ width: "357%", height: "357%", transform: "scale(0.28)" }}
+                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(${THUMBNAIL_SCALE})` }}
                 />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element

@@ -244,6 +244,48 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   }, [user]);
 
   /*
+    Phase 6I.3 (spec section 5) - once a canonical profile has a
+    resolved default_template_id, the Full Resume Preview below must
+    show the Canonical Runtime rendered through that template instead
+    of the legacy per-source preview (uploaded-file iframe or the
+    field-built CareerMemoryTemplatePreview), regardless of which
+    source the resume originally came from - canonical content/design
+    is now the single source of truth once it exists. "legacy" (no
+    canonical profile at all) keeps today's behavior completely
+    unchanged; "selection-required" is a defensive fallback (the
+    Phase 6I.2 hard gate above should already prevent a user from
+    reaching this deep into the page in that state, but the preview
+    itself must never silently fall back to a legacy render or an
+    arbitrary template if it somehow happens).
+  */
+  const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"loading" | "legacy" | "selection-required" | "canonical">("loading");
+  const [canonicalPreviewTemplateId, setCanonicalPreviewTemplateId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    fetch("/api/internal/canonical-career-memory/resolve-template")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.kind === "canonical") {
+          setCanonicalPreviewTemplateId(data.templateId);
+          setCanonicalPreviewStatus("canonical");
+        } else if (data?.kind === "selection-required") {
+          setCanonicalPreviewStatus("selection-required");
+        } else {
+          setCanonicalPreviewStatus("legacy");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCanonicalPreviewStatus("legacy");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  /*
     Revokes the previous object URL whenever a new file is uploaded (the
     cleanup below runs before the effect re-fires) and on unmount - object
     URLs are otherwise never released and leak for the life of the tab.
@@ -2170,6 +2212,31 @@ return;
     return <CareerMemoryTemplatePreview data={memoryData} />;
   }
 
+  function renderCanonicalResumePreview() {
+    return (
+      <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
+        <iframe
+          key={canonicalPreviewTemplateId}
+          src={`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=html`}
+          title="Canonical resume preview"
+          className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
+        />
+      </div>
+    );
+  }
+
+  function renderTemplateSelectionRequiredNotice() {
+    return (
+      <div className="flex min-h-[400px] items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 p-10 text-center">
+        <div>
+          <p className="text-5xl">🎨</p>
+          <h3 className="mt-5 text-2xl font-black text-slate-950">Choose a resume template first</h3>
+          <p className="mt-3 max-w-md text-sm leading-6 text-slate-600">Your canonical profile is ready, but no default template has been selected yet. Continue to Dashboard to choose one.</p>
+        </div>
+      </div>
+    );
+  }
+
   function renderFullResumePreview() {
     const isUploadedResumePreview = memoryData.resumeSource === "uploaded" && (uploadedResumeUrl || memoryData.uploadedResumeText || uploadedResumeKind !== "none");
     return (
@@ -2178,15 +2245,22 @@ return;
           <div><p className="text-sm font-black uppercase tracking-wide text-blue-600">Full Resume Preview</p><h2 className="mt-1 text-3xl font-black text-slate-950">Review your resume before saving</h2></div>
           <div className="flex gap-3"><button onClick={() => (mode === "import" ? setImportStage("parsed") : setCurrentStep(7))} className="rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600">Back</button><button onClick={() => { persistMemory(); continueToDashboard(); }} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Save & Continue</button></div>
         </div>
-        {/*
+        {canonicalPreviewStatus === "canonical" ? (
+          renderCanonicalResumePreview()
+        ) : canonicalPreviewStatus === "selection-required" ? (
+          renderTemplateSelectionRequiredNotice()
+        ) : (
+        /*
           Template/Font/Style selection only applies to a resume built from
           Career Memory fields (renderBuiltResumePreview) - it has no effect
           on an uploaded resume's own preview (renderUploadedOriginalPreview
           always shows the original file/text as-is), so showing those
           controls next to an uploaded-resume review was misleading. The
           sidebar itself is skipped for that case rather than left empty.
-        */}
-        {isUploadedResumePreview ? (
+          This whole legacy branch is unchanged for "legacy" (no canonical
+          profile) and while canonicalPreviewStatus is still "loading".
+        */
+        isUploadedResumePreview ? (
           <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
             {renderUploadedOriginalPreview()}
           </div>
@@ -2203,7 +2277,7 @@ return;
               {renderBuiltResumePreview()}
             </div>
           </div>
-        )}
+        ))}
       </div>
     );
   }
@@ -2884,7 +2958,7 @@ return;
           selectedTemplateId={null}
           onSelect={(templateId) => confirmTemplateGateAndContinue(templateId)}
           disabled={templateGateSaving}
-          livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html`}
+          livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
         />
       </div>
     </div>

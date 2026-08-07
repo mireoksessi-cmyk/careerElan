@@ -3032,7 +3032,7 @@ Choose which resume and cover letter will be used when generating your applicati
         selectedTemplateId={selectedTemplateId as any}
         onSelect={(templateId) => selectDefaultTemplate(templateId)}
         disabled={savingTemplate}
-        livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html`}
+        livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
       />
     </div>
   )}

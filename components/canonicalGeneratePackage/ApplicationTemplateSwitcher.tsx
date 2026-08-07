@@ -28,9 +28,18 @@ import type { TemplateId, TemplateCapabilities } from "@/lib/resumeTemplates/con
 
 export type ApplicationTemplateSwitcherProps = {
   applicationId: string;
+  /*
+    Phase 6I.3 (spec section 6) - optional callback fired right after a
+    successful switch (before OR after "Set as my default" - both are
+    a real template change for this application), so a caller showing
+    this application's own resume preview elsewhere on the page (e.g.
+    JobDetail) can refetch and reflect the change immediately, instead
+    of the preview staying stale until the next full remount.
+  */
+  onTemplateChanged?: () => void;
 };
 
-export default function ApplicationTemplateSwitcher({ applicationId }: ApplicationTemplateSwitcherProps) {
+export default function ApplicationTemplateSwitcher({ applicationId, onTemplateChanged }: ApplicationTemplateSwitcherProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "not-applicable">("loading");
   const [templates, setTemplates] = useState<TemplateCapabilities[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<TemplateId | null>(null);
@@ -81,6 +90,7 @@ export default function ApplicationTemplateSwitcher({ applicationId }: Applicati
       }
       setSelectedTemplateId(data.selectedTemplateId);
       setSavedAsDefault(setAsDefault);
+      onTemplateChanged?.();
     } catch {
       setError("Could not switch the template for this application.");
     } finally {

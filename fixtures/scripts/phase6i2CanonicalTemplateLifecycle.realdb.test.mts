@@ -23,11 +23,13 @@
   Requires local Supabase running.
 */
 import { createClient } from "@supabase/supabase-js";
+import * as cheerio from "cheerio";
 import { runWithAuthenticatedContext } from "../../lib/careerMemory/api/routeGuard";
 import { handleGetTemplatePreference, makeHandlePutTemplatePreference } from "../../app/api/internal/canonical-career-memory/template-preference/route";
 import { makeHandleResolveTemplate } from "../../app/api/internal/canonical-career-memory/resolve-template/route";
 import { makeHandleResumePreview } from "../../app/api/internal/canonical-career-memory/resume-preview/route";
 import { makeHandlePutApplicationTemplate } from "../../app/api/internal/canonical-generate-package/template/route";
+import { PAPER_DIMENSIONS } from "../../lib/resumeTemplates/shared/paperSizes";
 import { makeHandleGenerate } from "../../app/api/internal/canonical-generate-package/generate/route";
 import { checkTemplateGate, requireTemplateSelected } from "../../lib/careerMemory/services/canonicalTemplateGate";
 import { createCanonicalRepositories } from "../../lib/careerMemory/repositories/createRepositories";
@@ -220,18 +222,67 @@ async function main() {
     check("resolve-template: canonical -> source profile-default (no applicationId given)", bodyA.source, "profile-default");
   }
 
-  // ==================== 11. resume-preview (untailored) route ====================
+  // ==================== 11. resume-preview (untailored) route - full HTML ====================
+  // Phase 6I.3: format=html now returns RAW text/html, not JSON - this is
+  // the proven root cause of the broken 4-template picker thumbnails
+  // (every current caller embeds this URL as <iframe src>, which needs
+  // an actual HTML document, not a JSON envelope the browser would
+  // render with its own JSON viewer instead of the resume).
   {
     const res = await runWithAuthenticatedContext(userA.client as never, makeHandleResumePreview(getRequest("http://x/resume-preview?templateId=creative-timeline&format=html")));
     check("resume-preview: html format for userA (has profile+version) -> 200", res.status, 200);
-    const body = await res.json();
-    checkTrue("resume-preview html response includes non-empty html", typeof body.html === "string" && body.html.length > 0);
+    checkTrue("resume-preview: html format Content-Type is text/html, not application/json", (res.headers.get("content-type") || "").includes("text/html"));
+    const html = await res.text();
+    checkTrue("resume-preview: full html is real, non-empty raw HTML (starts with doctype)", html.trim().toLowerCase().startsWith("<!doctype html>"));
+    checkTrue("resume-preview: full html is NOT wrapped in a JSON envelope (no leading '{')", !html.trim().startsWith("{"));
 
     const resInvalid = await runWithAuthenticatedContext(userA.client as never, makeHandleResumePreview(getRequest("http://x/resume-preview?templateId=not-real&format=html")));
     check("resume-preview: invalid templateId -> 404 (unknown-template-id)", resInvalid.status, 404);
 
     const resLegacy = await runWithAuthenticatedContext(legacyUser.client as never, makeHandleResumePreview(getRequest("http://x/resume-preview?templateId=professional-ats&format=html")));
     check("resume-preview: legacy-only user (no profile) -> 404 CANONICAL_PROFILE_UNAVAILABLE", resLegacy.status, 404);
+
+    const resBadVariant = await runWithAuthenticatedContext(userA.client as never, makeHandleResumePreview(getRequest("http://x/resume-preview?templateId=professional-ats&format=html&variant=bogus")));
+    check("resume-preview: invalid variant param -> 422", resBadVariant.status, 422);
+  }
+
+  // ==================== 11b. resume-preview thumbnail variant (Phase 6I.3 - the actual bug fix under test) ====================
+  {
+    const templateIds = ["professional-ats", "modern-sidebar", "executive-minimal", "creative-timeline"];
+    const thumbnailHtml: Record<string, string> = {};
+    for (const templateId of templateIds) {
+      const res = await runWithAuthenticatedContext(userA.client as never, makeHandleResumePreview(getRequest(`http://x/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`)));
+      check(`thumbnail ${templateId}: 200`, res.status, 200);
+      checkTrue(`thumbnail ${templateId}: Content-Type text/html`, (res.headers.get("content-type") || "").includes("text/html"));
+      const html = await res.text();
+      thumbnailHtml[templateId] = html;
+      checkTrue(`thumbnail ${templateId}: non-empty HTML`, html.length > 0);
+      checkTrue(`thumbnail ${templateId}: explicit light color-scheme guard present (dark-mode isolation)`, html.includes("color-scheme"));
+      checkTrue(`thumbnail ${templateId}: explicit white background guard present (no black-lower-half regression)`, html.includes("background:#ffffff"));
+      checkTrue(`thumbnail ${templateId}: not a bare JSON envelope`, !html.trim().startsWith("{"));
+
+      const $ = cheerio.load(html);
+      const bodyChildren = $("body").children();
+      check(`thumbnail ${templateId}: body has exactly 1 top-level element (page-1-only, no multi-page bleed)`, bodyChildren.length, 1);
+    }
+    checkTrue("thumbnails: professional-ats and modern-sidebar are structurally distinct (real per-template rendering)", thumbnailHtml["professional-ats"] !== thumbnailHtml["modern-sidebar"]);
+    checkTrue("thumbnails: all 4 templates produce mutually distinct HTML (no shared fallback/placeholder reused across templates)", new Set(Object.values(thumbnailHtml)).size === 4);
+  }
+
+  // ==================== 11c. thumbnail deterministic scale formula (pure math, mirrors CanonicalTemplatePicker.tsx's own constants) ====================
+  {
+    const pageWidthPx = PAPER_DIMENSIONS.letter.widthPx;
+    const pageHeightPx = PAPER_DIMENSIONS.letter.heightPx;
+    const thumbnailWidthPx = 280;
+    const thumbnailHeightPx = Math.round(thumbnailWidthPx * (pageHeightPx / pageWidthPx));
+    const scale = Math.min(thumbnailWidthPx / pageWidthPx, thumbnailHeightPx / pageHeightPx);
+    checkTrue("thumbnail scale is > 0", scale > 0);
+    checkTrue("thumbnail scale is <= 1 (never upscaled)", scale <= 1);
+    const scaledWidth = pageWidthPx * scale;
+    const scaledHeight = pageHeightPx * scale;
+    checkTrue("scaled page width fits within the thumbnail box width (no horizontal clipping)", scaledWidth <= thumbnailWidthPx + 0.5);
+    checkTrue("scaled page height fits within the thumbnail box height (no vertical clipping)", scaledHeight <= thumbnailHeightPx + 0.5);
+    checkTrue("aspect ratio preserved (scaled box matches the thumbnail box almost exactly, no letterboxing waste)", Math.abs(scaledWidth - thumbnailWidthPx) < 1 && Math.abs(scaledHeight - thumbnailHeightPx) < 1);
   }
 
   // ==================== 12-14. /generate inherits profile default + hard gate (no real OpenAI call) ====================

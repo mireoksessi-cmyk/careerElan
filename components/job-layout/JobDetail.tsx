@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import A4Preview from "@/app/job-tracker/A4Preview";
 import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
@@ -87,6 +88,60 @@ export default function JobDetail({
   downloadPackage,
   deleteApplication,
 }: Props) {
+  /*
+    Phase 6I.3 (spec section 6) - for a canonical application, this tab
+    must render the TAILORED resume (application.selected_template_id
+    -> profile.default_template_id, via the same resolve-template
+    priority endpoint already used everywhere else) instead of the
+    legacy resume_text/resume_template_id snapshot A4DocumentPreview
+    always used before. Uses the EXISTING applicationId+overlay-based
+    /canonical-generate-package/preview route (unmodified - no new
+    tailored-render endpoint needed) via srcDoc rather than an iframe
+    src URL, since that route needs a POST body (templateId,
+    applicationId) that a plain <iframe src> GET cannot express - see
+    that route's own header comment for why it must stay POST (it
+    reconstructs and verifies the tailored overlay against the
+    profile's CURRENT resume version before rendering). Hooks are
+    declared before the early "no application selected" return below,
+    per React's rule that hooks always run in the same order.
+  */
+  const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"idle" | "loading" | "ready" | "not-applicable" | "error">("idle");
+  const [canonicalPreviewHtml, setCanonicalPreviewHtml] = useState<string | null>(null);
+
+  const loadCanonicalPreview = useCallback(async () => {
+    if (!selectedApplication || selectedApplication.generation_engine !== "canonical") {
+      setCanonicalPreviewStatus("not-applicable");
+      return;
+    }
+    setCanonicalPreviewStatus("loading");
+    try {
+      const resolveRes = await fetch(`/api/internal/canonical-career-memory/resolve-template?applicationId=${selectedApplication.id}`);
+      const resolution = resolveRes.ok ? await resolveRes.json() : null;
+      if (resolution?.kind !== "canonical") {
+        setCanonicalPreviewStatus("not-applicable");
+        return;
+      }
+      const previewRes = await fetch("/api/internal/canonical-generate-package/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId: selectedApplication.id, templateId: resolution.templateId, format: "html" }),
+      });
+      if (!previewRes.ok) {
+        setCanonicalPreviewStatus("error");
+        return;
+      }
+      const data = await previewRes.json();
+      setCanonicalPreviewHtml(data.html ?? "");
+      setCanonicalPreviewStatus("ready");
+    } catch {
+      setCanonicalPreviewStatus("error");
+    }
+  }, [selectedApplication]);
+
+  useEffect(() => {
+    loadCanonicalPreview();
+  }, [loadCanonicalPreview]);
+
   if (!selectedApplication) {
     return (
       <div className="rounded-3xl border border-blue-100 bg-white p-10 shadow-sm">
@@ -329,16 +384,22 @@ export default function JobDetail({
       <div className="mt-8">
         {selectedTab === "resume" && (
           <>
-            <A4DocumentPreview
-              text={
-                selectedApplication.resume_text ||
-                ""
-              }
-              templateId={selectedApplication.resume_template_id}
-            />
+            {canonicalPreviewStatus === "ready" ? (
+              <iframe key={selectedApplication.id} srcDoc={canonicalPreviewHtml ?? ""} title="Canonical resume preview" className="h-[1100px] w-full rounded-2xl border border-slate-200 bg-white" />
+            ) : canonicalPreviewStatus === "loading" ? (
+              <div className="flex h-[600px] items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-500">Loading resume preview...</div>
+            ) : (
+              <A4DocumentPreview
+                text={
+                  selectedApplication.resume_text ||
+                  ""
+                }
+                templateId={selectedApplication.resume_template_id}
+              />
+            )}
             {selectedApplication.generation_engine === "canonical" && (
               <div className="mt-6">
-                <ApplicationTemplateSwitcher applicationId={selectedApplication.id} />
+                <ApplicationTemplateSwitcher applicationId={selectedApplication.id} onTemplateChanged={loadCanonicalPreview} />
               </div>
             )}
           </>
