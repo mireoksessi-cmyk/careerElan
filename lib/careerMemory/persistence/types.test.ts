@@ -44,6 +44,7 @@ function checkTrue(label: string, actual: boolean) {
     preferences: { targetRoles: ["Ops Manager"] },
     schema_version: "1.0.0",
     serializer_version: "career-memory-runtime-v1",
+    default_template_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
   };
@@ -60,6 +61,7 @@ function checkTrue(label: string, actual: boolean) {
     preferences: {},
     schema_version: "1.0.0",
     serializer_version: "career-memory-runtime-v1",
+    default_template_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
   };

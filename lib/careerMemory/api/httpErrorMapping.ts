@@ -23,6 +23,12 @@ const STATUS_BY_CODE: Record<DomainErrorCode, number> = {
   /* Phase 6G additions - Canonical Generate Package. */
   MALFORMED_REQUEST: 400,
   QUOTA_EXCEEDED: 429,
+  /* Phase 6I.2 additions - Canonical Template Lifecycle. */
+  TEMPLATE_SELECTION_REQUIRED: 409,
+  INVALID_TEMPLATE_ID: 422,
+  CANONICAL_PROFILE_UNAVAILABLE: 404,
+  TEMPLATE_PREFERENCE_PERSIST_FAILED: 500,
+  TEMPLATE_PREVIEW_FAILED: 500,
 };
 
 export function errorResponse(error: unknown): NextResponse {

@@ -91,7 +91,7 @@ function assembleBundleFromRuntime(userId: string, profileId: string, runtime: C
   }));
 
   return {
-    profile: { ...insertBundle.profile, id: profileId, identity: insertBundle.profile.identity ?? {}, summary_text: insertBundle.profile.summary_text ?? null, preferences: insertBundle.profile.preferences ?? {}, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" },
+    profile: { ...insertBundle.profile, id: profileId, identity: insertBundle.profile.identity ?? {}, summary_text: insertBundle.profile.summary_text ?? null, preferences: insertBundle.profile.preferences ?? {}, default_template_id: insertBundle.profile.default_template_id ?? null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" },
     sourceDocuments,
     latestVersion,
     experiences,

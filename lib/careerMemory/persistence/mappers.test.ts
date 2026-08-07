@@ -68,7 +68,7 @@ const resume = runtime.resume;
   check("profile insert: schema_version from metadata", insertInput.schema_version, "resume-structured-v1");
   check("profile insert: serializer_version from metadata", insertInput.serializer_version, "career-memory-runtime-v1");
 
-  const profileRow = { id: "profile-1", user_id: "user-1", identity: insertInput.identity!, summary_text: insertInput.summary_text!, preferences: {}, schema_version: insertInput.schema_version, serializer_version: insertInput.serializer_version, created_at: "x", updated_at: "x" };
+  const profileRow = { id: "profile-1", user_id: "user-1", identity: insertInput.identity!, summary_text: insertInput.summary_text!, preferences: {}, schema_version: insertInput.schema_version, serializer_version: insertInput.serializer_version, default_template_id: null, created_at: "x", updated_at: "x" };
   const slice = careerProfileRowToRuntime(profileRow);
   check("profile row->runtime: identity.fullName round-trips", slice.identity?.fullName?.value, "JordanÉlan Lee");
 }
@@ -77,7 +77,7 @@ const resume = runtime.resume;
 {
   const insertInput = runtimeToCareerProfileInsertInput("user-1", runtime);
   check("profile insert: summary_text is professionalSummary.text", insertInput.summary_text, resume.professionalSummary!.text);
-  const slice = careerProfileRowToRuntime({ id: "p", user_id: "u", identity: {}, summary_text: "Bilingual operations coordinator with 6+ years managing cross-functional logistics for mid-size manufacturers.", preferences: {}, schema_version: "s", serializer_version: "v", created_at: "x", updated_at: "x" });
+  const slice = careerProfileRowToRuntime({ id: "p", user_id: "u", identity: {}, summary_text: "Bilingual operations coordinator with 6+ years managing cross-functional logistics for mid-size manufacturers.", preferences: {}, schema_version: "s", serializer_version: "v", default_template_id: null, created_at: "x", updated_at: "x" });
   check("profile row->runtime: professionalSummaryText round-trips", slice.professionalSummaryText, resume.professionalSummary!.text);
 }
 
@@ -373,7 +373,7 @@ const resume = runtime.resume;
 // ==================== 27. Aggregate: careerProfileToCanonicalRuntime full bundle reconstruction ====================
 {
   const bundle = {
-    profile: { id: "profile-1", user_id: "user-1", identity: {}, summary_text: null, preferences: {}, schema_version: "resume-structured-v1", serializer_version: "career-memory-runtime-v1", created_at: "x", updated_at: "x" },
+    profile: { id: "profile-1", user_id: "user-1", identity: {}, summary_text: null, preferences: {}, schema_version: "resume-structured-v1", serializer_version: "career-memory-runtime-v1", default_template_id: null, created_at: "x", updated_at: "x" },
     sourceDocuments: [
       { id: "doc-1", profile_id: "profile-1", storage_bucket: "b", storage_path: "p1", original_file_name: "jordan-lee-resume.pdf", mime_type: null, byte_size: null, content_hash: "sha256-aaa", parser_version: "pdf-parser-v3", file_type: "pdf" as const, analysis_status: "succeeded" as const, created_at: "2026-01-01T00:00:00.000Z", updated_at: "x" },
       { id: "doc-2", profile_id: "profile-1", storage_bucket: "b", storage_path: "p2", original_file_name: "jordan-lee-resume-v2.docx", mime_type: null, byte_size: null, content_hash: "sha256-bbb", parser_version: "docx-parser-v1", file_type: "docx" as const, analysis_status: "succeeded" as const, created_at: "2026-01-05T00:00:00.000Z", updated_at: "x" },

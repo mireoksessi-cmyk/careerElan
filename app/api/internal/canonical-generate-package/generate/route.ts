@@ -4,6 +4,7 @@ import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { isCanonicalGenerateEnabled } from "@/lib/careerMemory/orchestration/featureFlags";
 import { generateCanonicalPackage } from "@/lib/careerMemory/orchestration/canonicalGeneratePackageService";
+import { requireTemplateSelected } from "@/lib/careerMemory/services/canonicalTemplateGate";
 import { logCanonicalMetric, classifyErrorCode } from "@/lib/careerMemory/orchestration/canonicalProductionMetrics";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/types";
@@ -55,8 +56,31 @@ export function makeHandleGenerate(request: Request) {
     if (typeof body.applicationId !== "string" || body.applicationId.length === 0) {
       throw new ValidationError(["applicationId is required and must be a non-empty string"]);
     }
-    if (typeof body.templateId !== "string" || body.templateId.length === 0) {
-      throw new ValidationError(["templateId is required and must be a non-empty string"]);
+    /*
+      Phase 6I.2 - templateId is now OPTIONAL. Omitted -> inherit
+      career_profiles.default_template_id (spec section 10: "Generate
+      Package must inherit the selected template automatically").
+      Present -> an explicit per-application override (spec section
+      11); still flows through the SAME resolveCanonicalTemplateId()
+      validation inside renderCanonicalPackage as before - no new
+      validation path. requireTemplateSelected() enforces the hard
+      gate (section 13): a canonical profile with no default template
+      yet blocks generation with TEMPLATE_SELECTION_REQUIRED rather
+      than silently falling through to an arbitrary template. A
+      request with no canonical profile at all falls through to
+      generateCanonicalPackage()'s own existing
+      CanonicalProfileUnavailableError - unchanged, not duplicated
+      here.
+    */
+    if (body.templateId !== undefined && (typeof body.templateId !== "string" || body.templateId.length === 0)) {
+      throw new ValidationError(["templateId, if present, must be a non-empty string"]);
+    }
+    let templateId: string;
+    if (typeof body.templateId === "string") {
+      templateId = body.templateId;
+    } else {
+      const gate = await requireTemplateSelected(ctx.repos, ctx.userId);
+      templateId = gate?.defaultTemplateId ?? "";
     }
     if (typeof body.jobDescriptionText !== "string" || body.jobDescriptionText.trim().length === 0) {
       throw new ValidationError(["jobDescriptionText is required and must be a non-empty string"]);
@@ -88,19 +112,19 @@ export function makeHandleGenerate(request: Request) {
         jobDescriptionText: body.jobDescriptionText,
         jobAnalysisSummary,
         targetRole,
-        templateId: body.templateId,
+        templateId,
         paperSize,
         density,
         locale,
       });
     } catch (error) {
-      logCanonicalMetric({ event: "canonical_generate", applicationId: body.applicationId, templateId: body.templateId, outcome: "error", errorCode: classifyErrorCode(error), latencyMs: Date.now() - startedAt });
+      logCanonicalMetric({ event: "canonical_generate", applicationId: body.applicationId, templateId, outcome: "error", errorCode: classifyErrorCode(error), latencyMs: Date.now() - startedAt });
       throw error;
     }
     logCanonicalMetric({
       event: "canonical_generate",
       applicationId: body.applicationId,
-      templateId: body.templateId,
+      templateId,
       outcome: "success",
       latencyMs: Date.now() - startedAt,
       pdfPersisted: result.render.documentStorage.persisted,

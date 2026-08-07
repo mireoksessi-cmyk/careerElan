@@ -334,6 +334,51 @@ async function downloadPackage(type: "docx" | "pdf") {
   const baseName = `${selectedApplication.company}_${selectedApplication.job_title}`;
 
   if (selectedTab === "resume") {
+    /*
+      Phase 6I.2 (spec section 12) - a canonical-engine application's
+      resume_text/resume_template_id are the LEGACY snapshot columns,
+      never the actual canonical-tailored content; downloading those
+      for a canonical application would silently serve the wrong
+      document. Resolve the real template (application override, else
+      profile default) and re-render through the SAME tailored preview
+      route the in-app Resume Preview tab already uses for canonical
+      applications (0 AI calls, 0 quota - see that route's own header
+      comment) instead of the legacy exportPdfFromText/exportDocxFromText
+      path, which stays exactly as-is for every non-canonical
+      application (the vast majority of existing rows).
+    */
+    if (selectedApplication.generation_engine === "canonical") {
+      try {
+        const resolveRes = await fetch(`/api/internal/canonical-career-memory/resolve-template?applicationId=${selectedApplication.id}`);
+        const resolution = resolveRes.ok ? await resolveRes.json() : null;
+        if (resolution?.kind === "canonical") {
+          const previewRes = await fetch("/api/internal/canonical-generate-package/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ applicationId: selectedApplication.id, templateId: resolution.templateId, format: type }),
+          });
+          if (previewRes.ok) {
+            const blob = await previewRes.blob();
+            const downloadUrl = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = downloadUrl;
+            link.download = `${baseName}_Resume.${type}`;
+            link.click();
+            URL.revokeObjectURL(downloadUrl);
+            return;
+          }
+        }
+        if (resolution?.kind === "selection-required") {
+          alert("Choose a default resume template on Dashboard before downloading this resume.");
+          return;
+        }
+      } catch {
+        // Falls through to the legacy export below on any resolution/
+        // render failure - a download must still succeed with the
+        // legacy snapshot rather than fail outright.
+      }
+    }
+
     if (type === "docx") {
       await exportDocxFromText(
         selectedApplication.resume_text || "",

@@ -21,7 +21,20 @@ export type DomainErrorCode =
      every new route goes through the same single errorResponse()
      mapping everything else already uses. */
   | "MALFORMED_REQUEST"
-  | "QUOTA_EXCEEDED";
+  | "QUOTA_EXCEEDED"
+  /* Phase 6I.2 additions - Canonical Template Lifecycle. Distinct codes
+     (not reused generic VALIDATION_FAILED/NOT_FOUND) because the
+     product spec requires the client to distinguish "you haven't
+     picked a template yet" from an ordinary validation failure, and
+     "no canonical profile" specifically in the template-preference
+     context from the generic 404 the rest of this file already uses
+     for that (CanonicalProfileUnavailableError, kept unchanged
+     elsewhere). */
+  | "TEMPLATE_SELECTION_REQUIRED"
+  | "INVALID_TEMPLATE_ID"
+  | "CANONICAL_PROFILE_UNAVAILABLE"
+  | "TEMPLATE_PREFERENCE_PERSIST_FAILED"
+  | "TEMPLATE_PREVIEW_FAILED";
 
 export abstract class DomainError extends Error {
   abstract readonly code: DomainErrorCode;
@@ -191,6 +204,46 @@ export class GeneratedDocumentError extends PersistenceError {
 export class LegacyFallbackError extends PersistenceError {
   constructor(detail: string) {
     super(`legacy fallback itself failed: ${detail}`);
+  }
+}
+
+/*
+  Phase 6I.2 - Canonical Template Lifecycle domain errors. See this
+  file's own header comment on the DomainErrorCode union above for why
+  these are distinct codes rather than reused generic ones.
+*/
+export class TemplateSelectionRequiredError extends DomainError {
+  readonly code = "TEMPLATE_SELECTION_REQUIRED" as const;
+  constructor(message = "A canonical resume template must be selected before continuing.") {
+    super(message);
+  }
+}
+
+export class InvalidTemplateIdError extends DomainError {
+  readonly code = "INVALID_TEMPLATE_ID" as const;
+  constructor(rawTemplateId: string) {
+    super(`"${rawTemplateId}" is not a valid canonical template id.`);
+  }
+}
+
+export class CanonicalProfileUnavailableForTemplateError extends DomainError {
+  readonly code = "CANONICAL_PROFILE_UNAVAILABLE" as const;
+  constructor(message = "No canonical profile exists for this user yet - import a resume first.") {
+    super(message);
+  }
+}
+
+export class TemplatePreferencePersistFailedError extends DomainError {
+  readonly code = "TEMPLATE_PREFERENCE_PERSIST_FAILED" as const;
+  constructor(detail: string) {
+    super(`Template preference could not be saved: ${detail}`);
+  }
+}
+
+export class TemplatePreviewFailedError extends DomainError {
+  readonly code = "TEMPLATE_PREVIEW_FAILED" as const;
+  constructor(detail: string) {
+    super(`Template preview failed: ${detail}`);
   }
 }
 

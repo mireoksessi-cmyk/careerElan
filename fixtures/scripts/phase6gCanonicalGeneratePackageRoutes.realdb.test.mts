@@ -339,8 +339,18 @@ async function main() {
     const missingAppId = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { templateId: "professional-ats", jobDescriptionText: "x" })));
     check("generate route: missing applicationId -> 422 (fails before any AI call)", missingAppId.status, 422);
 
+    /*
+      Phase 6I.2 changed this: templateId became OPTIONAL (omission now
+      means "inherit career_profiles.default_template_id"), so a
+      missing templateId is no longer a validation error by itself -
+      fixtureA's profile (seeded pre-6I.2, no default_template_id set)
+      correctly hits the hard gate instead: 409 TEMPLATE_SELECTION_REQUIRED,
+      still before any AI call, still zero side effects - the same
+      underlying guarantee this assertion always checked, just via the
+      new, more specific status/error code.
+    */
     const missingTemplateId = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, jobDescriptionText: "x" })));
-    check("generate route: missing templateId -> 422 (fails before any AI call)", missingTemplateId.status, 422);
+    check("generate route: missing templateId with no profile default set -> 409 TEMPLATE_SELECTION_REQUIRED (fails before any AI call)", missingTemplateId.status, 409);
 
     const missingJobText = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats" })));
     check("generate route: missing jobDescriptionText -> 422 (fails before any AI call)", missingJobText.status, 422);
@@ -475,8 +485,11 @@ async function main() {
     // Missing templateId still fires first regardless of the spoofed
     // userId - proves the spoofed field has literally zero effect on
     // validation order/outcome, not just on the eventual DB write.
+    // Phase 6I.2: this now resolves to the hard gate (409), same reasoning
+    // as the "missing templateId" case above - still fires before the
+    // spoofed userId could ever matter.
     const spoofedUserIdMissingTemplate = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { userId: userB.userId, applicationId: fixtureA.application.id, jobDescriptionText: "x" })));
-    check("generate route: body userId spoof (pointing at a different real user) has zero effect on validation - still fails on the real missing field (templateId), same as without the spoof", spoofedUserIdMissingTemplate.status, 422);
+    check("generate route: body userId spoof (pointing at a different real user) has zero effect on validation - still fails the same hard gate (409) as without the spoof", spoofedUserIdMissingTemplate.status, 409);
   });
 
   // ==================== retry-after-flag-toggle: a request correctly rejected while OFF succeeds once genuinely ON (no residual 404 caching) ====================
@@ -527,7 +540,8 @@ async function main() {
       runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, jobDescriptionText: "x" }))),
       runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, jobDescriptionText: "x" }))),
     ]);
-    check("generate route: two concurrent identical malformed (missing templateId) requests both independently return 422 - no race causes one to succeed or crash", [dupA.status, dupB.status], [422, 422]);
+    // Phase 6I.2: missing templateId now resolves to the hard gate (409) for this fixture, same reasoning as above.
+    check("generate route: two concurrent identical requests (missing templateId, no profile default) both independently return 409 - no race causes one to succeed or crash", [dupA.status, dupB.status], [409, 409]);
   });
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

@@ -979,6 +979,39 @@ export default function PasteJobPage() {
   const [resumeTemplateId, setResumeTemplateId] = useState<string | null>(null);
 
   /*
+    Phase 6I.2 (spec section 9/12) - when this user has a canonical
+    profile with a resolved template (an application override, once
+    one exists, or the profile default), the Resume Preview/PDF/DOCX
+    below render the user's actual Canonical Resume through that
+    template instead of the legacy resume_template_id path - even
+    before Generate Package has ever run, so the initial preview never
+    reverts to the legacy visual style "merely because tailoring
+    hasn't run yet." null means "no canonical resolution applies -
+    keep using the existing legacy resumeTemplateId path unchanged"
+    (matches resolveApplicationTemplateId's own "legacy"/
+    "selection-required" results, both of which fall through to null
+    here rather than block this pre-existing preview).
+  */
+  const [canonicalPreviewTemplateId, setCanonicalPreviewTemplateId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    fetch("/api/internal/canonical-career-memory/resolve-template")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        setCanonicalPreviewTemplateId(data?.kind === "canonical" ? data.templateId : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCanonicalPreviewTemplateId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  /*
     Resume tab only: "preview" shows the new DocumentIR-based, template-
     aware A4DocumentPreview (read-only); "edit" shows the original
     flat-text A4Preview with its per-page <textarea> editing. Cover
@@ -1128,6 +1161,9 @@ const [
     changing even one section still invalidates the cached Blob.
   */
   function resumePdfKey() {
+    if (canonicalPreviewTemplateId) {
+      return `canonical::${canonicalPreviewTemplateId}`;
+    }
     const layout = packageData.packageAnalysis?.dpeOriginalLayout;
     if (layout) {
       return `tree::${resumeTemplateId}::${JSON.stringify(layout.nodeTexts)}`;
@@ -1141,10 +1177,17 @@ const [
       return resumePdfBlob;
     }
 
-    const layout = packageData.packageAnalysis?.dpeOriginalLayout;
-    const blob = layout
-      ? await buildOriginalLayoutPdfBlob({ tree: layout.tree, designTokens: layout.designTokens, nodeTexts: layout.nodeTexts })
-      : await buildPdfBlob(packageData.resume, resumeTemplateId);
+    let blob: Blob;
+    if (canonicalPreviewTemplateId) {
+      const res = await fetch(`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=pdf`);
+      if (!res.ok) throw new Error("canonical resume preview failed");
+      blob = await res.blob();
+    } else {
+      const layout = packageData.packageAnalysis?.dpeOriginalLayout;
+      blob = layout
+        ? await buildOriginalLayoutPdfBlob({ tree: layout.tree, designTokens: layout.designTokens, nodeTexts: layout.nodeTexts })
+        : await buildPdfBlob(packageData.resume, resumeTemplateId);
+    }
     const url = URL.createObjectURL(blob);
 
     if (resumePdfUrlRef.current) {
@@ -1161,7 +1204,7 @@ const [
 
   useEffect(() => {
     if (!(selectedPreview === "resume" && resumeViewMode === "preview")) return;
-    if (!packageData.resume) return;
+    if (!packageData.resume && !canonicalPreviewTemplateId) return;
     if (resumePdfKeyRef.current === resumePdfKey() && resumePdfUrl) return;
 
     let cancelled = false;
@@ -1180,7 +1223,7 @@ const [
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPreview, resumeViewMode, packageData.resume, packageData.packageAnalysis, resumeTemplateId]);
+  }, [selectedPreview, resumeViewMode, packageData.resume, packageData.packageAnalysis, resumeTemplateId, canonicalPreviewTemplateId]);
 
   useEffect(() => {
     return () => {
@@ -2692,6 +2735,21 @@ async function downloadPdf() {
 
 async function downloadDocx() {
   if (selectedPreview === "resume") {
+    if (canonicalPreviewTemplateId) {
+      const res = await fetch(`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=docx`);
+      if (!res.ok) {
+        alert("Could not generate the DOCX for your canonical resume template.");
+        return;
+      }
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `${getFileBaseName()}_${selectedPreview}.docx`;
+      link.click();
+      URL.revokeObjectURL(downloadUrl);
+      return;
+    }
     await exportDocxFromText(
       packageData[selectedPreview],
       `${getFileBaseName()}_${selectedPreview}`,

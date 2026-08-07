@@ -32,6 +32,16 @@ export type CareerProfileRow = {
   preferences: Record<string, unknown>;
   schema_version: string;
   serializer_version: string;
+  /*
+    Phase 6I.2 - profile-level canonical template preference. NULL until
+    the user explicitly picks one via PUT
+    /api/internal/canonical-career-memory/template-preference - never
+    auto-assigned. See supabase/migrations/
+    20260808010000_canonical_default_template_id.sql for the CHECK
+    constraint (same 4 ids as applications.selected_template_id, a
+    deliberately separate column - see that migration's own comment).
+  */
+  default_template_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -44,6 +54,7 @@ export type CareerProfileInsertInput = {
   preferences?: Record<string, unknown>;
   schema_version: string;
   serializer_version: string;
+  default_template_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };

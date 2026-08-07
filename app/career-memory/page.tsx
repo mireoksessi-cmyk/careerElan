@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
+import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
 import {
   MAX_UPLOADED_RESUMES,
   MAX_CREATED_RESUMES,
@@ -222,6 +223,25 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [importStage, setImportStage] = useState<ImportStage>("idle");
   const [uploadedResumeUrl, setUploadedResumeUrl] = useState("");
   const [uploadedResumeKind, setUploadedResumeKind] = useState<UploadedResumeKind>("none");
+
+  /*
+    Phase 6I.2 - the hard gate (spec section 13/14): forward navigation
+    to Dashboard is blocked, in-place, whenever a canonical profile
+    exists but has no default_template_id yet - whether that profile
+    was just created this session or is a pre-existing one from before
+    this phase shipped. templateGateTemplates/templateGateError are
+    only populated while templateGateBlocking is true.
+  */
+  const [templateGateBlocking, setTemplateGateBlocking] = useState(false);
+  const [templateGateTemplates, setTemplateGateTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
+  const [templateGateSaving, setTemplateGateSaving] = useState(false);
+  const [templateGateError, setTemplateGateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    checkAndBlockOnTemplateGate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   /*
     Revokes the previous object URL whenever a new file is uploaded (the
@@ -813,10 +833,51 @@ return true;
   alert("Career Memory saved.");
 }
 
+  /*
+    Phase 6I.2 hard gate (spec section 13/14) - shared by two call
+    sites: proactively on mount (so an EXISTING user with a canonical
+    profile and no default_template_id sees the blocking prompt "next
+    time they enter Career Memory," per section 14, without needing to
+    click anything first) and inside continueToDashboard (so a brand
+    new import can't slip past the same check via a faster click).
+    Returns true when blocking was triggered - callers use that to
+    decide whether to proceed with whatever they were about to do.
+    Legacy-only users (no canonical profile at all) are unaffected -
+    templateGateBlocking simply never becomes true for them.
+  */
+  async function checkAndBlockOnTemplateGate(): Promise<boolean> {
+    try {
+      const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
+      if (prefRes.ok) {
+        const prefData = await prefRes.json();
+        if (!prefData.defaultTemplateId) {
+          const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
+          if (profileRes.status !== 404) {
+            const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+            const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+            setTemplateGateTemplates(templatesData.templates ?? []);
+            setTemplateGateError(null);
+            setTemplateGateBlocking(true);
+            return true;
+          }
+        }
+      }
+    } catch {
+      // Best-effort gate check - a network hiccup here must not trap
+      // the user; treat it as "not blocking" rather than an
+      // inconclusive block.
+    }
+    return false;
+  }
+
   async function continueToDashboard() {
   const saved = await persistMemory();
 
   if (!saved) {
+    return;
+  }
+
+  if (await checkAndBlockOnTemplateGate()) {
     return;
   }
 
@@ -831,6 +892,30 @@ return true;
   */
   await refresh();
   router.replace("/dashboard");
+}
+
+async function confirmTemplateGateAndContinue(templateId: string) {
+  setTemplateGateSaving(true);
+  setTemplateGateError(null);
+  try {
+    const res = await fetch("/api/internal/canonical-career-memory/template-preference", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setTemplateGateError(data?.error?.message || "Could not save your template selection.");
+      return;
+    }
+    setTemplateGateBlocking(false);
+    await refresh();
+    router.replace("/dashboard");
+  } catch {
+    setTemplateGateError("Could not save your template selection.");
+  } finally {
+    setTemplateGateSaving(false);
+  }
 }
 function continueUploadedDashboard() {
   router.replace("/dashboard");
@@ -2783,6 +2868,28 @@ return;
 </header>
 
 {renderRequiredBanner()}
+
+{templateGateBlocking && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+    <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
+      <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose your resume template</p>
+      <h2 className="mt-1 text-xl font-black text-slate-950">One more step before Dashboard</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-500">
+        Pick one of the 4 Canonical Templates. This becomes your default design everywhere until you change it.
+      </p>
+      {templateGateError && <p className="mt-3 text-xs font-semibold text-red-600">{templateGateError}</p>}
+      <div className="mt-4">
+        <CanonicalTemplatePicker
+          templates={templateGateTemplates as any}
+          selectedTemplateId={null}
+          onSelect={(templateId) => confirmTemplateGateAndContinue(templateId)}
+          disabled={templateGateSaving}
+          livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html`}
+        />
+      </div>
+    </div>
+  </div>
+)}
 
 {mode === "import" && (
   <div className="rounded-2xl border border-blue-100 bg-white p-10 shadow-sm">

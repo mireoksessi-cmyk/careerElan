@@ -69,6 +69,7 @@ class InMemoryCareerProfileRepository implements CareerProfileRepository {
       preferences: input.preferences ?? {},
       schema_version: input.schema_version,
       serializer_version: input.serializer_version,
+      default_template_id: input.default_template_id ?? null,
       created_at: input.created_at ?? "2026-01-01T00:00:00.000Z",
       updated_at: input.updated_at ?? "2026-01-01T00:00:00.000Z",
     };

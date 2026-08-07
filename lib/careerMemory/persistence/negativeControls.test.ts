@@ -64,7 +64,7 @@ function buildValidBundle(): CareerMemoryPersistenceBundle {
   };
   const toRow = (input: Record<string, unknown>, index: number, prefix: string) => ({ ...input, id: (input.id as string) ?? `${prefix}-${index}`, created_at: "2026-01-01T00:10:00.000Z", updated_at: "2026-01-01T00:10:00.000Z" });
   return {
-    profile: { id: "profile-1", user_id: "user-1", identity: insertBundle.profile.identity ?? {}, summary_text: insertBundle.profile.summary_text ?? null, preferences: {}, schema_version: insertBundle.profile.schema_version, serializer_version: insertBundle.profile.serializer_version, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" },
+    profile: { id: "profile-1", user_id: "user-1", identity: insertBundle.profile.identity ?? {}, summary_text: insertBundle.profile.summary_text ?? null, preferences: {}, schema_version: insertBundle.profile.schema_version, serializer_version: insertBundle.profile.serializer_version, default_template_id: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" },
     sourceDocuments,
     latestVersion,
     experiences: insertBundle.experiences.map((e, i) => toRow(e as Record<string, unknown>, i, "exp") as any),

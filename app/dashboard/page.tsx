@@ -19,6 +19,7 @@ import CareerFairCard from "@/components/careerFairs/CareerFairCard";
 import ProvinceSelect from "@/components/careerFairs/ProvinceSelect";
 import { useUserLocation } from "@/lib/careerFairs/useUserLocation";
 import type { RecommendedCareerFair } from "@/lib/careerFairs/types";
+import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
 
 const FREE_PACKAGE_LIMIT = 3;
 const menuItems = [
@@ -985,6 +986,48 @@ const [canonicalImportEligible, setCanonicalImportEligible] = useState(false);
 const [importingResumeId, setImportingResumeId] = useState<string | null>(null);
 const [canonicalImportMessage, setCanonicalImportMessage] = useState<string | null>(null);
 
+/*
+  Phase 6I.2 - the hard gate (spec section 13): once a canonical
+  profile exists, `default_template_id` is either a real value
+  ("selected") or NULL ("needs-selection", which blocks navigation-like
+  actions until resolved). "not-applicable" covers both "flag off" and
+  "no canonical profile yet" - both mean nothing to render here.
+*/
+const [templateGateStatus, setTemplateGateStatus] = useState<"loading" | "not-applicable" | "needs-selection" | "selected">("loading");
+const [availableTemplates, setAvailableTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
+const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+const [savingTemplate, setSavingTemplate] = useState(false);
+const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
+
+async function checkTemplateGate() {
+  try {
+    const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
+    if (!prefRes.ok) {
+      setTemplateGateStatus("not-applicable");
+      return;
+    }
+    const prefData = await prefRes.json();
+    if (prefData.defaultTemplateId) {
+      setSelectedTemplateId(prefData.defaultTemplateId);
+      setTemplateGateStatus("selected");
+      return;
+    }
+
+    const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
+    if (profileRes.status === 404) {
+      setTemplateGateStatus("not-applicable");
+      return;
+    }
+
+    const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+    const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+    setAvailableTemplates(templatesData.templates ?? []);
+    setTemplateGateStatus("needs-selection");
+  } catch {
+    setTemplateGateStatus("not-applicable");
+  }
+}
+
 useEffect(() => {
   let cancelled = false;
 
@@ -993,14 +1036,22 @@ useEffect(() => {
       const configRes = await fetch("/api/internal/canonical-generate-package/config");
       const configData = configRes.ok ? await configRes.json() : { templateSelectorEnabled: false };
       if (!configData.templateSelectorEnabled) {
-        if (!cancelled) setCanonicalImportEligible(false);
+        if (!cancelled) {
+          setCanonicalImportEligible(false);
+          setTemplateGateStatus("not-applicable");
+        }
         return;
       }
 
       const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
-      if (!cancelled) setCanonicalImportEligible(profileRes.status === 404);
+      if (cancelled) return;
+      setCanonicalImportEligible(profileRes.status === 404);
+      await checkTemplateGate();
     } catch {
-      if (!cancelled) setCanonicalImportEligible(false);
+      if (!cancelled) {
+        setCanonicalImportEligible(false);
+        setTemplateGateStatus("not-applicable");
+      }
     }
   }
 
@@ -1009,6 +1060,29 @@ useEffect(() => {
     cancelled = true;
   };
 }, []);
+
+async function selectDefaultTemplate(templateId: string) {
+  setSavingTemplate(true);
+  setTemplateSaveError(null);
+  try {
+    const res = await fetch("/api/internal/canonical-career-memory/template-preference", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setTemplateSaveError(data?.error?.message || "Could not save your template selection.");
+      return;
+    }
+    setSelectedTemplateId(data.defaultTemplateId);
+    setTemplateGateStatus("selected");
+  } catch {
+    setTemplateSaveError("Could not save your template selection.");
+  } finally {
+    setSavingTemplate(false);
+  }
+}
 
 async function prepareResumeForCanonicalTemplates(resumeId: string) {
   setImportingResumeId(resumeId);
@@ -1025,7 +1099,8 @@ async function prepareResumeForCanonicalTemplates(resumeId: string) {
       return;
     }
     setCanonicalImportEligible(false);
-    setCanonicalImportMessage("This resume is ready for Canonical Templates.");
+    setCanonicalImportMessage("This resume is ready for Canonical Templates. Choose a template below.");
+    await checkTemplateGate();
   } catch {
     setCanonicalImportMessage("Could not prepare this resume for Canonical Templates.");
   } finally {
@@ -2942,6 +3017,49 @@ Choose which resume and cover letter will be used when generating your applicati
 
   {canonicalImportMessage && (
     <p className="mt-2 text-xs font-semibold text-slate-600">{canonicalImportMessage}</p>
+  )}
+
+  {templateGateStatus === "needs-selection" && (
+    <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+      <p className="mb-1 text-sm font-bold text-slate-900">Choose your resume template</p>
+      <p className="mb-3 text-xs text-slate-600">
+        Pick one of the 4 Canonical Templates. This becomes your default design everywhere — Dashboard, Paste Job, and generated
+        packages — until you change it.
+      </p>
+      {templateSaveError && <p className="mb-3 text-xs font-semibold text-red-600">{templateSaveError}</p>}
+      <CanonicalTemplatePicker
+        templates={availableTemplates as any}
+        selectedTemplateId={selectedTemplateId as any}
+        onSelect={(templateId) => selectDefaultTemplate(templateId)}
+        disabled={savingTemplate}
+        livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html`}
+      />
+    </div>
+  )}
+
+  {templateGateStatus === "selected" && selectedTemplateId && (
+    <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-xs font-semibold text-slate-600">
+        Default template: <span className="text-slate-900">{selectedTemplateId}</span>
+      </p>
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+            const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+            setAvailableTemplates(templatesData.templates ?? []);
+            setTemplateSaveError(null);
+            setTemplateGateStatus("needs-selection");
+          } catch {
+            setTemplateSaveError("Could not load templates.");
+          }
+        }}
+        className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+      >
+        Change Template
+      </button>
+    </div>
   )}
 </div>
 <div>
