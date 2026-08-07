@@ -38,7 +38,7 @@ function isValidPaperSize(value: unknown): value is PaperSize {
   return value === "letter" || value === "a4";
 }
 function isValidDensity(value: unknown): value is TemplateDensity {
-  return value === "compact" || value === "comfortable" || value === "spacious";
+  return value === "compact" || value === "comfortable" || value === "spacious" || value === "balanced";
 }
 
 export function makeHandleGenerate(request: Request) {

@@ -19,9 +19,7 @@
 */
 import OpenAI, { APIConnectionTimeoutError } from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createCanonicalRepositories } from "../repositories/createRepositories";
-import { CanonicalCareerMemoryService } from "../services/canonicalCareerMemoryService";
-import type { CanonicalResumeRuntime } from "../runtime/types";
+import { getCanonicalRuntimeViaServiceRole } from "./canonicalMemoryBundleFetch";
 import { applyOverlay } from "../runtime/overlayRuntime";
 import { validateAiTailoringResponse } from "./canonicalTailoringService";
 import { buildCanonicalTailoringPrompt } from "./canonicalTailoringPrompt";
@@ -82,24 +80,17 @@ async function callTailoringOpenAi(promptText: string): Promise<string> {
 }
 
 export async function generateCanonicalPackage(client_: SupabaseClient, input: CanonicalGeneratePackageInput): Promise<CanonicalGeneratePackageResult> {
-  const repos = createCanonicalRepositories(client_);
-  const memoryService = new CanonicalCareerMemoryService(repos);
-
-  const profile = await repos.profiles.getByUserId(input.userId);
-  if (!profile) {
-    throw new CanonicalProfileUnavailableError("no canonical profile exists for this user");
-  }
-
-  let runtime: CanonicalResumeRuntime | null;
+  let lookup;
   try {
-    runtime = await memoryService.getCanonicalRuntime(input.userId);
+    lookup = await getCanonicalRuntimeViaServiceRole(client_, input.userId);
   } catch (error) {
     throw new CanonicalDeserializationError(error instanceof Error ? error.message.slice(0, 200) : "unknown deserialization failure");
   }
-
-  if (!runtime) {
+  if (!lookup.found) {
+    if (lookup.reason === "no_profile") throw new CanonicalProfileUnavailableError("no canonical profile exists for this user");
     throw new CanonicalVersionUnavailableError("no resume version exists for this profile");
   }
+  const { profile, runtime } = lookup;
   if (!runtime.version?.id) {
     throw new CanonicalVersionUnavailableError("no resume version exists for this profile");
   }

@@ -123,6 +123,45 @@ async function main() {
         checkTrue(`constraints: ${label} CHECK constraint rejects an invalid value at the database layer`, stderr.includes("violates check constraint"));
       }
     }
+
+    // Positive counterpart: every REAL enum value for each constrained
+    // column is accepted without error - proves the CHECK lists aren't
+    // accidentally too narrow (the exact class of bug found and fixed
+    // in the route-level density validator earlier in this round).
+    const { execFileSync: execFileSyncOk } = await import("node:child_process");
+    const validValueAttempts: Array<[string, string]> = [
+      ["selected_template_id=professional-ats", `update applications set selected_template_id = 'professional-ats' where id = '${application.id}';`],
+      ["selected_template_id=modern-sidebar", `update applications set selected_template_id = 'modern-sidebar' where id = '${application.id}';`],
+      ["selected_template_id=executive-minimal", `update applications set selected_template_id = 'executive-minimal' where id = '${application.id}';`],
+      ["selected_template_id=creative-timeline", `update applications set selected_template_id = 'creative-timeline' where id = '${application.id}';`],
+      ["generation_engine=legacy", `update applications set generation_engine = 'legacy' where id = '${application.id}';`],
+      ["generation_engine=canonical", `update applications set generation_engine = 'canonical' where id = '${application.id}';`],
+      ["fallback_reason=no_canonical_profile", `update applications set fallback_reason = 'no_canonical_profile' where id = '${application.id}';`],
+      ["fallback_reason=no_canonical_version", `update applications set fallback_reason = 'no_canonical_version' where id = '${application.id}';`],
+      ["fallback_reason=deserialization_failure", `update applications set fallback_reason = 'deserialization_failure' where id = '${application.id}';`],
+      ["fallback_reason=overlay_validation_failure", `update applications set fallback_reason = 'overlay_validation_failure' where id = '${application.id}';`],
+      ["fallback_reason=template_rendering_failure", `update applications set fallback_reason = 'template_rendering_failure' where id = '${application.id}';`],
+      ["fallback_reason=generated_document_failure", `update applications set fallback_reason = 'generated_document_failure' where id = '${application.id}';`],
+      ["fallback_reason=feature_flag_disabled", `update applications set fallback_reason = 'feature_flag_disabled' where id = '${application.id}';`],
+      ["fallback_reason=transient_failure", `update applications set fallback_reason = 'transient_failure' where id = '${application.id}';`],
+    ];
+    for (const [label, sql] of validValueAttempts) {
+      try {
+        execFileSyncOk("docker", ["exec", "supabase_db_careerelan", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
+        checkTrue(`constraints: real enum value ${label} is accepted (CHECK list is not accidentally too narrow)`, true);
+      } catch {
+        checkTrue(`constraints: real enum value ${label} is accepted (CHECK list is not accidentally too narrow)`, false);
+      }
+    }
+
+    // NULL is explicitly allowed on all 3 constrained columns (CHECK only
+    // fires when the value is non-null, per each constraint's own "IS NULL OR ..." shape).
+    try {
+      execFileSyncOk("docker", ["exec", "supabase_db_careerelan", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", `update applications set selected_template_id = null, generation_engine = null, fallback_reason = null where id = '${application.id}';`], { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
+      checkTrue("constraints: setting all 3 constrained columns back to NULL succeeds (nullable, CHECK only fires on non-null)", true);
+    } catch {
+      checkTrue("constraints: setting all 3 constrained columns back to NULL succeeds (nullable, CHECK only fires on non-null)", false);
+    }
   }
 
   // ==================== B. generated-documents Storage bucket RLS ====================
@@ -148,6 +187,38 @@ async function main() {
 
     const adminUpload = await admin.storage.from("generated-documents").upload(`${userA.userId}/admin-test.pdf`, bytes, { contentType: "application/pdf", upsert: true });
     check("storage RLS: service_role (background worker context) CAN upload regardless of RLS - bypasses by design", adminUpload.error, null);
+
+    // Update/overwrite RLS: owner can overwrite their own object; a
+    // different user cannot overwrite it either (separate from the
+    // insert-with-upsert path already covered above).
+    const ownOverwrite = await userA.client.storage.from("generated-documents").update(`${userA.userId}/test.pdf`, new Uint8Array([9, 9, 9]), { contentType: "application/pdf" });
+    check("storage RLS: owner can update/overwrite their own already-uploaded object", ownOverwrite.error, null);
+    const crossOverwrite = await userB.client.storage.from("generated-documents").update(`${userA.userId}/test.pdf`, new Uint8Array([9, 9, 9]), { contentType: "application/pdf" });
+    checkTrue("storage RLS: a different user CANNOT update/overwrite user A's object", crossOverwrite.error !== null);
+
+    // Delete RLS: a different user cannot delete; the owner can.
+    const crossDelete = await userB.client.storage.from("generated-documents").remove([`${userA.userId}/test.pdf`]);
+    check("storage RLS: a different user's delete attempt reports no removed files (RLS makes the object invisible to delete, not a visible permission error)", (crossDelete.data ?? []).length, 0);
+    const stillThere = await userA.client.storage.from("generated-documents").download(`${userA.userId}/test.pdf`);
+    check("storage RLS: object still exists after the other user's failed delete attempt", stillThere.error, null);
+    const ownDelete = await userA.client.storage.from("generated-documents").remove([`${userA.userId}/test.pdf`]);
+    checkTrue("storage RLS: owner CAN delete their own object", (ownDelete.data ?? []).length === 1);
+    const goneAfterDelete = await userA.client.storage.from("generated-documents").download(`${userA.userId}/test.pdf`);
+    checkTrue("storage RLS: object is genuinely gone after the owner's real delete", goneAfterDelete.error !== null);
+
+    // Unauthenticated (anon key, no session) access is rejected outright -
+    // RLS policies are all scoped `to authenticated`, so a bare anon
+    // client has no matching policy at all for this bucket.
+    const anonClient = createClient(URL, ANON_KEY);
+    const anonUpload = await anonClient.storage.from("generated-documents").upload(`${userA.userId}/anon-attempt.pdf`, bytes, { contentType: "application/pdf" });
+    checkTrue("storage RLS: a completely unauthenticated (anon key, no session) upload attempt is rejected", anonUpload.error !== null);
+    const anonDownload = await anonClient.storage.from("generated-documents").download(`${userA.userId}/admin-test.pdf`);
+    checkTrue("storage RLS: a completely unauthenticated download attempt is rejected", anonDownload.error !== null);
+
+    // A path with no owner-prefix match at all (malformed/attacker-shaped
+    // path) is also rejected for an authenticated-but-wrong-owner client.
+    const malformedPathUpload = await userB.client.storage.from("generated-documents").upload("not-a-real-user-id-prefix/x.pdf", bytes, { contentType: "application/pdf" });
+    checkTrue("storage RLS: a path whose first segment matches NEITHER caller's own uid is rejected", malformedPathUpload.error !== null);
   }
 
   // ==================== C. Shadow comparison PII safety + flag-off no-op ====================
@@ -220,6 +291,192 @@ async function main() {
     const res = await runWithAuthenticatedContext(userD.client as never, makeHandlePreview(req));
     check("version conflict: preview against a stale (V1) overlay after the canonical resume moved to V2 returns 409, never a silently mismatched render", res.status, 409);
     delete process.env.CANONICAL_GENERATE_ENABLED;
+  }
+
+  // ==================== E. Shadow mode ENABLED - real failure-path PII safety + resultCategory correctness ====================
+  // The existing section C test never actually set CANONICAL_SHADOW_MODE,
+  // so runShadowComparisonSafely() short-circuited to
+  // "skipped_flag_disabled" without ever calling generateCanonicalPackage -
+  // its PII assertions technically passed, but against an almost-empty
+  // record, not a real failure path. This section closes that gap: shadow
+  // mode is genuinely enabled and exercised against a real no-canonical-
+  // profile user, which fails BEFORE any AI call (zero cost) but DOES
+  // exercise the full runShadowComparison() try/catch + classifyForFallback
+  // + JSON-log-record path for real.
+  {
+    const userE = await makeTestUser(admin, "shadow-real-failure");
+    const secretJobText = "CONFIDENTIAL-JOB-TEXT-MARKER-77451: Lead Underwater Basket Weaving Architect, contact real.person@example.com or 555-0188";
+    process.env.CANONICAL_SHADOW_MODE = "true";
+
+    const originalLog = console.log;
+    const capturedLogs: string[] = [];
+    console.log = (...args: unknown[]) => {
+      capturedLogs.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      // userE has NO career_profiles row at all - generateCanonicalPackage
+      // throws CanonicalProfileUnavailableError before any AI call.
+      await runShadowComparisonSafely({
+        userId: userE.userId,
+        applicationId: "11111111-1111-1111-1111-111111111111",
+        jobDescriptionText: secretJobText,
+        jobAnalysisSummary: "another summary that must never leak",
+        legacySucceeded: true,
+      });
+    } finally {
+      console.log = originalLog;
+      delete process.env.CANONICAL_SHADOW_MODE;
+    }
+    checkTrue("shadow ENABLED real-failure: produced at least one log line", capturedLogs.length > 0);
+    const parsedRecord = JSON.parse(capturedLogs[capturedLogs.length - 1]) as { resultCategory?: string; fallbackReason?: string | null; applicationId?: string };
+    check("shadow ENABLED real-failure: resultCategory correctly reflects a REAL fallback-eligible failure, not skipped_flag_disabled", parsedRecord.resultCategory, "canonical_failed_fallback_eligible");
+    check("shadow ENABLED real-failure: fallbackReason correctly identifies the no-profile case", parsedRecord.fallbackReason, "no_canonical_profile");
+    check("shadow ENABLED real-failure: applicationId echoed correctly", parsedRecord.applicationId, "11111111-1111-1111-1111-111111111111");
+    checkFalse("shadow ENABLED real-failure: log output never contains the raw job description text", capturedLogs.some((l) => l.includes(secretJobText)));
+    checkFalse("shadow ENABLED real-failure: log output never contains the job analysis summary text", capturedLogs.some((l) => l.includes("another summary that must never leak")));
+    checkFalse("shadow ENABLED real-failure: log output never contains an email address pattern", capturedLogs.some((l) => /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(l)));
+    checkFalse("shadow ENABLED real-failure: log output never contains the literal injected phone number", capturedLogs.some((l) => l.includes("555-0188")));
+    checkFalse("shadow ENABLED real-failure: log output never contains the userId's raw value alongside job text in a way that could correlate PII (userId itself is a safe, non-PII identifier - only checking no cross-contamination)", capturedLogs.some((l) => l.includes(secretJobText) && l.includes(userE.userId)));
+  }
+
+  // ==================== F. Shadow mode isolation - a canonical failure never affects the legacy outcome semantics ====================
+  {
+    const userF = await makeTestUser(admin, "shadow-isolation");
+    process.env.CANONICAL_SHADOW_MODE = "true";
+    let threw = false;
+    try {
+      // legacySucceeded: false path - shadow mode runs even after a legacy
+      // FAILURE, and must still never throw regardless of its own outcome.
+      await runShadowComparisonSafely({
+        userId: userF.userId,
+        applicationId: "22222222-2222-2222-2222-222222222222",
+        jobDescriptionText: "some job text",
+        jobAnalysisSummary: "some summary",
+        legacySucceeded: false,
+      });
+    } catch {
+      threw = true;
+    } finally {
+      delete process.env.CANONICAL_SHADOW_MODE;
+    }
+    checkFalse("shadow isolation: runShadowComparisonSafely NEVER throws, even on the legacy-failure path with a real underlying canonical failure", threw);
+
+    // Malformed/garbage applicationId passed to shadow mode (simulating an
+    // unexpected internal state) - must still never throw or crash the caller.
+    process.env.CANONICAL_SHADOW_MODE = "true";
+    let threwOnGarbage = false;
+    try {
+      await runShadowComparisonSafely({ userId: "not-a-real-uuid", applicationId: "also-not-a-uuid", jobDescriptionText: "x", jobAnalysisSummary: "y", legacySucceeded: true });
+    } catch {
+      threwOnGarbage = true;
+    } finally {
+      delete process.env.CANONICAL_SHADOW_MODE;
+    }
+    checkFalse("shadow isolation: even a malformed userId/applicationId (garbage, non-UUID strings) never escapes as an uncaught exception - full isolation guarantee holds under garbage input too", threwOnGarbage);
+  }
+
+  // ==================== G. Feature-flag independence: complete_canonical_generation RPC succeeds regardless of canonical_document_storage_enabled ====================
+  // The RPC itself has no dependency on this flag at all - it only gates
+  // the APP-LAYER uploadGeneratedDocument() call (canonicalDocumentStorageService.ts),
+  // which the real-DB RPC tests bypass entirely by calling the RPC
+  // directly with placeholder storage paths. This documents that
+  // real-world boundary explicitly: the flag being off does NOT block the
+  // RPC's own write path (by design - the app layer is responsible for
+  // never calling the RPC with a fabricated path when storage is disabled,
+  // not the RPC itself).
+  {
+    const userG = await makeTestUser(admin, "storage-flag-independence");
+    const repos = createCanonicalRepositories(userG.client);
+    const service = new CanonicalCareerMemoryService(repos);
+    const runtimeG: CanonicalResumeRuntime = { ...buildFixtureRuntime(), sourceDocuments: [], overlayState: { history: [] } };
+    const savedG = await service.saveCanonicalRuntimeAcknowledgingGap(userG.userId, { runtime: runtimeG });
+    const profileG = await repos.profiles.getByUserId(userG.userId);
+    if (!profileG) throw new Error("profile not found");
+    const { data: applicationG } = await userG.client.from("applications").insert({ user_id: userG.userId }).select("*").single();
+
+    delete process.env.CANONICAL_DOCUMENT_STORAGE_ENABLED; // explicit Production-default OFF state
+    const overlayG = await admin.rpc("system_create_canonical_overlay", { p_user_id: userG.userId, p_profile_id: profileG.id, p_resume_version_id: savedG.version.id, p_application_id: applicationG.id, p_template_id: "professional-ats", p_ai_model: "test-model", p_prompt_version: "test-v1", p_overlay: { schemaVersion: "1.0.0" } });
+    const completeG = await admin.rpc("complete_canonical_generation", {
+      p_user_id: userG.userId,
+      p_application_id: applicationG.id,
+      p_tailored_resume_id: overlayG.data.overlayId,
+      p_canonical_profile_id: profileG.id,
+      p_canonical_resume_version_id: savedG.version.id,
+      p_template_id: "professional-ats",
+      p_pdf_storage_bucket: "generated-documents",
+      p_pdf_storage_path: `${userG.userId}/${applicationG.id}.pdf`,
+      p_docx_storage_bucket: "generated-documents",
+      p_docx_storage_path: `${userG.userId}/${applicationG.id}.docx`,
+      p_generation_engine: "canonical",
+      p_generation_engine_version: "6G.0",
+      p_protected_fact_validation_result: {},
+    });
+    check("flag independence: complete_canonical_generation RPC succeeds with canonical_document_storage_enabled unset/off - the RPC has no awareness of this app-layer flag", completeG.data?.status, "success");
+  }
+
+  // ==================== H. Missing canonical version at the /preview route - defense-in-depth for an inconsistent DB state ====================
+  // Constructs a state that should never occur via the normal generation
+  // flow (a tailored-resume row exists, but its owning profile has since
+  // lost every resume version) purely to prove the route's own null-
+  // handling is real defensive code, not just an untested assumption.
+  {
+    const userH = await makeTestUser(admin, "missing-version-defense");
+    const repos = createCanonicalRepositories(userH.client);
+    const service = new CanonicalCareerMemoryService(repos);
+    const runtimeH: CanonicalResumeRuntime = { ...buildFixtureRuntime(), sourceDocuments: [], overlayState: { history: [] } };
+    const savedH = await service.saveCanonicalRuntimeAcknowledgingGap(userH.userId, { runtime: runtimeH });
+    const profileH = await repos.profiles.getByUserId(userH.userId);
+    if (!profileH) throw new Error("profile not found");
+    const { data: applicationH } = await userH.client.from("applications").insert({ user_id: userH.userId }).select("*").single();
+    const overlayH = await admin.rpc("system_create_canonical_overlay", { p_user_id: userH.userId, p_profile_id: profileH.id, p_resume_version_id: savedH.version.id, p_application_id: applicationH.id, p_template_id: "professional-ats", p_ai_model: "test-model", p_prompt_version: "test-v1", p_overlay: { schemaVersion: "1.0.0" } });
+    checkTrue("missing-version defense setup: overlay creation succeeded first", overlayH.data?.status === "success");
+
+    // Delete every resume version row for this profile directly (admin/raw
+    // access - simulates an inconsistent state no normal app code path
+    // would produce, but which the route must still handle without crashing).
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("docker", ["exec", "supabase_db_careerelan", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", `delete from career_resume_versions where profile_id = '${profileH.id}';`], { encoding: "utf8" });
+
+    process.env.CANONICAL_GENERATE_ENABLED = "true";
+    const req = new Request("http://x/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ applicationId: applicationH.id, templateId: "professional-ats" }) });
+    const res = await runWithAuthenticatedContext(userH.client as never, makeHandlePreview(req));
+    checkTrue("missing-version defense: /preview against a profile with zero resume versions returns a clean 4xx/5xx, never a crash or 200 with fabricated content", res.status >= 400);
+    delete process.env.CANONICAL_GENERATE_ENABLED;
+  }
+
+  // ==================== I. Shadow comparison - legacySucceeded=false path + stack-trace-free logging ====================
+  {
+    const userI = await makeTestUser(admin, "shadow-legacy-failed");
+    process.env.CANONICAL_SHADOW_MODE = "true";
+    const originalLog = console.log;
+    const capturedLogs: string[] = [];
+    console.log = (...args: unknown[]) => {
+      capturedLogs.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      await runShadowComparisonSafely({ userId: userI.userId, applicationId: "33333333-3333-3333-3333-333333333333", jobDescriptionText: "job text here", jobAnalysisSummary: "summary here", legacySucceeded: false });
+    } finally {
+      console.log = originalLog;
+      delete process.env.CANONICAL_SHADOW_MODE;
+    }
+    const parsedRecordI = JSON.parse(capturedLogs[capturedLogs.length - 1]) as { legacySucceeded?: boolean; resultCategory?: string };
+    check("shadow legacy-failed path: legacySucceeded correctly recorded as false", parsedRecordI.legacySucceeded, false);
+    check("shadow legacy-failed path: still correctly classifies the real underlying no-profile failure", parsedRecordI.resultCategory, "canonical_failed_fallback_eligible");
+    checkFalse("shadow legacy-failed path: log output never contains a JS stack trace (the string 'at ' followed by a file path pattern, a common stack-trace signature)", capturedLogs.some((l) => /\bat .+\.(ts|js):\d+/.test(l)));
+    checkFalse("shadow legacy-failed path: log output never contains the literal string 'node_modules' (would indicate a leaked stack trace or internal path)", capturedLogs.some((l) => l.includes("node_modules")));
+  }
+
+  // ==================== J. Storage: listing at the bucket root reflects only the caller's own top-level folder ====================
+  {
+    const userJ = await makeTestUser(admin, "storage-root-list");
+    const bytes = new Uint8Array([1, 2, 3]);
+    await userJ.client.storage.from("generated-documents").upload(`${userJ.userId}/root-list-test.pdf`, bytes, { contentType: "application/pdf", upsert: true });
+    const rootList = await userJ.client.storage.from("generated-documents").list("");
+    checkTrue("storage RLS: listing the bucket root for an authenticated user returns exactly their own uid as the visible top-level folder (RLS filters the listing itself, not just downloads)", (rootList.data ?? []).some((entry) => entry.name === userJ.userId));
+
+    const userK = await makeTestUser(admin, "storage-root-list-cross");
+    const crossRootList = await userK.client.storage.from("generated-documents").list("");
+    checkFalse("storage RLS: a different user's bucket-root listing does NOT include user J's folder name", (crossRootList.data ?? []).some((entry) => entry.name === userJ.userId));
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

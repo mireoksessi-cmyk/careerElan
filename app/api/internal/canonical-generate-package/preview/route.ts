@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
-import { ValidationError, CanonicalVersionUnavailableError } from "@/lib/careerMemory/errors/domainErrors";
+import { ValidationError, CanonicalVersionUnavailableError, TemplateRenderingError } from "@/lib/careerMemory/errors/domainErrors";
 import { isCanonicalGenerateEnabled } from "@/lib/careerMemory/orchestration/featureFlags";
 import { resolveCanonicalTemplateId } from "@/lib/careerMemory/orchestration/canonicalRenderService";
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
@@ -35,7 +35,7 @@ function isValidPaperSize(value: unknown): value is PaperSize {
   return value === "letter" || value === "a4";
 }
 function isValidDensity(value: unknown): value is TemplateDensity {
-  return value === "compact" || value === "comfortable" || value === "spacious";
+  return value === "compact" || value === "comfortable" || value === "spacious" || value === "balanced";
 }
 
 export function makeHandlePreview(request: Request) {
@@ -101,15 +101,30 @@ export function makeHandlePreview(request: Request) {
 
     const applied = applyOverlay(runtime, tailoredRow.overlay);
 
-    if (format === "html") {
-      const result = await renderTemplateFromRuntime(applied.runtime, { templateId, useTailored: true, paperSize, density, locale, generatedAt: new Date(0).toISOString() }, "html");
-      return jsonResponse({ html: result.html, pageCount: result.pageCount, templateId });
-    }
+    /*
+      Wraps the render call(s) the same way renderCanonicalPackage() (the
+      /generate path's own render step) already does - a real-DB test
+      exposed that this route previously let ANY render-time exception
+      (e.g. a template/density combination the Phase 6F engine itself
+      rejects, such as professional-ats + "spacious") propagate uncaught,
+      producing an opaque generic 500 instead of a clean, structured
+      error. This never changes WHICH combinations succeed (Phase 6F's
+      own per-template contract validation is untouched) - it only
+      ensures a rejection is reported cleanly instead of crashing.
+    */
+    try {
+      if (format === "html") {
+        const result = await renderTemplateFromRuntime(applied.runtime, { templateId, useTailored: true, paperSize, density, locale, generatedAt: new Date(0).toISOString() }, "html");
+        return jsonResponse({ html: result.html, pageCount: result.pageCount, templateId });
+      }
 
-    const renderOptions = { templateId, useTailored: true, paperSize, density, locale, generatedAt: new Date(0).toISOString() };
-    const result = format === "pdf" ? await renderTemplateFromRuntime(applied.runtime, renderOptions, "pdf") : await renderTemplateFromRuntime(applied.runtime, renderOptions, "docx");
-    const contentType = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    return new NextResponse(new Uint8Array(result.bytes), { status: 200, headers: { "content-type": contentType, "cache-control": "no-store" } });
+      const renderOptions = { templateId, useTailored: true, paperSize, density, locale, generatedAt: new Date(0).toISOString() };
+      const result = format === "pdf" ? await renderTemplateFromRuntime(applied.runtime, renderOptions, "pdf") : await renderTemplateFromRuntime(applied.runtime, renderOptions, "docx");
+      const contentType = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      return new NextResponse(new Uint8Array(result.bytes), { status: 200, headers: { "content-type": contentType, "cache-control": "no-store" } });
+    } catch (error) {
+      throw new TemplateRenderingError(error instanceof Error ? error.message.slice(0, 200) : "unknown rendering failure");
+    }
   };
 }
 
