@@ -15,7 +15,13 @@ export type DomainErrorCode =
   | "CONFLICT"
   | "PERSISTENCE_ERROR"
   | "TRANSACTION_UNAVAILABLE"
-  | "SCHEMA_GAP";
+  | "SCHEMA_GAP"
+  /* Phase 6G additions - Canonical Generate Package integration. Kept
+     in the same shared union (rather than a parallel error system) so
+     every new route goes through the same single errorResponse()
+     mapping everything else already uses. */
+  | "MALFORMED_REQUEST"
+  | "QUOTA_EXCEEDED";
 
 export abstract class DomainError extends Error {
   abstract readonly code: DomainErrorCode;
@@ -93,6 +99,103 @@ export class SchemaGapError extends DomainError {
   }
 }
 
+export class MalformedRequestError extends DomainError {
+  readonly code = "MALFORMED_REQUEST" as const;
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+export class QuotaExceededError extends DomainError {
+  readonly code = "QUOTA_EXCEEDED" as const;
+  constructor(message = "Generation quota exceeded.") {
+    super(message);
+  }
+}
+
 export function isDomainError(value: unknown): value is DomainError {
   return value instanceof DomainError;
 }
+
+/*
+  Phase 6G - Canonical Generate Package domain errors. Every one maps
+  onto the SAME 10-code DomainErrorCode union above (never a parallel
+  error/HTTP-mapping system) - see the round spec's own §23 error list
+  for the intended name-to-status mapping; each class below picks the
+  existing DomainErrorCode whose HTTP status already matches what §23
+  asks for that error, rather than inventing new statuses:
+    CanonicalProfileUnavailableError/CanonicalVersionUnavailableError -> NOT_FOUND (404)
+    CanonicalDeserializationError -> PERSISTENCE_ERROR (500, genuinely unexpected)
+    CanonicalTailoringError/CanonicalOverlayValidationError -> VALIDATION_FAILED (422)
+    TemplateResolutionError -> NOT_FOUND (404, unknown template id) or
+      MALFORMED_REQUEST (400, unsupported format/paperSize/density for an
+      otherwise-valid template) - two constructors, see below.
+    TemplateRenderingError/GeneratedDocumentError -> PERSISTENCE_ERROR (500)
+    LegacyFallbackError -> PERSISTENCE_ERROR (500, fallback itself failed -
+      the one case with no lower path left to fall back to)
+    ShadowComparisonError -> never thrown to a caller; shadow mode is
+      fully isolated (see canonicalShadowComparisonService.ts) - included
+      here only as a typed value for the internal comparison log, not a
+      thrown DomainError.
+*/
+export class CanonicalProfileUnavailableError extends NotFoundError {
+  constructor(reason = "no canonical profile exists for this user") {
+    super(`Canonical profile (${reason})`);
+  }
+}
+
+export class CanonicalVersionUnavailableError extends NotFoundError {
+  constructor(reason = "no resume version exists for this profile") {
+    super(`Canonical resume version (${reason})`);
+  }
+}
+
+export class CanonicalDeserializationError extends PersistenceError {
+  constructor(detail: string) {
+    super(`canonical runtime deserialization failed: ${detail}`);
+  }
+}
+
+export class CanonicalTailoringError extends ValidationError {
+  constructor(issues: string[]) {
+    super(issues.length > 0 ? issues : ["AI tailoring output failed schema validation."]);
+  }
+}
+
+export class CanonicalOverlayValidationError extends ValidationError {
+  constructor(rejections: string[]) {
+    super(rejections.length > 0 ? rejections : ["Overlay validation failed."]);
+  }
+}
+
+export class TemplateResolutionError extends DomainError {
+  readonly code: "NOT_FOUND" | "MALFORMED_REQUEST";
+  constructor(reason: "unknown-template-id" | "unsupported-option", message: string) {
+    super(message);
+    this.code = reason === "unknown-template-id" ? "NOT_FOUND" : "MALFORMED_REQUEST";
+  }
+}
+
+export class TemplateRenderingError extends PersistenceError {
+  constructor(detail: string) {
+    super(`template rendering failed: ${detail}`);
+  }
+}
+
+export class GeneratedDocumentError extends PersistenceError {
+  constructor(detail: string) {
+    super(`generated document storage failed: ${detail}`);
+  }
+}
+
+export class LegacyFallbackError extends PersistenceError {
+  constructor(detail: string) {
+    super(`legacy fallback itself failed: ${detail}`);
+  }
+}
+
+/* Not a DomainError subclass - shadow comparison never surfaces to an
+   HTTP caller (see canonicalShadowComparisonService.ts's own isolation
+   guarantee); this type exists only for the internal comparison log
+   record's own `resultCategory` field. */
+export type ShadowComparisonErrorCategory = "canonical-generation-failed" | "canonical-render-failed" | "canonical-timeout" | "unexpected";

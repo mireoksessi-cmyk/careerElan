@@ -20,6 +20,9 @@ const STATUS_BY_CODE: Record<DomainErrorCode, number> = {
   PERSISTENCE_ERROR: 500,
   TRANSACTION_UNAVAILABLE: 503,
   SCHEMA_GAP: 501,
+  /* Phase 6G additions - Canonical Generate Package. */
+  MALFORMED_REQUEST: 400,
+  QUOTA_EXCEEDED: 429,
 };
 
 export function errorResponse(error: unknown): NextResponse {
