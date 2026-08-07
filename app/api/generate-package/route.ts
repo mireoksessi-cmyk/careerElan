@@ -27,6 +27,9 @@ import {
   type GenerationMode,
   type LayoutConstraints,
 } from "@/lib/generatePackage/shared";
+import { decideGenerationRoute } from "@/lib/careerMemory/orchestration/canonicalTrafficRouter";
+import { dispatchCanonicalGeneration } from "@/lib/careerMemory/orchestration/canonicalGenerateDispatchService";
+import { logCanonicalMetric } from "@/lib/careerMemory/orchestration/canonicalProductionMetrics";
 
 /*
   Phase 1 async rewrite: this route is now claim-only. It authenticates,
@@ -372,6 +375,40 @@ export async function POST(req: Request) {
         },
         { status: 400 }
       );
+    }
+
+    /*
+      Phase 6I - Part A: the ONE routing dispatch point. decideGenerationRoute()
+      is the single, isolated routing decision service (see its own file) -
+      this route never re-implements or inlines its logic, only branches on
+      the result. Everything above this point (auth, body parsing,
+      career_memory fetch, generationRequestId validation) is shared input
+      resolution both routes need identically; everything below (quota
+      reservation, claim-insert, enqueue) is legacy-specific and completely
+      untouched by this phase - a canonical-routed request never reaches any
+      of it, it is handled entirely by dispatchCanonicalGeneration() (its own
+      file, its own quota reservation, its own claim-insert, its own
+      enqueue) and returns directly from this branch.
+    */
+    const routingDecision = decideGenerationRoute(user.id);
+    logCanonicalMetric({ event: "canonical_routing_decision", route: routingDecision.route, reason: routingDecision.reason, stage: routingDecision.stage });
+    if (routingDecision.route === "canonical") {
+      return await dispatchCanonicalGeneration({
+        supabase,
+        userId: user.id,
+        memory,
+        generationRequestId,
+        jobText,
+        title,
+        company,
+        applicantName,
+        analysis,
+        jobUrl: getFirstText(body.jobUrl) || null,
+        body,
+        requestOrigin: new URL(req.url).origin,
+        routingReason: routingDecision.reason,
+        canaryStage: routingDecision.stage,
+      });
     }
 
     /*

@@ -1,6 +1,6 @@
 # Canonical Career Memory — Rollback Runbook
 
-Status: Phase 6H. Rollback demonstrated this phase via `fixtures/scripts/phase6hRollbackDemo.realdb.test.mts` — 9/9 assertions pass against real local Supabase.
+Status: Phase 6I. Extends the Phase 6H rollback demonstration (`fixtures/scripts/phase6hRollbackDemo.realdb.test.mts`, 9/9 passing, unchanged) with the routing-stage rollback this phase's canary mechanism now needs — see §6.
 
 ## 1. What rollback means here
 
@@ -31,8 +31,9 @@ The demonstration script seeds a full "already generated" canonical state (profi
 
 ## 3. What rollback does NOT preserve / is out of scope
 
-- **In-flight requests at the moment of rollback**: a request already inside `generateCanonicalPackage()` when the flag flips will complete or fail on its own terms — flipping a flag does not cancel an in-flight synchronous call. This is a direct consequence of the synchronous execution model (Architecture doc §5), not something rollback itself needs to fix.
+- **In-flight background generations at the moment of rollback**: since Phase 6I, canonical generation runs in a background worker, not the client-facing request (Architecture doc §5) — a row already claimed by `claim_canonical_generate_worker` when the flag flips continues running to completion (success, failure, or fallback) on its own terms. Flipping `CANONICAL_GENERATE_ENABLED` only blocks NEW dispatches from `/api/generate-package`; it does not cancel an already-enqueued worker invocation. This is consistent with legacy's own long-standing behavior (a legacy background generation isn't cancelable mid-flight either).
 - **Already-served responses**: if a user already downloaded a canonical-rendered PDF before rollback, that file is unaffected (client-side artifact, not tied to the flag).
+- **Quota already consumed**: since Phase 6I, canonical and legacy share one quota ledger (Architecture doc §7) — a generation that consumed quota before rollback stays consumed; rollback does not refund it (correct behavior — the user did receive a generation attempt).
 
 ## 4. Rollback procedure (per stage)
 
@@ -47,5 +48,11 @@ The demonstration script seeds a full "already generated" canonical state (profi
 
 Before flipping the flag back on:
 1. Confirm the root cause is understood and fixed (or was a transient external issue, e.g. OpenAI outage, now resolved).
-2. Re-run `fixtures/scripts/phase6hRollbackDemo.realdb.test.mts` and the full canonical real-DB regression suite (`docs/canonical-production-checklist.md`) locally.
-3. Re-enable at the SAME rollout stage that was active before the rollback, not a higher one — do not use re-enabling as an opportunity to skip ahead in the Rollout Plan.
+2. Re-run `fixtures/scripts/phase6hRollbackDemo.realdb.test.mts`, `fixtures/scripts/phase6iProductionEnablement.realdb.test.mts`, and the full canonical real-DB regression suite (`docs/canonical-production-checklist.md`) locally.
+3. Re-enable at the SAME rollout stage that was active before the rollback, not a higher one — do not use re-enabling as an opportunity to skip ahead in the Canary Plan.
+
+## 6. Partial (stage-only) rollback — new this phase
+
+Unlike a full rollback (`CANONICAL_GENERATE_ENABLED=false`), a stage-only rollback keeps canonical enabled but reduces exposure: set `CANONICAL_CANARY_STAGE` to a lower number (e.g. 4 → 3), or back to `0` (all traffic to legacy, but the master flag stays on for internal/allowlisted testing to continue). This is the preferred FIRST response to a Stage 3+ regression that doesn't require a full stand-down — it's strictly less disruptive than a full rollback and uses the exact same "flag change only, no data loss" guarantee (§1–2 above apply identically, since the routing decision and the generation/fallback/quota mechanisms are entirely separate concerns — reducing the stage only changes which users' NEXT request routes to canonical, nothing about already-generated data).
+
+Fallback (`CANONICAL_LEGACY_FALLBACK_ENABLED`) should almost never be turned off as a rollback response — doing so REMOVES the safety net that absorbs canonical failures into a legacy success, making user-visible failures MORE likely, not less. Turn off `CANONICAL_GENERATE_ENABLED` or reduce `CANONICAL_CANARY_STAGE` instead.

@@ -44,10 +44,20 @@ export type CanonicalErrorCode =
   | "openai_error"
   | "unknown";
 
+/*
+  Phase 6I additions - canonical_routing_decision and canonical_fallback.
+  Both are purely observational (never change control flow) and exist
+  because a rollout stage's actual traffic split and its actual
+  fallback rate are exactly the two numbers a canary needs to be
+  monitored live (Rollout/Canary Plan docs) but neither was derivable
+  from the Phase 6H-era event set without an extra DB join per request.
+*/
 export type CanonicalMetricEvent =
   | { event: "canonical_generate"; applicationId: string; templateId: string; outcome: CanonicalOutcome; errorCode?: CanonicalErrorCode; latencyMs: number; pdfPersisted?: boolean; docxPersisted?: boolean }
   | { event: "canonical_preview"; applicationId: string; templateId: string; format: "html" | "pdf" | "docx"; outcome: CanonicalOutcome; errorCode?: CanonicalErrorCode; latencyMs: number }
-  | { event: "canonical_status"; applicationId: string; outcome: CanonicalOutcome; errorCode?: CanonicalErrorCode; latencyMs: number };
+  | { event: "canonical_status"; applicationId: string; outcome: CanonicalOutcome; errorCode?: CanonicalErrorCode; latencyMs: number }
+  | { event: "canonical_routing_decision"; route: "legacy" | "canonical"; reason: string; stage: number }
+  | { event: "canonical_fallback"; applicationId: string; reason: string; outcome: "legacy_succeeded" | "legacy_failed" };
 
 export function logCanonicalMetric(event: CanonicalMetricEvent): void {
   console.log(JSON.stringify({ ...event, ts: new Date().toISOString() }));

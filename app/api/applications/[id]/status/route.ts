@@ -39,7 +39,7 @@ export async function GET(
   const { data: row, error } = await supabase
     .from("applications")
     .select(
-      "id, generation_status, generation_stage, generation_stage_updated_at, generation_started_at, generation_error_code, generation_error_summary, resume_text, cover_letter_text, email_draft, ai_insight, resume_source, resume_id, generation_input_resume_name, company, job_title, location, job_type, job_url, job_analysis"
+      "id, generation_status, generation_stage, generation_stage_updated_at, generation_started_at, generation_error_code, generation_error_summary, resume_text, cover_letter_text, email_draft, ai_insight, resume_source, resume_id, generation_input_resume_name, company, job_title, location, job_type, job_url, job_analysis, generation_engine, canonical_profile_id, tailored_resume_id, selected_template_id, generated_pdf_document_id, generated_docx_document_id, fallback_used, fallback_reason"
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -98,9 +98,38 @@ export async function GET(
   };
 
   if (row.generation_status === "succeeded") {
+    /*
+      Phase 6I - a canonical-engine completion (fallback_used=false;
+      fallback_used=true means legacy actually produced the final
+      output and the LEGACY response shape below is correct instead)
+      never has resume_text/cover_letter_text/email_draft/ai_insight -
+      canonical produces rendered documents (PDF/DOCX/HTML), not the
+      legacy text trio - so it gets its own response shape here rather
+      than returning nulls for fields a canonical client should never
+      have been reading in the first place.
+    */
+    if (row.generation_engine === "canonical" && !row.fallback_used) {
+      return NextResponse.json({
+        status: "succeeded",
+        applicationId: row.id,
+        engine: "canonical",
+        canonicalProfileId: row.canonical_profile_id,
+        tailoredResumeId: row.tailored_resume_id,
+        selectedTemplateId: row.selected_template_id,
+        documentStorage: {
+          persisted: Boolean(row.generated_pdf_document_id && row.generated_docx_document_id),
+        },
+        ...jobContext,
+        ...progressInfo,
+      });
+    }
+
     return NextResponse.json({
       status: "succeeded",
       applicationId: row.id,
+      engine: row.generation_engine || "legacy",
+      fallbackUsed: row.fallback_used || false,
+      fallbackReason: row.fallback_reason,
       resume: row.resume_text,
       coverLetter: row.cover_letter_text
         ? stripCoverLetterContactBlock(row.cover_letter_text)

@@ -23,6 +23,7 @@ import {
   AuthorizationError,
   QuotaExceededError,
   ValidationError,
+  NotFoundError,
 } from "../errors/domainErrors";
 import { isCanonicalLegacyFallbackEnabled } from "./featureFlags";
 
@@ -53,6 +54,23 @@ export function classifyForFallback(error: unknown): FallbackDecision {
     return { shouldFallback: false, reason: null };
   }
   if (error instanceof ValidationError && !(error instanceof CanonicalTailoringError) && !(error instanceof CanonicalOverlayValidationError)) {
+    return { shouldFallback: false, reason: null };
+  }
+  /*
+    Phase 6I fix: CanonicalProfileUnavailableError/CanonicalVersionUnavailableError
+    both extend NotFoundError but represent a genuine canonical-specific
+    gap (fallback-eligible, checked individually below) - a BARE
+    NotFoundError (e.g. "Application not found, or does not belong to
+    the current user", thrown by an ownership-scoped lookup elsewhere in
+    the canonical services) means the REQUEST's own target doesn't
+    belong to this caller, which the legacy path must refuse identically,
+    not silently serve. Without this check, a real ownership violation
+    fell through to the default "transient_failure" branch below and was
+    incorrectly treated as fallback-eligible - caught during this
+    round's own audit before any fallback path was ever wired to a real
+    caller.
+  */
+  if (error instanceof NotFoundError && !(error instanceof CanonicalProfileUnavailableError) && !(error instanceof CanonicalVersionUnavailableError)) {
     return { shouldFallback: false, reason: null };
   }
   if (error instanceof CanonicalProfileUnavailableError) return { shouldFallback: true, reason: "no_canonical_profile" };

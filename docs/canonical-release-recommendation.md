@@ -1,37 +1,45 @@
 # Canonical Career Memory — Release Recommendation
 
-Status: Phase 6H (Production Transition), final assessment.
+Status: Phase 6I (Production Enablement), final assessment. Supersedes the Phase 6H recommendation, which held that Stage 3+ was not achievable in code — that is no longer true.
 
-## Recommendation: PASS for Stage 0 (current state) and Stage 1–2 readiness. NOT YET READY for Stage 3+ (real percentage-based user traffic).
+## Recommendation: PASS for Stage 0 (current state) through Stage 2 with high confidence; **conditionally ready** for Stage 3 pending real Production data from Stage 1–2, not blocked by missing mechanisms anymore.
 
-## What is genuinely production-ready today
+## What changed since Phase 6H
 
-- All feature flags default OFF, fail-closed, read at call time — confirmed unset in this environment.
-- Full RLS coverage across every canonical table, audited directly against the database this phase — no gaps found.
-- Rollback is proven flag-only, zero data loss, at the database level (9/9 assertions, `phase6hRollbackDemo.realdb.test.mts`).
-- Monitoring is now wired (purely additive, PII-safe, verified with real log output) — Production incidents will be observable via structured logs for the first time.
-- 723 real-DB regression assertions passing, zero regressions from this phase's changes; `tsc` and `npm run build` both clean.
-- Templates (Phase 6F), the professional-ats content-preservation fix (Phase 6G.1), and the storage/RPC transaction layer (Phase 6D.1/6G) are all independently verified and stable.
+Phase 6H's own recommendation named 3 structural gaps as the reason Stage 3+ wasn't achievable: no traffic-routing mechanism, no quota mechanism, and the fallback flag having no real effect. All 3 are closed this phase (Known Issues doc, "Closed this phase"):
 
-This is enough to safely turn the flags on for Stage 1 (internal developers, manual testing via the internal routes) and Stage 2 (internal employee dogfooding) with confidence — no code changes required, only flag flips, and rollback is proven safe if something goes wrong.
+- **Routing**: the existing "Generate Package" button now automatically reaches canonical for canary-eligible users, with zero new UI (Traffic Routing doc).
+- **Quota**: canonical shares legacy's own proven quota ledger — no new metering system, no double-charging risk (Production Architecture doc §7).
+- **Fallback**: `runCanonicalWithFallbackDecision()` is genuinely wired in; a fallback-eligible canonical failure now hands off to legacy's real, unmodified generation logic, verified end-to-end at the SQL/orchestration level this phase (`phase6iProductionEnablement.realdb.test.mts` §F).
 
-## Why Stage 3+ is not yet recommended
+A 4th, previously-undetected bug (bare `NotFoundError` incorrectly falling back) was found and fixed while closing the fallback gap — closing #4 required actually exercising the classification logic against the real domain-error hierarchy, which is what surfaced it.
 
-Three gaps discovered during this phase's Production Readiness Audit are structural, not cosmetic (full detail in `docs/canonical-known-issues.md`):
+## Why "conditionally ready" rather than unconditional PASS for Stage 3+
 
-1. **No traffic-routing mechanism** — there is no code path today that would send any percentage of real users into canonical. Building one is real feature work, correctly out of scope for this phase, but it means Stage 3 cannot literally begin without a follow-up phase.
-2. **Fallback is not actually wired into the production route** — `CANONICAL_LEGACY_FALLBACK_ENABLED=true` currently has no effect; `generate/route.ts` calls `generateCanonicalPackage()` directly and lets failures surface as HTTP errors rather than falling back to legacy. This is the most important of the three gaps: shipping real traffic through canonical today, even at 1%, means real users hitting a hard failure on any canonical-specific bug, with no safety net despite the flag suggesting one exists.
-3. **No quota mechanism** — unmetered AI generation is an acceptable risk at 0 real users (Stage 0–2) but not at any nonzero percentage of real traffic.
+Every mechanism Stage 3+ needs now EXISTS and is verified at the orchestration/SQL level — but none of it has run against real OpenAI calls or real Production traffic yet (deliberately: this phase's own tests avoid real AI cost, per this repo's established convention, in favor of exhaustive RPC/orchestration-level verification). Specifically still unknown:
 
-Recommending Stage 3 before these are addressed would mean shipping a rollout plan whose own safety assumption (flag-controlled fallback) is not true in the current code.
+1. **Real fallback latency**: a fallback-eligible failure now costs the user a canonical attempt's time (including the doomed OpenAI call) PLUS legacy's own full generation time — this could roughly double worst-case latency for a fallback-triggering request. Not measured against real timing yet.
+2. **Real Production background-worker behavior**: the canonical Background Function has never actually run in real Netlify Production. Legacy's own equivalent is proven there; canonical's is proven only via the local-dev stand-in route + direct RPC testing.
+3. **Stale-claim reclaim gap** (Known Issues #7): if the Background Function crashes mid-generation in real Production, that row currently has no automatic recovery — acceptable at Stage 1–2's low volume (manual reconciliation, Operations Runbook §7), a genuine risk at Stage 3+'s real-user volume if the crash rate turns out to be non-negligible.
 
-## Recommended next steps (future phase, not this one)
+None of these require new architecture to resolve — they require Stage 1–2 to actually run in Production and produce real data, which is precisely what Stage 1–2 is for.
 
-1. Wire `runCanonicalWithFallbackDecision()` into `generate/route.ts` — smallest, highest-value fix; makes the existing `CANONICAL_LEGACY_FALLBACK_ENABLED` flag actually do what its name says.
-2. Design and build the traffic-routing mechanism for Stage 3+, paired with a quota decision (either extend the existing `generate_package_quota_*` mechanism to cover canonical, or accept a documented risk cap for early percentage stages).
-3. Independently measure real Netlify Production function timeout and compare against observed canonical generation latency, to know how much headroom the synchronous execution model actually has before Stage 4+ traffic volumes.
-4. Once 1–3 are addressed, re-run this phase's full regression + rollback demonstration, update the Rollout Plan's Stage 3 prerequisite note, and proceed.
+## Recommended path
+
+1. Enable Stage 1 (internal developers) in Production. Confirm the dev-only inspector pages are genuinely unreachable there first (Known Issues #6).
+2. Run Stage 1 long enough to observe: real fallback latency (if any fallback triggers), real Background Function cold-start/duration, whether any row gets stuck claimed.
+3. Advance to Stage 2 (internal employees) once Stage 1 shows no surprises. This is real dogfooding at low-but-nonzero volume.
+4. Before Stage 3: revisit Known Issues #7 with real Stage 1–2 data to size a stale-claim reclaim threshold if the crash rate observed warrants it; otherwise proceed to Stage 3 with manual reconciliation as the accepted interim process.
+5. Follow the Canary Plan doc's own per-stage thresholds and durations from Stage 3 onward.
+
+## Verification summary (this phase)
+
+- 773 real-DB + unit assertions passing, 0 failures (regression + 50 new Phase 6I assertions covering canary config, routing decisions, all 4 new RPCs, the fallback SQL handoff, and dispatch idempotency).
+- `npx tsc --noEmit -p .` — clean.
+- `npm run build` — clean; both the legacy and new canonical worker routes present in the manifest.
+- 1 real bug found and fixed (`classifyForFallback` ownership gap), regression-guarded.
+- No new migration risk: 3 new RPCs (plus 1 tiny read-only helper) added, all additive, no existing RPC modified, no existing table altered beyond columns Phase 6G already added and left unused.
 
 ## Final verdict
 
-**Phase 6H: PASS** for its own explicit scope (production readiness audit, rollout plan design, monitoring, rollback demonstration, validation, documentation — all delivered, zero regressions, zero new features introduced). **Not** a recommendation to advance past Stage 2 in Production until the three gaps above are closed in a dedicated follow-up phase.
+**Phase 6I: PASS** for its own explicit scope (routing, fallback, quota, background execution, canary staging, metrics, verification, documentation — all delivered, zero regressions, zero new user-visible features, zero changes to Career Memory/Runtime/Overlay/Template semantics). Recommends proceeding to Stage 1 in Production; Stage 3+ readiness should be reconfirmed with real Stage 1–2 operational data before advancing, not because any mechanism is missing, but because none of this phase's new code has run against real Production traffic yet.

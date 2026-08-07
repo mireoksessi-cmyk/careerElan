@@ -619,7 +619,19 @@ async function main() {
   {
     check("classifyForFallback: LegacyFallbackError -> transient_failure (no lower fallback tier exists, treated as the generic catch-all)", classifyForFallback(new LegacyFallbackError("x")), { shouldFallback: true, reason: "transient_failure" });
     checkFalse("classifyForFallback: MalformedRequestError -> never fallback (it is not a ValidationError subclass, but still represents a bad request, not a canonical-specific gap - falls through to the generic transient_failure branch)", classifyForFallback(new MalformedRequestError("x")).reason === "no_canonical_profile");
-    check("classifyForFallback: NotFoundError (generic, not a Canonical-specific subclass) -> transient_failure (only the specific Canonical*Error subclasses get their own named reason)", classifyForFallback(new NotFoundError("Widget")), { shouldFallback: true, reason: "transient_failure" });
+    /*
+      Phase 6I fix: a BARE NotFoundError (not one of the two specific
+      Canonical*Error subclasses, both checked individually above) now
+      hard-fails rather than falling back - it represents the request's
+      OWN target not existing/not belonging to the caller (an ownership
+      or resource-identity problem), which legacy must refuse
+      identically, not silently serve a different engine's output for.
+      Previously fell through to the generic transient_failure branch
+      and was (incorrectly) treated as fallback-eligible - this
+      assertion is a regression guard for that fix, not the original
+      Phase 6G-era expectation.
+    */
+    checkFalse("classifyForFallback: bare NotFoundError (not a Canonical*Error subclass) -> never fallback (ownership/not-found on the request's own target)", classifyForFallback(new NotFoundError("Widget")).shouldFallback);
     check("classifyForFallback: ConflictError -> transient_failure (no dedicated fallback reason for a version conflict)", classifyForFallback(new ConflictError("x")), { shouldFallback: true, reason: "transient_failure" });
     check("classifyForFallback: undefined thrown -> transient_failure (never crashes on a falsy thrown value)", classifyForFallback(undefined), { shouldFallback: true, reason: "transient_failure" });
     check("classifyForFallback: thrown plain object (not an Error at all) -> transient_failure", classifyForFallback({ some: "object" }), { shouldFallback: true, reason: "transient_failure" });
