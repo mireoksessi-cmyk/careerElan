@@ -637,34 +637,28 @@ async function main() {
     check("render-package-direct K3: same for generated_docx_document_id", appRowK.generated_docx_document_id, persistedIds.docxDocumentId);
   }
 
-  // ==================== L. DISCLOSED LIMITATION - professional-ats PDF rejects buildFixtureRuntime()'s content at every supported density ====================
-  // Real defect found while building section K (never previously exposed -
-  // no test in this entire Phase 6G effort had ever requested format:"pdf"
-  // explicitly; every prior professional-ats coverage used the default
-  // "html" format, which does not enforce this gate). professional-ats's
-  // PDF path (lib/resumeTemplates/templates/professionalAts/index.ts ->
-  // buildProfessionalAtsPdf) delegates to the pre-existing legacy DPE
-  // Phase 4/5A pipeline, which throws a hard precondition-violation error
-  // if its own HTML content-preservation validation doesn't pass - by
-  // that module's own design, this is intentional (not a normal "return a
-  // failed result" case). buildFixtureRuntime()'s ordinary-length content
-  // fails this validation at EVERY density professional-ats supports
-  // (verified: compact/comfortable/balanced all fail; only modern-sidebar
-  // and creative-timeline succeed with the same content), producing
-  // real missing/invented text fragments after auto-compaction to
-  // "ultra-compact". This is NOT a crash in production - renderCanonicalPackage
-  // catches it and wraps it as TemplateRenderingError, which
-  // classifyForFallback correctly routes to the fallback-eligible legacy
-  // path - but it means a real user selecting professional-ats for a
-  // normal-length resume would silently never get their canonical PDF,
-  // always falling back to legacy. Root-causing/fixing the legacy DPE
-  // compaction algorithm itself is out of this round's scope (a large,
-  // separately-tested subsystem, not part of Phase 6F/6G) - this test
-  // exists to document and track the defect with a real regression
-  // marker, per this round's own "disclose, don't silently fix
-  // out-of-scope code" convention.
+  // ==================== L. REGRESSION GUARD - professional-ats PDF generation for buildFixtureRuntime()'s content (Phase 6G.1 fix) ====================
+  // Phase 6G originally found and disclosed a real defect here (never
+  // exposed before - no test in this entire Phase 6G effort had ever
+  // requested format:"pdf" explicitly for professional-ats; every prior
+  // coverage used the default "html" format, which doesn't enforce the
+  // Phase 4/5A content-preservation gate buildProfessionalAtsPdf does).
+  // Phase 6G.1 root-caused it using REAL (non-synthetic) resumes - see
+  // fixtures/scripts/phase6g1AtsPdfRepro.mts/phase6g1AtsFullVerify.mts -
+  // and found it was NOT a general professional-ats/DPE defect (all 6
+  // real bench resumes always passed): it was 3 distinct, fixed bugs -
+  // (1) this file's own testFixtures.ts hand-authored fixture had an
+  // exp-acme-ops entry whose hierarchicalContent tree didn't mirror its
+  // own content/bullets arrays (missing a bullet, an untracked
+  // subheading label), (2) renderers.tsx/docxRenderer.ts never rendered
+  // ProjectEntry.technologies or PublicationEntry.urlOrDoi even though
+  // textExtraction.ts already (correctly) expected them, (3)
+  // textExtraction.ts read entry.content unconditionally instead of
+  // mirroring the renderer's own hierarchicalContent-when-present
+  // branch. This test now asserts the FIXED behavior - a permanent
+  // regression guard, not a limitation to keep working around.
   {
-    const userL = await makeTestUser(admin, "professional-ats-pdf-limitation");
+    const userL = await makeTestUser(admin, "professional-ats-pdf-fixed");
     const repos = createCanonicalRepositories(userL.client);
     const service = new CanonicalCareerMemoryService(repos);
     const runtimeL: CanonicalResumeRuntime = { ...buildFixtureRuntime(), sourceDocuments: [], overlayState: { history: [] } };
@@ -674,29 +668,23 @@ async function main() {
     if (!profileL) throw new Error("profile not found");
     const { data: applicationL } = await userL.client.from("applications").insert({ user_id: userL.userId }).select("*").single();
 
-    let renderThrew = false;
-    let renderErrorCode: string | undefined;
-    try {
-      await renderCanonicalPackage(userL.client as never, {
-        userId: userL.userId,
-        applicationId: applicationL.id,
-        runtime: appliedL.runtime,
-        useTailored: true,
-        templateId: "professional-ats",
-        paperSize: "letter",
-        density: "balanced",
-        locale: "en-CA",
-        canonicalProfileId: profileL.id,
-        canonicalResumeVersionId: savedL.version.id,
-        tailoredResumeId: null,
-        generatedAt: new Date().toISOString(),
-      });
-    } catch (e) {
-      renderThrew = true;
-      renderErrorCode = (e as { code?: string })?.code;
-    }
-    checkTrue("DISCLOSED LIMITATION: professional-ats PDF generation for buildFixtureRuntime()'s standard content throws (reproduces the real defect deterministically)", renderThrew);
-    check("DISCLOSED LIMITATION: the thrown error is a structured domain error (PERSISTENCE_ERROR from TemplateRenderingError), never an unstructured crash", renderErrorCode, "PERSISTENCE_ERROR");
+    const resultL = await renderCanonicalPackage(userL.client as never, {
+      userId: userL.userId,
+      applicationId: applicationL.id,
+      runtime: appliedL.runtime,
+      useTailored: true,
+      templateId: "professional-ats",
+      paperSize: "letter",
+      density: "balanced",
+      locale: "en-CA",
+      canonicalProfileId: profileL.id,
+      canonicalResumeVersionId: savedL.version.id,
+      tailoredResumeId: null,
+      generatedAt: new Date().toISOString(),
+    });
+    checkTrue("REGRESSION GUARD (Phase 6G.1 fix): professional-ats PDF generation for buildFixtureRuntime()'s content now succeeds (previously threw)", resultL.pdfBytes.length > 0);
+    checkTrue("REGRESSION GUARD (Phase 6G.1 fix): PDF content-preservation validation now passes", resultL.pdfValidation.passed);
+    checkTrue("REGRESSION GUARD (Phase 6G.1 fix): DOCX content-preservation validation now passes too (the same underlying content gap affected both renderers)", resultL.docxValidation.passed);
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

@@ -24,6 +24,7 @@ import type {
   PublicationEntry,
   CustomResumeSection,
   MetricGrid,
+  HierarchicalContentNode,
 } from "../resumeStructured/types";
 
 function nonEmpty(text: string | undefined): string | undefined {
@@ -72,22 +73,52 @@ export function extractSkillGroupFragments(group: SkillGroup): string[] {
   return fragments;
 }
 
+/*
+  Phase 6G.1 - recursively collects every node's own .text (subheading
+  labels included, not just leaf bullets/paragraphs) - mirrors
+  renderers.tsx's renderHierarchicalNodes exactly, which renders EVERY
+  node's text (in a <p> for subheading/paragraph, in a <li> for bullet)
+  plus each node's own children. Real bug found via Phase 6G.1's
+  buildFixtureRuntime() PDF repro: a subheading node's own label text
+  (e.g. a "Program"/"Initiative" grouping heading) was genuinely
+  rendered but never counted as expected, so the validator flagged
+  correctly-rendered content as "invented".
+*/
+function collectHierarchicalTextFragments(nodes: HierarchicalContentNode[]): string[] {
+  const fragments: string[] = [];
+  for (const node of nodes) {
+    const v = nonEmpty(node.text);
+    if (v) fragments.push(v);
+    if (node.children.length > 0) fragments.push(...collectHierarchicalTextFragments(node.children));
+  }
+  return fragments;
+}
+
 export function extractExperienceEntryFragments(entry: ExperienceEntry): string[] {
   const fragments: string[] = [];
   for (const f of [entry.organization, entry.role, entry.location, entry.dateRangeText]) {
     const v = nonEmpty(f?.value);
     if (v) fragments.push(v);
   }
-  // Phase 5D.3A - mirrors renderers.tsx's ExperienceLikeView exactly:
-  // every block in entry.content, in original order - bullets and
-  // paragraphs both render now, so both are expected here. This
-  // replaced a bullets-XOR-descriptionParagraphs precedence that
-  // silently dropped an entire array whenever an entry legitimately
-  // mixed both kinds (Phase 5D.3 UAT's Prior Experience / Government-
-  // Funded Projects findings - the very bug this round exists to fix).
-  for (const c of entry.content) {
-    const v = nonEmpty(c.text);
-    if (v) fragments.push(v);
+  /*
+    Phase 5D.3A / Phase 6G.1 - mirrors renderers.tsx's ExperienceLikeView
+    exactly: entry.hierarchicalContent when hasHierarchicalStructure is
+    true and non-empty (a real, richer tree the renderer actually
+    displays instead of entry.content in that case - see
+    renderHierarchicalNodes), else every block in entry.content, in
+    original order. Originally this always read entry.content
+    regardless of hasHierarchicalStructure, silently under-expecting
+    (missing bullets nested only under the hierarchical tree) or over-
+    expecting (bullets that hierarchicalContent legitimately omits)
+    whenever the two representations diverged even slightly.
+  */
+  if (entry.hasHierarchicalStructure && entry.hierarchicalContent.length > 0) {
+    fragments.push(...collectHierarchicalTextFragments(entry.hierarchicalContent));
+  } else {
+    for (const c of entry.content) {
+      const v = nonEmpty(c.text);
+      if (v) fragments.push(v);
+    }
   }
   return fragments;
 }
@@ -182,6 +213,8 @@ export function extractProjectEntryFragments(entry: ProjectEntry): string[] {
     if (v) fragments.push(v);
   }
   // Phase 5D.3A - see extractExperienceEntryFragments's own comment.
+  // ProjectEntry has no hierarchicalContent (unlike ExperienceEntry) -
+  // entry.content is always the renderer's own source here.
   for (const c of entry.content) {
     const v = nonEmpty(c.text);
     if (v) fragments.push(v);

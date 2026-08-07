@@ -365,6 +365,13 @@ function ExperienceLikeView({ block, subRange, isContinuation, spacing = DEFAULT
   const org = val(("organization" in entry ? entry.organization : "name" in entry ? entry.name : undefined) as StructuredTextValue | undefined);
   const location = "location" in entry ? val(entry.location) : undefined;
   const dateRange = val(entry.dateRangeText);
+  /* project-entry is the only ExperienceEntry-like kind carrying a
+     technologies list - experience-entry/volunteer-entry never have this
+     field. Previously never rendered at all, so any populated
+     technologies value was silently dropped from the professional-ats
+     output while textExtraction.ts (correctly) still expected it to
+     appear - a real content-preservation gap, not a validator bug. */
+  const technologies = "technologies" in entry ? entry.technologies.map((t) => t.value.trim()).filter((t) => t.length > 0) : [];
   return (
     <div data-block-id={block.id} data-block-kind={block.kind} data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
@@ -377,6 +384,7 @@ function ExperienceLikeView({ block, subRange, isContinuation, spacing = DEFAULT
             </strong>
           )}
           {(location || dateRange) && <div>{joinContact([location, dateRange])}</div>}
+          {technologies.length > 0 && <div>{technologies.join(", ")}</div>}
         </div>
       )}
       {"hasHierarchicalStructure" in entry && entry.hasHierarchicalStructure && entry.hierarchicalContent.length > 0
@@ -522,6 +530,11 @@ function PublicationView({ block, subRange, isContinuation, spacing = DEFAULT_SP
   const venue = val(entry.publisherOrVenue);
   const date = val(entry.dateText);
   const authors = entry.authors.map((a) => a.value).filter((a) => a.trim().length > 0).join(", ");
+  /* urlOrDoi was previously never rendered here at all, so a populated
+     value was silently dropped while textExtraction.ts (correctly)
+     still expected it - a real content-preservation gap, not a
+     validator bug. */
+  const urlOrDoi = val(entry.urlOrDoi);
   const hasAnyStructuredField = title || authors || venue || date || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="publication-entry" data-source-entry-id={block.sourceEntryId}>
@@ -529,6 +542,7 @@ function PublicationView({ block, subRange, isContinuation, spacing = DEFAULT_SP
         <div data-block-header>
           {title && <strong>{title}</strong>}
           {(authors || venue || date) && <div>{joinContact([authors || undefined, venue, date])}</div>}
+          {urlOrDoi && <div>{urlOrDoi}</div>}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}

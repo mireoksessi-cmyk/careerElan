@@ -59,7 +59,10 @@ export function buildFixtureResume(): ResumeStructuredModel {
             text: "Warehouse Program",
             depth: 0,
             numberingLabel: "1.",
-            children: [{ id: "exp-acme-ops-h1-c1", kind: "bullet", text: "Reduced shipment delays by 32% through carrier scorecard program.", depth: 1, children: [], source: trace("sec-exp", ["blk-9"]) }],
+            children: [
+              { id: "exp-acme-ops-h1-c1", kind: "bullet", text: "Reduced shipment delays by 32% through carrier scorecard program.", depth: 1, children: [], source: trace("sec-exp", ["blk-9"]) },
+              { id: "exp-acme-ops-h1-c2", kind: "bullet", text: "Led a team of 5 planners across two warehouses.", depth: 1, children: [], source: trace("sec-exp", ["blk-10"]) },
+            ],
             source: trace("sec-exp", ["blk-9"]),
           },
         ],

@@ -249,6 +249,17 @@ function renderExperienceLike(block: AssemblyBlock, ctx: BuildContext, blockGapT
       keepNext: entry.content.length > 0,
     });
   }
+  /* Phase 6G.1 - mirrors renderers.tsx's own ExperienceLikeView fix
+     exactly: project-entry's technologies field was previously never
+     rendered here either, dropping content that docxTextExtraction.ts
+     already (correctly) expects. */
+  const technologies = "technologies" in entry ? entry.technologies.map((t) => t.value.trim()).filter((t) => t.length > 0) : [];
+  if (technologies.length > 0) {
+    pushParagraph(ctx, block.id, block.sourceEntryId, [run(technologies.join(", "), ctx)], {
+      spacingBeforeTwips: 0,
+      keepNext: entry.content.length > 0 || ("hierarchicalContent" in entry && entry.hierarchicalContent.length > 0),
+    });
+  }
   if ("hasHierarchicalStructure" in entry && entry.hasHierarchicalStructure && entry.hierarchicalContent.length > 0) {
     renderHierarchicalContentSubItems(block, ctx, entry.hierarchicalContent, 0);
   } else {
@@ -390,11 +401,16 @@ function renderAward(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: num
 function renderPublication(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const entry = block.payload as PublicationEntry;
   const authors = entry.authors.map((a) => a.value).filter((a) => a.trim().length > 0).join(", ");
+  /* Phase 6G.1 - mirrors renderers.tsx's own PublicationView fix
+     exactly: urlOrDoi was previously never rendered here either. Joined
+     into the same meta line as authors/venue/date (not primaryLines,
+     which only activates its multi-bold-line behavior for 2+ entries
+     and would otherwise silently drop a single extra value). */
   renderDetailsEntry(
     block,
     ctx,
     blockGapTwips,
-    { primary: val(entry.title), meta: [authors || undefined, val(entry.publisherOrVenue), val(entry.dateText)] },
+    { primary: val(entry.title), meta: [authors || undefined, val(entry.publisherOrVenue), val(entry.dateText), val(entry.urlOrDoi)] },
     entry.details.map((d) => d.value),
     entry.rawHeaderText
   );
