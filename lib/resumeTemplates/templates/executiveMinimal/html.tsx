@@ -150,6 +150,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             </div>
             {p.role && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{p.role}</div>}
             <ContentItemsView items={p.items} textColor={colors.text} />
+            {p.technologies.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>Technologies: {p.technologies.join(", ")}</div>}
           </div>
         );
         items.push({ id: `project-${p.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(key)}{body}</section>) : body });
@@ -168,7 +169,9 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             </div>
             <div style={{ color: colors.text }}>{edu.credentials.join(", ") || edu.credential}</div>
             {edu.fieldsOfStudy.length > 0 && <div style={{ color: colors.muted, fontSize: "0.9em" }}>{edu.fieldsOfStudy.join(" & ")}</div>}
+            {edu.gpa && <div style={{ color: colors.muted, fontSize: "0.85em" }}>GPA: {edu.gpa}</div>}
             {edu.honors.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.honors.join(", ")}</div>}
+            {edu.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
           </div>
         );
         items.push({ id: `edu-${edu.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(key)}{body}</section>) : body });
@@ -184,6 +187,9 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             <span style={{ fontWeight: 600 }}>{c.name || c.names.join(", ")}</span>
             {c.issuer && <span style={{ color: colors.muted }}> — {c.issuer}</span>}
             {c.issueDateText && <span style={{ color: colors.muted }}> ({c.issueDateText})</span>}
+            {c.expiryDateText && <span style={{ color: colors.muted }}> – {c.expiryDateText}</span>}
+            {c.credentialId && <div style={{ color: colors.muted, fontSize: "0.85em" }}>Credential ID: {c.credentialId}</div>}
+            {c.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
           </div>
         );
         items.push({ id: `cred-${c.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(key)}{body}</section>) : body });
@@ -199,6 +205,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             <span style={{ fontWeight: 600 }}>{a.name || a.names.join(", ")}</span>
             {a.issuer && <span style={{ color: colors.muted }}> — {a.issuer}</span>}
             {a.dateText && <span style={{ color: colors.muted }}> ({a.dateText})</span>}
+            {a.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
           </div>
         );
         items.push({ id: `award-${a.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(key)}{body}</section>) : body });
@@ -216,6 +223,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             {p.publisherOrVenue && <span style={{ color: colors.muted }}> — {p.publisherOrVenue}</span>}
             {p.dateText && <span style={{ color: colors.muted }}> ({p.dateText})</span>}
             {p.urlOrDoi && <div style={{ color: colors.accent, fontSize: "0.85em", wordBreak: "break-all" }}>{p.urlOrDoi}</div>}
+            {p.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
           </div>
         );
         items.push({ id: `pub-${p.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(key)}{body}</section>) : body });

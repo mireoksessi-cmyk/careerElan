@@ -88,6 +88,7 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
         paragraphs.push(new Paragraph({ children: [run(p.name, { bold: true }), run(p.dateRangeText ? `   —   ${p.dateRangeText}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
         if (p.role) paragraphs.push(new Paragraph({ children: [run(p.role, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
         paragraphs.push(...renderContentItemsToParagraphs(p.items, contentItemOpts));
+        if (p.technologies.length > 0) paragraphs.push(new Paragraph({ children: [run(`Technologies: ${p.technologies.join(", ")}`, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       }
       continue;
     }
@@ -99,7 +100,9 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
         const creds = edu.credentials.join(", ") || edu.credential;
         if (creds) paragraphs.push(new Paragraph({ children: [run(creds)], spacing: { after: 20 } }));
         if (edu.fieldsOfStudy.length > 0) paragraphs.push(new Paragraph({ children: [run(edu.fieldsOfStudy.join(" & "), { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+        if (edu.gpa) paragraphs.push(new Paragraph({ children: [run(`GPA: ${edu.gpa}`, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
         if (edu.honors.length > 0) paragraphs.push(new Paragraph({ children: [run(edu.honors.join(", "), { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+        for (const d of edu.details) paragraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       }
       continue;
     }
@@ -107,8 +110,10 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
       if (normalized.credentials.length === 0) continue;
       heading(EXECUTIVE_MINIMAL_SECTION_LABELS.credentials ?? "Credentials");
       for (const c of normalized.credentials) {
-        const line = [c.name || c.names.join(", "), c.issuer, c.issueDateText].filter(Boolean).join(" — ");
+        const line = [c.name || c.names.join(", "), c.issuer, c.issueDateText, c.expiryDateText].filter(Boolean).join(" — ");
         paragraphs.push(new Paragraph({ children: [run(line)], spacing: { after: 40 } }));
+        if (c.credentialId) paragraphs.push(new Paragraph({ children: [run(`Credential ID: ${c.credentialId}`, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+        for (const d of c.details) paragraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       }
       continue;
     }
@@ -118,6 +123,7 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
       for (const a of normalized.awards) {
         const line = [a.name || a.names.join(", "), a.issuer, a.dateText].filter(Boolean).join(" — ");
         paragraphs.push(new Paragraph({ children: [run(line)], spacing: { after: 40 } }));
+        for (const d of a.details) paragraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       }
       continue;
     }
@@ -128,6 +134,7 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
         const line = [p.title || p.titles.join(", "), p.authors.join(", "), p.publisherOrVenue, p.dateText].filter(Boolean).join(" — ");
         paragraphs.push(new Paragraph({ children: [run(line)], spacing: { after: 20 } }));
         if (p.urlOrDoi) paragraphs.push(new Paragraph({ children: [run(p.urlOrDoi, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 40 } }));
+        for (const d of p.details) paragraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       }
       continue;
     }

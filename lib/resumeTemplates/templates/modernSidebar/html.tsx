@@ -85,6 +85,7 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
           </div>
           {p.role && <div style={{ color: colors.accent, fontSize: "0.85em" }}>{p.role}</div>}
           <ContentItemsView items={p.items} textColor={colors.text} />
+          {p.technologies.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>Technologies: {p.technologies.join(", ")}</div>}
         </div>
       );
       items.push({ id: `project-${p.id}`, sectionKey: "projects", node: i === 0 ? (<section>{heading(MODERN_SIDEBAR_LABELS.projects, colors)}{body}</section>) : body });
@@ -100,7 +101,9 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
           <div style={{ color: colors.text, fontSize: "0.9em" }}>{edu.credentials.join(", ") || edu.credential}</div>
           {edu.fieldsOfStudy.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.fieldsOfStudy.join(" & ")}</div>}
           <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.dateRangeText}</div>
+          {edu.gpa && <div style={{ color: colors.muted, fontSize: "0.85em" }}>GPA: {edu.gpa}</div>}
           {edu.honors.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.honors.join(", ")}</div>}
+          {edu.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </div>
       );
       items.push({ id: `edu-${edu.id}`, sectionKey: "education", node: i === 0 ? (<section>{heading(MODERN_SIDEBAR_LABELS.education, colors)}{body}</section>) : body });
@@ -112,7 +115,9 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     normalized.credentials.forEach((c, i) => {
       const body = (
         <div style={{ marginBottom: "3px", color: colors.text, fontSize: "0.9em" }}>
-          <strong>{c.name || c.names.join(", ")}</strong> {c.issuer ? `— ${c.issuer}` : ""} {c.issueDateText ? `(${c.issueDateText})` : ""}
+          <strong>{c.name || c.names.join(", ")}</strong> {c.issuer ? `— ${c.issuer}` : ""} {c.issueDateText ? `(${c.issueDateText})` : ""} {c.expiryDateText ? `– ${c.expiryDateText}` : ""}
+          {c.credentialId && <div style={{ color: colors.muted, fontSize: "0.85em" }}>Credential ID: {c.credentialId}</div>}
+          {c.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </div>
       );
       items.push({ id: `cred-${c.id}`, sectionKey: "credentials", node: i === 0 ? (<section>{heading(MODERN_SIDEBAR_LABELS.credentials, colors)}{body}</section>) : body });
@@ -122,7 +127,12 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
   if (normalized.awards.length > 0) {
     headingsInOrder.push(MODERN_SIDEBAR_LABELS.awards);
     normalized.awards.forEach((a, i) => {
-      const body = <div style={{ marginBottom: "3px", color: colors.text, fontSize: "0.9em" }}><strong>{a.name || a.names.join(", ")}</strong> {a.issuer ? `— ${a.issuer}` : ""} {a.dateText ? `(${a.dateText})` : ""}</div>;
+      const body = (
+        <div style={{ marginBottom: "3px", color: colors.text, fontSize: "0.9em" }}>
+          <strong>{a.name || a.names.join(", ")}</strong> {a.issuer ? `— ${a.issuer}` : ""} {a.dateText ? `(${a.dateText})` : ""}
+          {a.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
+        </div>
+      );
       items.push({ id: `award-${a.id}`, sectionKey: "awards", node: i === 0 ? (<section>{heading(MODERN_SIDEBAR_LABELS.awards, colors)}{body}</section>) : body });
     });
   }
@@ -134,6 +144,7 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
         <div style={{ marginBottom: "4px", color: colors.text, fontSize: "0.9em", wordBreak: "break-word" }}>
           <strong>{p.title || p.titles.join(", ")}</strong> {p.authors.length > 0 ? `— ${p.authors.join(", ")}` : ""} {p.publisherOrVenue ? `— ${p.publisherOrVenue}` : ""} {p.dateText ? `(${p.dateText})` : ""}
           {p.urlOrDoi && <div style={{ color: colors.accent, fontSize: "0.85em", wordBreak: "break-all" }}>{p.urlOrDoi}</div>}
+          {p.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </div>
       );
       items.push({ id: `pub-${p.id}`, sectionKey: "publications", node: i === 0 ? (<section>{heading(MODERN_SIDEBAR_LABELS.publications, colors)}{body}</section>) : body });

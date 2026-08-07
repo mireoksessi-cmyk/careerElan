@@ -50,6 +50,7 @@ export async function renderModernSidebarDocx(context: TemplateRenderContext): P
     mainParagraphs.push(heading(MODERN_SIDEBAR_LABELS[key]));
     for (const entry of entries) {
       mainParagraphs.push(new Paragraph({ children: [run(entry.role, { bold: true }), run(entry.organization ? `  —  ${entry.organization}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+      if (entry.location) mainParagraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       if (entry.dateRangeText) mainParagraphs.push(new Paragraph({ children: [run(entry.dateRangeText, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       mainParagraphs.push(...renderContentItemsToParagraphs(entry.items, contentOpts));
     }
@@ -60,6 +61,7 @@ export async function renderModernSidebarDocx(context: TemplateRenderContext): P
       mainParagraphs.push(new Paragraph({ children: [run(p.name, { bold: true }), run(p.dateRangeText ? `  —  ${p.dateRangeText}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
       if (p.role) mainParagraphs.push(new Paragraph({ children: [run(p.role, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       mainParagraphs.push(...renderContentItemsToParagraphs(p.items, contentOpts));
+      if (p.technologies.length > 0) mainParagraphs.push(new Paragraph({ children: [run(`Technologies: ${p.technologies.join(", ")}`, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
     }
   }
   if (normalized.education.length > 0) {
@@ -69,24 +71,32 @@ export async function renderModernSidebarDocx(context: TemplateRenderContext): P
       const creds = edu.credentials.join(", ") || edu.credential;
       mainParagraphs.push(new Paragraph({ children: [run([creds, edu.dateRangeText].filter(Boolean).join(" — "))], spacing: { after: 20 } }));
       if (edu.fieldsOfStudy.length > 0) mainParagraphs.push(new Paragraph({ children: [run(edu.fieldsOfStudy.join(" & "), { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+      if (edu.gpa) mainParagraphs.push(new Paragraph({ children: [run(`GPA: ${edu.gpa}`, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
       if (edu.honors.length > 0) mainParagraphs.push(new Paragraph({ children: [run(edu.honors.join(", "), { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 40 } }));
+      for (const d of edu.details) mainParagraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
     }
   }
   if (normalized.credentials.length > 0) {
     mainParagraphs.push(heading(MODERN_SIDEBAR_LABELS.credentials));
     for (const c of normalized.credentials) {
-      mainParagraphs.push(new Paragraph({ children: [run([c.name || c.names.join(", "), c.issuer, c.issueDateText].filter(Boolean).join(" — "))], spacing: { after: 40 } }));
+      mainParagraphs.push(new Paragraph({ children: [run([c.name || c.names.join(", "), c.issuer, c.issueDateText, c.expiryDateText].filter(Boolean).join(" — "))], spacing: { after: 40 } }));
+      if (c.credentialId) mainParagraphs.push(new Paragraph({ children: [run(`Credential ID: ${c.credentialId}`, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+      for (const d of c.details) mainParagraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
     }
   }
   if (normalized.awards.length > 0) {
     mainParagraphs.push(heading(MODERN_SIDEBAR_LABELS.awards));
-    for (const a of normalized.awards) mainParagraphs.push(new Paragraph({ children: [run([a.name || a.names.join(", "), a.issuer, a.dateText].filter(Boolean).join(" — "))], spacing: { after: 40 } }));
+    for (const a of normalized.awards) {
+      mainParagraphs.push(new Paragraph({ children: [run([a.name || a.names.join(", "), a.issuer, a.dateText].filter(Boolean).join(" — "))], spacing: { after: 40 } }));
+      for (const d of a.details) mainParagraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+    }
   }
   if (normalized.publications.length > 0) {
     mainParagraphs.push(heading(MODERN_SIDEBAR_LABELS.publications));
     for (const p of normalized.publications) {
       mainParagraphs.push(new Paragraph({ children: [run([p.title || p.titles.join(", "), p.authors.join(", "), p.publisherOrVenue, p.dateText].filter(Boolean).join(" — "))], spacing: { after: 20 } }));
       if (p.urlOrDoi) mainParagraphs.push(new Paragraph({ children: [run(p.urlOrDoi, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 40 } }));
+      for (const d of p.details) mainParagraphs.push(new Paragraph({ children: [run(d, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
     }
   }
   const nonLanguageCustom = normalized.customSections.filter((s) => !isLanguageCustomSection(s));
