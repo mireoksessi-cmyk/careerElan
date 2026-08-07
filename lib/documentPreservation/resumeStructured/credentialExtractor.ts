@@ -27,6 +27,7 @@ import { entryId } from "./ids";
 import { collectHeaderWindow, classifyWindow, looksLikeHeaderLine, type HeaderWindowLine } from "./headerWindow";
 import { splitMultiValueSegment, segmentLooksLikeCredential, detectProgramLabel } from "./multiAcademicValueParser";
 import { parseInlineCompositeHeader } from "./academicCompositeParser";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import type { CredentialEntry, StructuredTextValue } from "./types";
 
 const BULLET_PREFIX_RE = /^[•\-*◦▪·‣⁃]\s+/;
@@ -119,7 +120,9 @@ export function extractCredentialEntries(sectionId: string, bodyBlocks: Semantic
     const indices = range.headerIndices;
     const blocks = indices.map((i) => relevant[i]);
     const bodyBlocksForEntry = range.bodyIndices.map((i) => relevant[i]);
-    const details = bodyBlocksForEntry.filter((b) => b.rawText.length > 0).map((b) => makeValue(b.rawText, sectionId, [b], 0.6));
+    const details = bodyBlocksForEntry
+      .filter((b) => b.rawText.length > 0)
+      .map((b) => makeValue(normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText, sectionId, [b], 0.6));
     const combinedText = blocks.map((b) => stripBullet(b.text)).join(" ");
     /* A headerless range (no line in it looked credential-shaped at
        all) still preserves its own text verbatim via rawHeaderText -

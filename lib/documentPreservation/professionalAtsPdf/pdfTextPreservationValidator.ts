@@ -49,21 +49,24 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 /*
-  pdfjs-dist's getTextContent() occasionally splits a hyphenated word
-  across two separate TextItems at the exact hyphen boundary (e.g.
-  "root-cause" -> item "root-" + item "cause"), and joining items with
-  a uniform space in extractPdfPageText() then introduces a stray
-  space right after the hyphen ("root- cause") that never existed in
+  pdfjs-dist's getTextContent() occasionally splits a word across two
+  separate TextItems at a line-wrap boundary (e.g. "root-cause" ->
+  item "root-" + item "cause", or a long URL wrapped mid-path at a
+  "/"), and joining items with a uniform space in
+  extractPdfPageText() then introduces a stray space right at that
+  boundary ("root- cause", "example.com/ path") that never existed in
   the source content or the Phase-4-validated HTML. This is a text-
   EXTRACTION artifact, not real content loss (confirmed by direct
-  inspection: the surrounding text, including the hyphen itself, is
-  intact) - so the PDF-native comparison tolerates an optional single
-  space immediately after any hyphen in the expected fragment, unlike
-  Phase 4's own textPreservationValidator.ts (HTML has no such
-  artifact, so its boundaryPattern doesn't need this).
+  inspection: the surrounding text, including the hyphen/slash itself,
+  is intact) - so the PDF-native comparison tolerates an optional
+  single space immediately after any hyphen OR slash in the expected
+  fragment (Chromium's own soft-wrap opportunities inside a long
+  unbroken token fall at both characters), unlike Phase 4's own
+  textPreservationValidator.ts (HTML has no such artifact, so its
+  boundaryPattern doesn't need this).
 */
 function boundaryPattern(fragment: string): RegExp {
-  const escaped = escapeRegExp(fragment).replace(/-/g, "-\\s?");
+  const escaped = escapeRegExp(fragment).replace(/-/g, "-\\s?").replace(/\//g, "/\\s?");
   const startsAlnum = /^[A-Za-z0-9]/.test(fragment);
   const endsAlnum = /[A-Za-z0-9]$/.test(fragment);
   return new RegExp(`${startsAlnum ? "\\b" : ""}${escaped}${endsAlnum ? "\\b" : ""}`, "g");
@@ -150,7 +153,7 @@ export function validatePdfTextPreservation(
       leftover = leftover.replace(boundaryPattern(fragment), " ");
     }
     for (const safe of safeSectionLabels) leftover = leftover.split(safe).join(" ");
-    leftover = leftover.replace(/[·,\-—:]/g, " ").replace(/\s+/g, " ").trim();
+    leftover = leftover.replace(/[·,\-—:/]/g, " ").replace(/\s+/g, " ").trim();
 
     if (leftover.length > 0) {
       inventedFragments.push(`page ${pageText.pageIndex}: ${leftover}`);

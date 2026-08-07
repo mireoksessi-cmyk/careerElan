@@ -9,6 +9,7 @@ import type { SemanticContentBlock } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId, bulletId } from "./ids";
 import { extractDateParts } from "./dateRangeParsing";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import type { ProjectEntry, StructuredTextValue } from "./types";
 
 const MAX_HEADER_LINE_LENGTH = 90;
@@ -81,15 +82,21 @@ export function extractProjectEntries(sectionId: string, bodyBlocks: SemanticCon
 
     const bullets = bodyBlocksForEntry
       .filter((b) => b.blockType === "bullet")
-      .map((b, bi) => ({ id: bulletId(entryId(sectionId, "project", index), bi), text: b.rawText, source: traceFromBlock(sectionId, b) }));
-    const descriptionParagraphs = bodyBlocksForEntry.filter((b) => b.blockType !== "bullet").map((b) => makeValue(b.rawText, sectionId, b, 0.6));
+      .map((b, bi) => ({
+        id: bulletId(entryId(sectionId, "project", index), bi),
+        text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
+        source: traceFromBlock(sectionId, b),
+      }));
+    const descriptionParagraphs = bodyBlocksForEntry
+      .filter((b) => b.blockType !== "bullet")
+      .map((b) => makeValue(normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText, sectionId, b, 0.6));
     const technologies = extractTechnologies(sectionId, bodyBlocksForEntry);
 
     // Phase 5D.3A - see ExperienceEntry.content's own comment (types.ts).
     const content = bodyBlocksForEntry.map((b, ci) => ({
       id: `${entryId(sectionId, "project", index)}-content-${ci}`,
       kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
-      text: b.rawText,
+      text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
       source: traceFromBlock(sectionId, b),
     }));
 

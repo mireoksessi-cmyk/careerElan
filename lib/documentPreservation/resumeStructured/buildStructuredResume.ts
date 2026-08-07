@@ -28,6 +28,7 @@ import { extractProjectEntries } from "./projectExtractor";
 import { extractAwardEntries } from "./awardExtractor";
 import { extractPublicationEntries } from "./publicationExtractor";
 import { adaptCustomSection } from "./customSectionAdapter";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import { splitEmbeddedCanonicalSubsections } from "./embeddedSubsectionSplitter";
 import { detectMetricGrids } from "./metricGridExtractor";
 import { validateStructuredResume } from "./structuredValidator";
@@ -377,14 +378,23 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
       displayHeading: null,
       paragraphs: document.unassignedBlocks
         .filter((b) => b.blockType !== "bullet")
-        .map((b) => ({ value: b.rawText, confidence: 1, extractionMethod: "fallback" as const, source: { sourceSectionId: "unassigned", sourceBlockIds: [b.id], sourceElementIds: b.sourceElementIds } })),
+        .map((b) => ({
+          value: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
+          confidence: 1,
+          extractionMethod: "fallback" as const,
+          source: { sourceSectionId: "unassigned", sourceBlockIds: [b.id], sourceElementIds: b.sourceElementIds },
+        })),
       bullets: document.unassignedBlocks
         .filter((b) => b.blockType === "bullet")
-        .map((b, i) => ({ id: `unassigned-residual-bullet-${i}`, text: b.rawText, source: { sourceSectionId: "unassigned", sourceBlockIds: [b.id], sourceElementIds: b.sourceElementIds } })),
+        .map((b, i) => ({
+          id: `unassigned-residual-bullet-${i}`,
+          text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
+          source: { sourceSectionId: "unassigned", sourceBlockIds: [b.id], sourceElementIds: b.sourceElementIds },
+        })),
       content: document.unassignedBlocks.map((b, i) => ({
         id: `unassigned-residual-content-${i}`,
         kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
-        text: b.rawText,
+        text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
         source: { sourceSectionId: "unassigned", sourceBlockIds: [b.id], sourceElementIds: b.sourceElementIds },
       })),
       sourceOrder: document.sections.length,

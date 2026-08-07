@@ -30,6 +30,7 @@ import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
 import { extractDateParts, hasDateEvidence } from "./dateRangeParsing";
 import { collectHeaderWindow, classifyWindow, type HeaderWindowLine } from "./headerWindow";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import type { PublicationEntry, StructuredTextValue, EntryContentBlock } from "./types";
 
 const YEAR_PAREN_RE = /\((?:19|20)\d{2}\)/;
@@ -48,11 +49,11 @@ function makeValue(value: string, sectionId: string, block: SemanticContentBlock
 }
 
 function detailsAndContentFor(sectionId: string, blocks: SemanticContentBlock[], entryId0: string): { details: StructuredTextValue[]; content: EntryContentBlock[] } {
-  const details = blocks.map((b) => makeValue(b.rawText, sectionId, b, 1));
+  const details = blocks.map((b) => makeValue(normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText, sectionId, b, 1));
   const content = blocks.map((b, i) => ({
     id: `${entryId0}-content-${i}`,
     kind: (b.blockType === "bullet" ? "bullet" : "paragraph") as EntryContentBlock["kind"],
-    text: b.rawText,
+    text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
     source: traceFromBlock(sectionId, b),
   }));
   return { details, content };

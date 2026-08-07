@@ -35,6 +35,7 @@ import { traceFromBlock, traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
 import { hasDateEvidence, stripDateAnchor } from "./dateRangeParsing";
 import { parseInlineCompositeHeader } from "./academicCompositeParser";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import {
   splitMultiValueSegment,
   splitDegreeInMajor,
@@ -578,9 +579,9 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       if (block.rawText.length === 0) continue;
       if (GPA_RE.test(block.text)) continue;
       if (/\b(honou?rs?|dean'?s list|cum laude|distinction)\b/i.test(block.text)) {
-        honors.push(makeValue(block.rawText, sectionId, block, 0.7));
+        honors.push(makeValue(normalizeBulletPresentation(block.rawText, { blockType: block.blockType }).displayText, sectionId, block, 0.7));
       } else {
-        details.push(makeValue(block.rawText, sectionId, block, 0.6));
+        details.push(makeValue(normalizeBulletPresentation(block.rawText, { blockType: block.blockType }).displayText, sectionId, block, 0.6));
       }
     }
 

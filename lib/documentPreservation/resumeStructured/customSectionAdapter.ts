@@ -8,6 +8,7 @@
 import type { LosslessResumeSection } from "../losslessSemantic/types";
 import { traceFromBlock, traceFromBlocks } from "./sourceTrace";
 import { customSectionId, bulletId } from "./ids";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import type { CustomResumeSection } from "./types";
 
 export function adaptCustomSection(section: LosslessResumeSection): CustomResumeSection {
@@ -15,12 +16,21 @@ export function adaptCustomSection(section: LosslessResumeSection): CustomResume
 
   const paragraphs = bodyBlocks
     .filter((b) => b.blockType !== "bullet")
-    .map((b) => ({ value: b.rawText, confidence: 1, extractionMethod: "explicit-label" as const, source: traceFromBlock(section.id, b) }));
+    .map((b) => ({
+      value: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
+      confidence: 1,
+      extractionMethod: "explicit-label" as const,
+      source: traceFromBlock(section.id, b),
+    }));
 
   const id = customSectionId(section.id);
   const bullets = bodyBlocks
     .filter((b) => b.blockType === "bullet")
-    .map((b, i) => ({ id: bulletId(id, i), text: b.rawText, source: traceFromBlock(section.id, b) }));
+    .map((b, i) => ({
+      id: bulletId(id, i),
+      text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
+      source: traceFromBlock(section.id, b),
+    }));
 
   // Phase 5D.3A - same bodyBlocks, in their original order, each tagged
   // with its own blockType instead of split into paragraphs/bullets
@@ -28,7 +38,7 @@ export function adaptCustomSection(section: LosslessResumeSection): CustomResume
   const content = bodyBlocks.map((b, i) => ({
     id: `${id}-content-${i}`,
     kind: b.blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const),
-    text: b.rawText,
+    text: normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText,
     source: traceFromBlock(section.id, b),
   }));
 

@@ -34,7 +34,7 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function boundaryPattern(fragment: string): RegExp {
-  const escaped = escapeRegExp(fragment).replace(/-/g, "-\\s?");
+  const escaped = escapeRegExp(fragment).replace(/-/g, "-\\s?").replace(/\//g, "/\\s?");
   const startsAlnum = /^[A-Za-z0-9]/.test(fragment);
   const endsAlnum = /[A-Za-z0-9]$/.test(fragment);
   return new RegExp(`${startsAlnum ? "\\b" : ""}${escaped}${endsAlnum ? "\\b" : ""}`, "g");
@@ -84,7 +84,7 @@ export function validateDocxTextPreservation(assembly: ProfessionalAtsAssemblyDo
   for (const fragment of byLengthDesc) {
     leftover = leftover.replace(boundaryPattern(fragment), " ");
   }
-  leftover = leftover.replace(/[·,\-—:]/g, " ").replace(/\s+/g, " ").trim();
+  leftover = leftover.replace(/[·,\-—:/]/g, " ").replace(/\s+/g, " ").trim();
   const inventedFragments = leftover.length > 0 ? [leftover] : [];
 
   /* Structural duplicate check: same block appearing with more than

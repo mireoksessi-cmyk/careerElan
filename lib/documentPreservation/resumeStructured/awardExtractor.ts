@@ -21,6 +21,7 @@ import { traceFromBlocks, mergeTraces } from "./sourceTrace";
 import { entryId } from "./ids";
 import { collectHeaderWindow, classifyWindow, looksLikeHeaderLine, type HeaderWindowLine } from "./headerWindow";
 import { splitMultiValueSegment, detectProgramLabel } from "./multiAcademicValueParser";
+import { normalizeBulletPresentation } from "./bulletPresentation";
 import type { AwardEntry, StructuredTextValue } from "./types";
 
 /* Phase 5D.3D - "Multiple awards on one composite line" (spec pattern
@@ -88,7 +89,9 @@ export function extractAwardEntries(sectionId: string, bodyBlocks: SemanticConte
     const indices = range.headerIndices;
     const blocks = indices.map((i) => relevant[i]);
     const bodyBlocksForEntry = range.bodyIndices.map((i) => relevant[i]);
-    const details = bodyBlocksForEntry.filter((b) => b.rawText.length > 0).map((b) => makeValue(b.rawText, sectionId, [b], 0.6));
+    const details = bodyBlocksForEntry
+      .filter((b) => b.rawText.length > 0)
+      .map((b) => makeValue(normalizeBulletPresentation(b.rawText, { blockType: b.blockType }).displayText, sectionId, [b], 0.6));
     const rawHeaderText = blocks.length > 0 ? blocks.map((b) => b.rawText).join("\n") : bodyBlocksForEntry.map((b) => b.rawText).join("\n");
     const reasonCodes: string[] = [];
 

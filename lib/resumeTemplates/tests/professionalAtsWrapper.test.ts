@@ -1,16 +1,22 @@
 /*
-  Phase 6F - Professional ATS real-render test category (spec section
-  19). This template is a thin wrapper around the EXISTING, unmodified
-  Phase 3/4/5A/5B pipeline (see templates/professionalAts/index.ts's own
-  header comment) - it inherits that pipeline's own already-tested
-  validation. One disclosed, pre-existing cosmetic gap in that
-  UNMODIFIED code (not something this round is permitted to fix, see
-  the Phase 6F pre-report's Error #7/#8 root-causing): its PDF/DOCX
-  fragment-removal detector leaves a stray "/" character as a false
-  "invented-text" flag after removing the shortened custom-section URL
-  fragment. This is asserted EXPLICITLY below (not silently tolerated)
-  so a regression that introduces a SECOND, different false positive -
-  or that somehow makes HTML fail too - would be caught. Run with:
+  Phase 6F / 6F.1 - Professional ATS real-render test category (spec
+  section 19). This template is a thin wrapper around the EXISTING,
+  unmodified-in-Phase-6F Phase 3/4/5A/5B pipeline (see
+  templates/professionalAts/index.ts's own header comment) - it
+  inherits that pipeline's own already-tested validation.
+
+  Phase 6F.1 update: the pipeline's PDF/DOCX text-preservation
+  validators (pdfTextPreservationValidator.ts, docxTextPreservationValidator.ts)
+  were themselves hardened this round - proven root cause: their safe-
+  punctuation leftover-removal regex was missing "/" (present at the
+  HTML/parity layer, absent at PDF/DOCX), so any renderer-emitted " / "
+  join (e.g. multiple institutions/fieldsOfStudy) left a stray bare "/"
+  that got flagged as invented-text. Now fixed at the proven failure
+  layer (see that fix's own header comment for the full evidence
+  chain). This template's own render output is therefore now fully
+  clean end-to-end - the previously-disclosed 1-invented-fragment gap
+  no longer exists and is asserted as GONE below (not just tolerated).
+  Run with:
     npx tsx lib/resumeTemplates/tests/professionalAtsWrapper.test.ts
 */
 import { ensureTemplatesRegistered } from "../registry/bootstrap";
@@ -48,36 +54,38 @@ async function main() {
   const pdf = await renderTemplateFromRuntime(runtime, { templateId: "professional-ats", generatedAt: GENERATED_AT }, "pdf");
   const docx = await renderTemplateFromRuntime(runtime, { templateId: "professional-ats", generatedAt: GENERATED_AT }, "docx");
 
-  /* --- HTML result: the existing pipeline's own validation is expected to fully pass --- */
+  /* --- HTML result --- */
   check("html: templateId is professional-ats", html.templateId, "professional-ats");
   checkTrue("html: html string is non-empty", html.html.length > 0);
   checkTrue("html: pageCount is at least 1", html.pageCount >= 1);
   checkTrue("html: contains identity full name", html.html.includes("Jordan Ellis"));
-  checkTrue("html: validation.passed is true (fully clean, no known gaps at the HTML layer)", html.validation.passed);
+  checkTrue("html: validation.passed is true", html.validation.passed);
   check("html: validation.missingTextCount is 0", html.validation.missingTextCount, 0);
   check("html: validation.inventedTextCount is 0", html.validation.inventedTextCount, 0);
   check("html: validation.issues is empty", html.validation.issues, []);
 
-  /* --- PDF result: real, selectable-text, structurally valid, but carries the ONE disclosed pre-existing cosmetic gap --- */
+  /* --- PDF result: real, selectable-text, structurally valid, fully clean after the Phase 6F.1 slash-normalization fix --- */
   check("pdf: templateId is professional-ats", pdf.templateId, "professional-ats");
   checkTrue("pdf: bytes buffer is non-empty", pdf.bytes.length > 0);
   checkTrue("pdf: bytes start with the %PDF magic header", pdf.bytes.subarray(0, 5).toString("latin1") === "%PDF-");
   checkTrue("pdf: hasSelectableText is true (real text layer, never rasterized)", pdf.hasSelectableText);
   checkTrue("pdf: pageCount is at least 1", pdf.pageCount >= 1);
+  checkTrue("pdf: validation.passed is true (Phase 6F.1: the previously-disclosed stray-slash gap is now fixed at its proven root cause)", pdf.validation.passed);
   check("pdf: validation.missingTextCount is 0 (no real content loss)", pdf.validation.missingTextCount, 0);
-  check("pdf: validation.inventedTextCount is exactly 1 (the known, disclosed stray-slash false positive, not a new/different gap)", pdf.validation.inventedTextCount, 1);
-  checkTrue("pdf: the one invented-text issue's message is exactly the disclosed stray '/' (not a different, undisclosed defect)", pdf.validation.issues.some((i) => i.code === "invented-text" && i.message.trim().endsWith("/")));
-  check("pdf: validation.sectionOrderPreserved is true (the known gap is text-fragment-only, not structural)", pdf.validation.sectionOrderPreserved, true);
+  check("pdf: validation.inventedTextCount is 0 (stray-slash false positive eliminated, not merely tolerated)", pdf.validation.inventedTextCount, 0);
+  check("pdf: validation.issues is empty", pdf.validation.issues, []);
+  check("pdf: validation.sectionOrderPreserved is true", pdf.validation.sectionOrderPreserved, true);
   check("pdf: validation.protectedFactsUnchanged is true", pdf.validation.protectedFactsUnchanged, true);
 
-  /* --- DOCX result: same disclosed gap, same structural soundness --- */
+  /* --- DOCX result: same fix, same structural soundness --- */
   check("docx: templateId is professional-ats", docx.templateId, "professional-ats");
   checkTrue("docx: bytes buffer is non-empty", docx.bytes.length > 0);
   checkTrue("docx: bytes start with the PK zip magic header", docx.bytes.subarray(0, 2).toString("latin1") === "PK");
   checkTrue("docx: isEditableNativeDocx is true", docx.isEditableNativeDocx);
+  checkTrue("docx: validation.passed is true", docx.validation.passed);
   check("docx: validation.missingTextCount is 0", docx.validation.missingTextCount, 0);
-  check("docx: validation.inventedTextCount is exactly 1 (same disclosed stray-slash gap as PDF)", docx.validation.inventedTextCount, 1);
-  checkTrue("docx: the one invented-text issue's message is exactly the disclosed stray '/'", docx.validation.issues.some((i) => i.code === "invented-text" && i.message.trim().endsWith("/")));
+  check("docx: validation.inventedTextCount is 0 (Phase 6F.1 fix)", docx.validation.inventedTextCount, 0);
+  check("docx: validation.issues is empty", docx.validation.issues, []);
 
   const docxZip = await JSZip.loadAsync(docx.bytes);
   checkTrue("docx: contains word/document.xml", docxZip.file("word/document.xml") !== null);
