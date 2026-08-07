@@ -35,6 +35,16 @@ import {
 } from "./shared";
 import { runDpePreservationForApplication } from "../documentPreservation/runForApplication";
 /*
+  Phase 6G - Shadow Mode. runShadowComparisonSafely() NEVER throws (see
+  its own header comment) and is always awaited at the two call sites
+  below, AFTER the legacy write (success or failure) has already fully
+  completed - shadow mode observes a finished legacy attempt, it never
+  gates or delays it. Behind canonical_shadow_mode (default off); when
+  off, runShadowComparisonSafely resolves immediately with a
+  "skipped_flag_disabled" log line and does no work.
+*/
+import { runShadowComparisonSafely } from "../careerMemory/orchestration/canonicalShadowComparisonService";
+/*
   D안 Phase 1 (Original Visual Tree) - feature-flagged (isVisualTreeEnabled,
   default OFF), upload-only, additive. Every import below is used ONLY
   inside the `if (isVisualTreeEnabled() && resumeSource === "upload")`
@@ -964,6 +974,30 @@ export async function runPackageGeneration(
       durationMs: Date.now() - workerReceivedAt,
       status: "succeeded",
     });
+
+    /*
+      Phase 6G Shadow Mode - awaited, fully isolated. runShadowComparisonSafely()
+      is itself designed to never throw (see its own header comment), but this
+      call site adds its own redundant try/catch anyway: it sits inside the
+      SAME try block as the legacy success path above, so an uncaught
+      exception here would otherwise fall into the catch block below and
+      incorrectly re-run failure RPCs (fail_generate_package_generation,
+      quota release) against an application that has already succeeded.
+      Defense-in-depth, not reliance on the callee's own contract alone.
+    */
+    try {
+      await runShadowComparisonSafely({
+        userId,
+        applicationId,
+        jobDescriptionText: String(row.job_description || ""),
+        jobAnalysisSummary: String(row.job_description_normalized || ""),
+        legacySucceeded: true,
+      });
+    } catch (shadowError) {
+      console.log(
+        `GP WORKER SHADOW UNEXPECTED workerRequestId=${workerRequestId} applicationId=${applicationId} name=${shadowError instanceof Error ? shadowError.name : typeof shadowError}`
+      );
+    }
   } catch (error) {
     const caughtErrorName =
       error instanceof Error ? error.name : typeof error;
@@ -1024,5 +1058,27 @@ export async function runPackageGeneration(
       durationMs: Date.now() - workerReceivedAt,
       status: `failed:${code}`,
     });
+
+    /*
+      Phase 6G Shadow Mode - awaited, fully isolated. Same redundant
+      try/catch rationale as the success-path call site above: this is the
+      last statement in the worker's own catch block, so an uncaught
+      exception here would otherwise escape runPackageGeneration entirely
+      as an unhandled rejection, even though the legacy failure has already
+      been fully recorded (fail RPC + quota release already ran above).
+    */
+    try {
+      await runShadowComparisonSafely({
+        userId,
+        applicationId,
+        jobDescriptionText: String(row.job_description || ""),
+        jobAnalysisSummary: String(row.job_description_normalized || ""),
+        legacySucceeded: false,
+      });
+    } catch (shadowError) {
+      console.log(
+        `GP WORKER SHADOW UNEXPECTED workerRequestId=${workerRequestId} applicationId=${applicationId} name=${shadowError instanceof Error ? shadowError.name : typeof shadowError}`
+      );
+    }
   }
 }
