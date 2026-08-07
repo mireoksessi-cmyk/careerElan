@@ -5,6 +5,7 @@ import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import { exportPdfFromText, buildPdfBlob } from "@/lib/brand/render/pdfDocumentExport";
 import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
+import CanonicalTemplateSelector from "@/components/canonicalGeneratePackage/CanonicalTemplateSelector";
 /*
   D안 Phase 1 (Original Visual Tree) - buildOriginalLayoutPdfBlob is a
   pure client-safe jsPDF builder (same runtime shape as buildPdfBlob
@@ -4113,6 +4114,10 @@ async function downloadDocx() {
               </div>
             )}
           </div>
+
+          {selectedPreview === "resume" && (
+            <CanonicalTemplateSelector applicationId={applicationId} />
+          )}
 
           {selectedPreview === "resume" && resumeViewMode === "preview" ? (
             resumePdfError ? (
