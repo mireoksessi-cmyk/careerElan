@@ -160,7 +160,7 @@ function lineText(line: ElementMetadata[]): string {
   return joined.replace(/\s+/g, " ").trim();
 }
 
-function shouldInsertSpaceBetween(prev: ElementMetadata, next: ElementMetadata): boolean {
+export function shouldInsertSpaceBetween(prev: ElementMetadata, next: ElementMetadata): boolean {
   if (prev.x === null || prev.width === null || next.x === null) return true;
   const prevHeight = prev.height ?? prev.fontSize ?? null;
   const nextHeight = next.height ?? next.fontSize ?? null;

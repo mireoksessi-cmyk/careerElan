@@ -16,7 +16,39 @@
 */
 import type { ElementMetadata, LayoutAnalysisResult } from "../layoutAnalysis/types";
 import { elementId } from "./ids";
+import { shouldInsertSpaceBetween } from "./blockAdapter";
 import type { LosslessResumeDocument, LosslessValidationReport, SemanticContentBlock } from "./types";
+
+/*
+  Phase 6I.1 bug fix - reconstructing "expected text" by unconditionally
+  joining source elements with a literal space (the old behavior) does
+  not match how blockAdapter.ts's own lineText() actually joins them:
+  shouldInsertSpaceBetween() deliberately omits the space when the real
+  horizontal gap between two elements is too small to be a genuine word
+  boundary (the ligature/kerning fix documented in blockAdapter.ts's own
+  SPACE_GAP_RATIO comment - e.g. a pdfjs-split "fi"/"fl" glyph run).
+  Reconstructing "expected" with the SAME conditional-space rule the
+  producer actually used is what makes this a true byte-for-byte
+  fidelity check again, rather than a check against a joining rule the
+  document was never built with. Found via a real user's real resume,
+  which always failed here through no fault of that resume's content -
+  any PDF with a ligature-adjacent element pair anywhere would trigger
+  the same false "missing text span".
+*/
+function expectedTextFor(owningElements: ElementMetadata[]): string {
+  let joined = "";
+  for (let i = 0; i < owningElements.length; i++) {
+    const element = owningElements[i];
+    const text = element.text ?? "";
+    if (i === 0) {
+      joined = text;
+      continue;
+    }
+    const needsSpace = shouldInsertSpaceBetween(owningElements[i - 1], element);
+    joined += (needsSpace ? " " : "") + text;
+  }
+  return joined;
+}
 
 function collectAllBlocks(doc: LosslessResumeDocument): SemanticContentBlock[] {
   return [...doc.identityBlocks, ...doc.sections.flatMap((s) => s.blocks), ...doc.unassignedBlocks];
@@ -69,7 +101,7 @@ export function validateLosslessDocument(
   const inventedTextSpans: string[] = [];
   for (const block of allBlocks) {
     const owningElements = block.sourceElementIds.map((id) => elementById.get(id)).filter((e): e is ElementMetadata => e !== undefined);
-    const expectedText = normalizeForCompare(owningElements.map((e) => e.text ?? "").join(" "));
+    const expectedText = normalizeForCompare(expectedTextFor(owningElements));
     const actualText = normalizeForCompare(block.rawText);
     if (expectedText === actualText) continue;
     if (!actualText.includes(expectedText)) {

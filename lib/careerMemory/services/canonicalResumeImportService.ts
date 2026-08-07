@@ -45,6 +45,7 @@ import { CANONICAL_RUNTIME_SERIALIZER_VERSION } from "../runtime/types";
 import { CanonicalCareerMemoryService } from "./canonicalCareerMemoryService";
 import { CanonicalSourceDocumentService } from "./canonicalSourceDocumentService";
 import { ensureProfile } from "./profileAccess";
+import { classifyLosslessValidationFailure, classifyStructuredValidationFailure } from "./canonicalImportFailureClassifier";
 
 const SUPPORTED_SOURCE_FORMATS: LayoutSourceFormat[] = ["pdf", "docx"];
 const RESUMES_STORAGE_BUCKET = "resumes";
@@ -116,12 +117,14 @@ export class CanonicalResumeImportService {
       fileType: sourceFormat,
     });
     if (!losslessDoc.validation.passed) {
-      throw new ValidationError([`Layout analysis did not pass lossless validation for resume "${resumeId}": ${losslessDoc.validation.warnings.join("; ") || "unspecified failure"}.`]);
+      const { code, summary } = classifyLosslessValidationFailure(losslessDoc.validation);
+      throw new ValidationError([`${code}: ${summary}`]);
     }
 
     const structuredModel = buildStructuredResume(losslessDoc);
     if (!structuredModel.validation.passed) {
-      throw new ValidationError([`Resume structuring did not pass validation for resume "${resumeId}": ${structuredModel.validation.warnings.join("; ") || "unspecified failure"}.`]);
+      const { code, summary } = classifyStructuredValidationFailure(structuredModel.validation);
+      throw new ValidationError([`${code}: ${summary}`]);
     }
 
     const profile = await ensureProfile(this.repos, userId, {
