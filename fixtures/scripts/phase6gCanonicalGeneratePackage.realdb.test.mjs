@@ -460,6 +460,25 @@ async function main() {
 
     check("quota isolation: still zero reservations after overlay+complete+fallback-mark calls - Canonical path never consumes legacy quota", pgCount("generate_package_quota_reservations", `user_id = '${userF.userId}'`), 0);
     check("quota isolation: zero quota_periods rows either", pgCount("generate_package_quota_periods", `user_id = '${userF.userId}'`), 0);
+
+    // A rejected cross-user attack against userF's own application must not
+    // accidentally consume quota for either the attacker or the victim -
+    // security and quota isolation are independent guarantees and both must
+    // hold even on the failure path, not just the success path.
+    const attackerG = await makeTestUser(admin, "quota-isolation-attacker");
+    const rejectedOverlay = await admin.rpc("system_create_canonical_overlay", {
+      p_user_id: attackerG.userId,
+      p_profile_id: fixtureF.profile.id, // belongs to userF, not the attacker
+      p_resume_version_id: fixtureF.version.id,
+      p_application_id: fixtureF.application.id,
+      p_template_id: "modern-sidebar",
+      p_ai_model: "test-model",
+      p_prompt_version: "test-v1",
+      p_overlay: { schemaVersion: "1.0.0" },
+    });
+    check("quota isolation: cross-user overlay attack against userF is rejected (not_found/profile)", rejectedOverlay.data, { status: "not_found", reason: "profile" });
+    check("quota isolation: rejected attack leaves attacker's own quota reservations at zero", pgCount("generate_package_quota_reservations", `user_id = '${attackerG.userId}'`), 0);
+    check("quota isolation: rejected attack leaves victim userF's quota reservations at zero too", pgCount("generate_package_quota_reservations", `user_id = '${userF.userId}'`), 0);
   }
 
   // ==================== 8. Canonical-less legacy user - system_create_canonical_overlay finds no profile ====================

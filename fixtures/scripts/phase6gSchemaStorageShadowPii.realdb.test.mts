@@ -34,6 +34,8 @@ import { createCanonicalRepositories } from "../../lib/careerMemory/repositories
 import { CanonicalCareerMemoryService } from "../../lib/careerMemory/services/canonicalCareerMemoryService";
 import { buildFixtureRuntime } from "../../lib/careerMemory/persistence/testFixtures";
 import { runShadowComparisonSafely } from "../../lib/careerMemory/orchestration/canonicalShadowComparisonService";
+import { renderCanonicalPackage } from "../../lib/careerMemory/orchestration/canonicalRenderService";
+import { applyOverlay } from "../../lib/careerMemory/runtime/overlayRuntime";
 import type { CanonicalResumeRuntime } from "../../lib/careerMemory/runtime/types";
 
 const URL = "http://127.0.0.1:54321";
@@ -291,6 +293,43 @@ async function main() {
     const res = await runWithAuthenticatedContext(userD.client as never, makeHandlePreview(req));
     check("version conflict: preview against a stale (V1) overlay after the canonical resume moved to V2 returns 409, never a silently mismatched render", res.status, 409);
     delete process.env.CANONICAL_GENERATE_ENABLED;
+
+    // Retry-after-transient-failure recovery: the correct client response
+    // to a 409 is to regenerate against the CURRENT version, not to keep
+    // retrying the stale request. Proves the recovery path actually works
+    // end-to-end, not just that the failure is detected.
+    const overlayV2 = await admin.rpc("system_create_canonical_overlay", {
+      p_user_id: userD.userId,
+      p_profile_id: profile.id,
+      p_resume_version_id: savedV2.version.id,
+      p_application_id: application.id,
+      p_template_id: "professional-ats",
+      p_ai_model: "test-model",
+      p_prompt_version: "test-v1",
+      p_overlay: { schemaVersion: "1.0.0" },
+    });
+    checkTrue("version conflict recovery: creating a fresh overlay against the current (V2) version succeeds", overlayV2.data?.status === "success");
+    const completeV2 = await admin.rpc("complete_canonical_generation", {
+      p_user_id: userD.userId,
+      p_application_id: application.id,
+      p_tailored_resume_id: overlayV2.data.overlayId,
+      p_canonical_profile_id: profile.id,
+      p_canonical_resume_version_id: savedV2.version.id,
+      p_template_id: "professional-ats",
+      p_pdf_storage_bucket: "generated-documents",
+      p_pdf_storage_path: `${userD.userId}/${application.id}.pdf`,
+      p_docx_storage_bucket: "generated-documents",
+      p_docx_storage_path: `${userD.userId}/${application.id}.docx`,
+      p_generation_engine: "canonical",
+      p_generation_engine_version: "6G.0",
+      p_protected_fact_validation_result: {},
+    });
+    checkTrue("version conflict recovery: completing generation against the fresh V2 overlay succeeds", completeV2.data?.status === "success");
+    process.env.CANONICAL_GENERATE_ENABLED = "true";
+    const reqAfterRecovery = new Request("http://x/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ applicationId: application.id, templateId: "professional-ats" }) });
+    const resAfterRecovery = await runWithAuthenticatedContext(userD.client as never, makeHandlePreview(reqAfterRecovery));
+    check("version conflict recovery: /preview now succeeds (200) once the application points at a same-version (V2) overlay - the 409 is genuinely recoverable, not a permanent dead end", resAfterRecovery.status, 200);
+    delete process.env.CANONICAL_GENERATE_ENABLED;
   }
 
   // ==================== E. Shadow mode ENABLED - real failure-path PII safety + resultCategory correctness ====================
@@ -365,14 +404,29 @@ async function main() {
     // unexpected internal state) - must still never throw or crash the caller.
     process.env.CANONICAL_SHADOW_MODE = "true";
     let threwOnGarbage = false;
+    const originalLogGarbage = console.log;
+    const capturedGarbageLogs: string[] = [];
+    console.log = (...args: unknown[]) => {
+      capturedGarbageLogs.push(args.map((a) => String(a)).join(" "));
+    };
     try {
       await runShadowComparisonSafely({ userId: "not-a-real-uuid", applicationId: "also-not-a-uuid", jobDescriptionText: "x", jobAnalysisSummary: "y", legacySucceeded: true });
     } catch {
       threwOnGarbage = true;
     } finally {
+      console.log = originalLogGarbage;
       delete process.env.CANONICAL_SHADOW_MODE;
     }
     checkFalse("shadow isolation: even a malformed userId/applicationId (garbage, non-UUID strings) never escapes as an uncaught exception - full isolation guarantee holds under garbage input too", threwOnGarbage);
+
+    // Beyond "never throws" - the malformed input must still classify to a
+    // SPECIFIC, correct category/reason (a non-UUID userId makes the
+    // service-role RPC lookup itself fail with a raw Postgres type error,
+    // which generateCanonicalPackage wraps as CanonicalDeserializationError
+    // -> fallback-eligible/deserialization_failure, not a generic catch-all).
+    const parsedGarbageRecord = JSON.parse(capturedGarbageLogs[capturedGarbageLogs.length - 1]) as { resultCategory?: string; fallbackReason?: string | null; latencyMs?: number };
+    check("shadow isolation garbage input: classifies specifically as fallback-eligible/deserialization_failure, not a generic unknown category", { resultCategory: parsedGarbageRecord.resultCategory, fallbackReason: parsedGarbageRecord.fallbackReason }, { resultCategory: "canonical_failed_fallback_eligible", fallbackReason: "deserialization_failure" });
+    checkTrue("shadow isolation garbage input: latencyMs is a real non-negative measured duration, not a placeholder", typeof parsedGarbageRecord.latencyMs === "number" && parsedGarbageRecord.latencyMs >= 0);
   }
 
   // ==================== G. Feature-flag independence: complete_canonical_generation RPC succeeds regardless of canonical_document_storage_enabled ====================
@@ -477,6 +531,172 @@ async function main() {
     const userK = await makeTestUser(admin, "storage-root-list-cross");
     const crossRootList = await userK.client.storage.from("generated-documents").list("");
     checkFalse("storage RLS: a different user's bucket-root listing does NOT include user J's folder name", (crossRootList.data ?? []).some((entry) => entry.name === userJ.userId));
+  }
+
+  // ==================== K. renderCanonicalPackage() exercised directly - documentStorage branches never covered by any RPC-only test ====================
+  // Every other real-DB test in this round calls system_create_canonical_overlay
+  // / complete_canonical_generation directly, never renderCanonicalPackage()
+  // itself - the one function that actually decides which documentStorage
+  // branch fires (no_tailored_resume / storage_disabled / a real persisted
+  // upload+RPC cycle). This closes that gap with the SAME call shape
+  // production code uses (applyOverlay then renderCanonicalPackage), at
+  // zero AI cost since the overlay applied here is a real, valid, no-op one.
+  {
+    const userK = await makeTestUser(admin, "render-package-direct");
+    const repos = createCanonicalRepositories(userK.client);
+    const service = new CanonicalCareerMemoryService(repos);
+    const runtimeK: CanonicalResumeRuntime = { ...buildFixtureRuntime(), sourceDocuments: [], overlayState: { history: [] } };
+    const savedK = await service.saveCanonicalRuntimeAcknowledgingGap(userK.userId, { runtime: runtimeK });
+    const profileK = await repos.profiles.getByUserId(userK.userId);
+    if (!profileK) throw new Error("profile not found");
+    const { data: applicationK } = await userK.client.from("applications").insert({ user_id: userK.userId }).select("*").single();
+
+    const appliedK = applyOverlay(savedK.runtime, { schemaVersion: "1.0.0" });
+    checkTrue("render-package-direct setup: applying a valid no-op overlay produces zero rejections", appliedK.rejections.length === 0);
+
+    // K1: tailoredResumeId=null -> documentStorage.reason="no_tailored_resume",
+    // regardless of the storage flag - this branch is checked FIRST in the
+    // real function, before the flag is even consulted.
+    delete process.env.CANONICAL_DOCUMENT_STORAGE_ENABLED;
+    const resultNoTailored = await renderCanonicalPackage(userK.client as never, {
+      userId: userK.userId,
+      applicationId: applicationK.id,
+      runtime: appliedK.runtime,
+      useTailored: true,
+      templateId: "modern-sidebar",
+      paperSize: "letter",
+      density: "balanced",
+      locale: "en-CA",
+      canonicalProfileId: profileK.id,
+      canonicalResumeVersionId: savedK.version.id,
+      tailoredResumeId: null,
+      generatedAt: new Date().toISOString(),
+    });
+    check("render-package-direct K1: tailoredResumeId=null -> documentStorage reports no_tailored_resume, never attempts an upload", resultNoTailored.documentStorage, { persisted: false, reason: "no_tailored_resume" });
+    checkTrue("render-package-direct K1: the render itself still succeeded (real HTML/PDF/DOCX bytes) even though nothing was persisted", resultNoTailored.pageCount > 0 && resultNoTailored.pdfBytes.length > 0 && resultNoTailored.docxBytes.length > 0);
+
+    // Real overlay row, reused for K2 (storage disabled) and K3 (storage enabled).
+    const overlayK = await admin.rpc("system_create_canonical_overlay", {
+      p_user_id: userK.userId,
+      p_profile_id: profileK.id,
+      p_resume_version_id: savedK.version.id,
+      p_application_id: applicationK.id,
+      p_template_id: "professional-ats",
+      p_ai_model: "test-model",
+      p_prompt_version: "test-v1",
+      p_overlay: { schemaVersion: "1.0.0" },
+    });
+    checkTrue("render-package-direct setup: real overlay row created for K2/K3", overlayK.data?.status === "success");
+
+    // K2: a real tailoredResumeId, but storage explicitly disabled ->
+    // documentStorage.reason="storage_disabled", never reaches the RPC at all.
+    delete process.env.CANONICAL_DOCUMENT_STORAGE_ENABLED;
+    const resultStorageDisabled = await renderCanonicalPackage(userK.client as never, {
+      userId: userK.userId,
+      applicationId: applicationK.id,
+      runtime: appliedK.runtime,
+      useTailored: true,
+      templateId: "modern-sidebar",
+      paperSize: "letter",
+      density: "balanced",
+      locale: "en-CA",
+      canonicalProfileId: profileK.id,
+      canonicalResumeVersionId: savedK.version.id,
+      tailoredResumeId: overlayK.data.overlayId,
+      generatedAt: new Date().toISOString(),
+    });
+    check("render-package-direct K2: real tailoredResumeId but storage disabled -> documentStorage reports storage_disabled", resultStorageDisabled.documentStorage, { persisted: false, reason: "storage_disabled" });
+
+    // K3: storage genuinely ENABLED - the full real upload + complete_canonical_generation
+    // cycle runs through renderCanonicalPackage() itself for the first time
+    // in this test suite (every other passing test calls the RPC directly).
+    process.env.CANONICAL_DOCUMENT_STORAGE_ENABLED = "true";
+    const resultPersisted = await renderCanonicalPackage(admin as never, {
+      userId: userK.userId,
+      applicationId: applicationK.id,
+      runtime: appliedK.runtime,
+      useTailored: true,
+      templateId: "modern-sidebar",
+      paperSize: "letter",
+      density: "balanced",
+      locale: "en-CA",
+      canonicalProfileId: profileK.id,
+      canonicalResumeVersionId: savedK.version.id,
+      tailoredResumeId: overlayK.data.overlayId,
+      generatedAt: new Date().toISOString(),
+    });
+    delete process.env.CANONICAL_DOCUMENT_STORAGE_ENABLED;
+    checkTrue("render-package-direct K3: storage enabled -> documentStorage.persisted is true (a real end-to-end upload+RPC cycle succeeded)", resultPersisted.documentStorage.persisted === true);
+    const persistedIds = resultPersisted.documentStorage as { persisted: true; pdfDocumentId: string; docxDocumentId: string };
+    checkTrue("render-package-direct K3: pdfDocumentId is a real, non-empty id", typeof persistedIds.pdfDocumentId === "string" && persistedIds.pdfDocumentId.length > 0);
+    checkTrue("render-package-direct K3: docxDocumentId is a real, non-empty id, distinct from pdfDocumentId", typeof persistedIds.docxDocumentId === "string" && persistedIds.docxDocumentId.length > 0 && persistedIds.docxDocumentId !== persistedIds.pdfDocumentId);
+
+    const { execFileSync: execFileSyncK } = await import("node:child_process");
+    const appRowK = JSON.parse(execFileSyncK("docker", ["exec", "supabase_db_careerelan", "psql", "-U", "postgres", "-d", "postgres", "-t", "-A", "-c", `select row_to_json(t) from (select generated_pdf_document_id, generated_docx_document_id from applications where id = '${applicationK.id}') t;`], { encoding: "utf8" }).trim());
+    check("render-package-direct K3: the applications row's generated_pdf_document_id was actually persisted by the real RPC call inside renderCanonicalPackage, matching the returned id exactly", appRowK.generated_pdf_document_id, persistedIds.pdfDocumentId);
+    check("render-package-direct K3: same for generated_docx_document_id", appRowK.generated_docx_document_id, persistedIds.docxDocumentId);
+  }
+
+  // ==================== L. DISCLOSED LIMITATION - professional-ats PDF rejects buildFixtureRuntime()'s content at every supported density ====================
+  // Real defect found while building section K (never previously exposed -
+  // no test in this entire Phase 6G effort had ever requested format:"pdf"
+  // explicitly; every prior professional-ats coverage used the default
+  // "html" format, which does not enforce this gate). professional-ats's
+  // PDF path (lib/resumeTemplates/templates/professionalAts/index.ts ->
+  // buildProfessionalAtsPdf) delegates to the pre-existing legacy DPE
+  // Phase 4/5A pipeline, which throws a hard precondition-violation error
+  // if its own HTML content-preservation validation doesn't pass - by
+  // that module's own design, this is intentional (not a normal "return a
+  // failed result" case). buildFixtureRuntime()'s ordinary-length content
+  // fails this validation at EVERY density professional-ats supports
+  // (verified: compact/comfortable/balanced all fail; only modern-sidebar
+  // and creative-timeline succeed with the same content), producing
+  // real missing/invented text fragments after auto-compaction to
+  // "ultra-compact". This is NOT a crash in production - renderCanonicalPackage
+  // catches it and wraps it as TemplateRenderingError, which
+  // classifyForFallback correctly routes to the fallback-eligible legacy
+  // path - but it means a real user selecting professional-ats for a
+  // normal-length resume would silently never get their canonical PDF,
+  // always falling back to legacy. Root-causing/fixing the legacy DPE
+  // compaction algorithm itself is out of this round's scope (a large,
+  // separately-tested subsystem, not part of Phase 6F/6G) - this test
+  // exists to document and track the defect with a real regression
+  // marker, per this round's own "disclose, don't silently fix
+  // out-of-scope code" convention.
+  {
+    const userL = await makeTestUser(admin, "professional-ats-pdf-limitation");
+    const repos = createCanonicalRepositories(userL.client);
+    const service = new CanonicalCareerMemoryService(repos);
+    const runtimeL: CanonicalResumeRuntime = { ...buildFixtureRuntime(), sourceDocuments: [], overlayState: { history: [] } };
+    const savedL = await service.saveCanonicalRuntimeAcknowledgingGap(userL.userId, { runtime: runtimeL });
+    const appliedL = applyOverlay(savedL.runtime, { schemaVersion: "1.0.0" });
+    const profileL = await repos.profiles.getByUserId(userL.userId);
+    if (!profileL) throw new Error("profile not found");
+    const { data: applicationL } = await userL.client.from("applications").insert({ user_id: userL.userId }).select("*").single();
+
+    let renderThrew = false;
+    let renderErrorCode: string | undefined;
+    try {
+      await renderCanonicalPackage(userL.client as never, {
+        userId: userL.userId,
+        applicationId: applicationL.id,
+        runtime: appliedL.runtime,
+        useTailored: true,
+        templateId: "professional-ats",
+        paperSize: "letter",
+        density: "balanced",
+        locale: "en-CA",
+        canonicalProfileId: profileL.id,
+        canonicalResumeVersionId: savedL.version.id,
+        tailoredResumeId: null,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      renderThrew = true;
+      renderErrorCode = (e as { code?: string })?.code;
+    }
+    checkTrue("DISCLOSED LIMITATION: professional-ats PDF generation for buildFixtureRuntime()'s standard content throws (reproduces the real defect deterministically)", renderThrew);
+    check("DISCLOSED LIMITATION: the thrown error is a structured domain error (PERSISTENCE_ERROR from TemplateRenderingError), never an unstructured crash", renderErrorCode, "PERSISTENCE_ERROR");
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

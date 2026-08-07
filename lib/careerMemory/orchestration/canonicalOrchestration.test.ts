@@ -987,6 +987,42 @@ async function main() {
     check("classifyForFallback ordering: but is also classified via its own specific branch, not the generic hard-fail branch", classifyForFallback(new CanonicalOverlayValidationError(["x"])), { shouldFallback: true, reason: "overlay_validation_failure" });
   }
 
+  // ==================== AF. classifyForFallback - classification is instanceof-based, not name-string-based ====================
+  // A class that merely shares a NAME with a known Canonical error (via a
+  // spoofed constructor.name) but does NOT extend it must not be
+  // misclassified. Proves the classifier can't be fooled by a class with a
+  // matching label but a different prototype chain - a real security-
+  // relevant boundary (an unexpected third-party error type must never
+  // silently borrow a specific error's fallback semantics just because its
+  // name string collides).
+  {
+    class ImpostorTailoringError extends Error {
+      constructor(message: string) {
+        super(message);
+        Object.defineProperty(this, "name", { value: "CanonicalTailoringError" });
+      }
+    }
+    const impostor = new ImpostorTailoringError("not really a tailoring error");
+    checkTrue("classifyForFallback name-spoofing: impostor's name string equals the real class's name (precondition)", impostor.name === "CanonicalTailoringError");
+    checkFalse("classifyForFallback name-spoofing: impostor is NOT an instanceof the real CanonicalTailoringError", impostor instanceof CanonicalTailoringError);
+    check("classifyForFallback name-spoofing: impostor falls through to the generic unknown-error branch, not the specific overlay_validation_failure reason", classifyForFallback(impostor), { shouldFallback: true, reason: "transient_failure" });
+  }
+
+  // ==================== AG. duplicate malformed /generate-style validation calls never mutate shared state across repeated calls ====================
+  // Pure-logic idempotency boundary distinct from the RPC-level duplicate-
+  // request tests: repeatedly calling the same pure classifier/validator
+  // with identical malformed input must be side-effect free and always
+  // agree with itself (no hidden internal counter/cache causing drift
+  // between call 1 and call N).
+  {
+    const sameInput = new CanonicalTailoringError(["dup-check"]);
+    const first = classifyForFallback(sameInput);
+    const second = classifyForFallback(sameInput);
+    const third = classifyForFallback(sameInput);
+    check("classifyForFallback repeated-call idempotency: 3 identical calls with the same error instance return the identical result each time (1st vs 3rd)", third, first);
+    check("classifyForFallback repeated-call idempotency: 2nd call also matches", second, first);
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

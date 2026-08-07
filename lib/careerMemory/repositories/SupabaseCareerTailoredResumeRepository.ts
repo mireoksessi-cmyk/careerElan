@@ -27,8 +27,19 @@ export class SupabaseCareerTailoredResumeRepository implements CareerTailoredRes
     return unwrapList(result as never, "CareerTailoredResumeRepository.listByProfileId");
   }
 
+  /*
+    Multiple career_tailored_resumes rows can legitimately exist for the
+    same application_id - each system_create_canonical_overlay call
+    inserts a new row rather than updating/deleting a prior one (e.g. a
+    stale-version-conflict recovery regenerates against the current
+    version without erasing the old attempt). A bare .maybeSingle() here
+    throws once a second row exists, breaking that recovery path. Order
+    by created_at descending so this returns the CURRENT (most recent)
+    tailored resume for the application, matching what
+    complete_canonical_generation most recently recorded.
+  */
   async getByApplicationId(applicationId: string): Promise<CareerTailoredResumeRow | null> {
-    const result = await this.client.from(TABLE).select("*").eq("application_id", applicationId).maybeSingle();
+    const result = await this.client.from(TABLE).select("*").eq("application_id", applicationId).order("created_at", { ascending: false }).limit(1).maybeSingle();
     return unwrapMaybe(result as never, "CareerTailoredResumeRepository.getByApplicationId");
   }
 

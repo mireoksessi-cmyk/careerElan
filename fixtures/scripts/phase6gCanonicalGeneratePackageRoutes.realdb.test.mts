@@ -489,6 +489,47 @@ async function main() {
     check("retry-after-toggle: the SAME request retried once the flag is genuinely ON succeeds cleanly - no stale 404 caching, no leftover state from the OFF attempt", afterOn.status, 200);
   });
 
+  // ==================== additional malformed-field negatives not yet individually exercised ====================
+  await withEnv("CANONICAL_GENERATE_ENABLED", "true", async () => {
+    const nullAppIdPreview = await runWithAuthenticatedContext(userA.client as never, makeHandlePreview(jsonRequest("http://x/preview", "POST", { applicationId: null, templateId: "professional-ats" })));
+    check("preview route: applicationId explicitly null -> 422 (not the same as a valid id) - mirrors the equivalent /generate check", nullAppIdPreview.status, 422);
+
+    const emptyStringTemplateId = await runWithAuthenticatedContext(userA.client as never, makeHandlePreview(jsonRequest("http://x/preview", "POST", { applicationId: fixtureA.application.id, templateId: "" })));
+    check("preview route: templateId present but an empty string -> 422, distinct case from templateId omitted entirely", emptyStringTemplateId.status, 422);
+
+    const numericPaperSize = await runWithAuthenticatedContext(userA.client as never, makeHandlePreview(jsonRequest("http://x/preview", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats", paperSize: 8.5 })));
+    check("preview route: paperSize as a number (wrong type, not just an unsupported string value) -> 422", numericPaperSize.status, 422);
+
+    const arrayDensity = await runWithAuthenticatedContext(userA.client as never, makeHandlePreview(jsonRequest("http://x/preview", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats", density: ["balanced"] })));
+    check("preview route: density as an array (wrong type, not just an unsupported string value) -> 422", arrayDensity.status, 422);
+
+    const numericPaperSizeGenerate = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats", jobDescriptionText: "x", paperSize: 8.5 })));
+    check("generate route: paperSize as a number (wrong type) -> 422, fails before any AI call", numericPaperSizeGenerate.status, 422);
+
+    const objectDensityGenerate = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats", jobDescriptionText: "x", density: { value: "balanced" } })));
+    check("generate route: density as an object (wrong type) -> 422, fails before any AI call", objectDensityGenerate.status, 422);
+  });
+
+  // ==================== invalid flag combination at ROUTE level (distinct from the pure flag-snapshot tests): the selector flag has zero bearing on generate/preview gating in either direction ====================
+  await withEnv("CANONICAL_GENERATE_ENABLED", "false", async () => {
+    await withEnv("CANONICAL_TEMPLATE_SELECTOR_ENABLED", "true", async () => {
+      const previewStillGated = await runWithAuthenticatedContext(userA.client as never, makeHandlePreview(jsonRequest("http://x/preview", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats" })));
+      check("preview route: templateSelectorEnabled=true does NOT bypass generate=false gating - still 404", previewStillGated.status, 404);
+
+      const generateStillGated = await runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, templateId: "professional-ats", jobDescriptionText: "x" })));
+      check("generate route: templateSelectorEnabled=true does NOT bypass generate=false gating - still 404", generateStillGated.status, 404);
+    });
+  });
+
+  // ==================== duplicate/concurrent malformed requests at the validation layer: two simultaneous invalid /generate calls both fail cleanly, no shared-state race ====================
+  await withEnv("CANONICAL_GENERATE_ENABLED", "true", async () => {
+    const [dupA, dupB] = await Promise.all([
+      runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, jobDescriptionText: "x" }))),
+      runWithAuthenticatedContext(userA.client as never, makeHandleGenerate(jsonRequest("http://x/generate", "POST", { applicationId: fixtureA.application.id, jobDescriptionText: "x" }))),
+    ]);
+    check("generate route: two concurrent identical malformed (missing templateId) requests both independently return 422 - no race causes one to succeed or crash", [dupA.status, dupB.status], [422, 422]);
+  });
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
 
   for (const userId of createdUserIds) {
