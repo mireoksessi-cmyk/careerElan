@@ -34,7 +34,7 @@
   own "gaps are constants, content wrapping needs a real browser" split.
 */
 import { DENSITY_SPACING, PAPER_DIMENSIONS } from "./designTokens";
-import type { PaginationPlan, FlatMeasurementResult, BlockPlacement, SectionHeadingPlacement, PaperSize } from "./types";
+import type { PaginationPlan, FlatMeasurementResult, BlockPlacement, SectionHeadingPlacement, PaperSize, MeasuredBlock } from "./types";
 import type { AssemblyDensity, ProfessionalAtsAssemblyDocument, AssemblyBlock, ProfessionalAtsSectionKey } from "../professionalAtsAssembly/types";
 
 const MM_TO_PX = 96 / 25.4;
@@ -51,6 +51,30 @@ type PageCursor = {
 
 function newPage(index: number, usableHeightPx: number): PageCursor {
   return { pageIndex: index, remainingPx: usableHeightPx };
+}
+
+/*
+  Phase 5D.6 TASK A - single source of truth for "does this block need
+  to move to a fresh page AS A WHOLE (header + every sub-item), rather
+  than just its header + first sub-item, when it doesn't fit as-is".
+  Real bug this fixes: the heading pre-check below used to compute its
+  own, DIFFERENT estimate of the first block's minimum keep-together
+  chunk (canSplit + subItems.length only), while the per-block
+  placement loop further down separately decided whether to move the
+  WHOLE block based on canSplit AND keepTogether ("whole-block"/
+  "whole-entry-if-fits"). Those two decisions could diverge: a block
+  like education-entry with 2+ details gets canSplit:true (so the
+  pre-check assumed only "header + first detail" was needed) but
+  keepTogether:"whole-entry-if-fits" (so the real placement loop, when
+  the whole entry didn't fit, moved the ENTIRE entry to the next page
+  anyway) - stranding the section heading, already placed on the
+  previous page by the pre-check's too-small estimate, alone at the
+  bottom of that page. Both call sites now call this one function, so
+  they can never again disagree about how much room a block needs.
+*/
+function requiresWholeBlock(block: AssemblyBlock, measured: MeasuredBlock): boolean {
+  const canReallySplit = block.canSplit && measured.subItems.length > 0;
+  return !canReallySplit || block.keepTogether === "whole-block" || block.keepTogether === "whole-entry-if-fits";
 }
 
 export function buildPaginationPlan(
@@ -91,20 +115,30 @@ export function buildPaginationPlan(
     const sectionGap = sectionIdx === 0 ? 0 : tokens.sectionGapPx;
 
     // Estimate the minimum chunk of the section's FIRST block that must
-    // stay with the heading (whole block if small/unsplittable, else
+    // stay with the heading (whole block if requiresWholeBlock() says
+    // so - unsplittable OR keepTogether demands the entire entry, else
     // header+first-subitem only) - used to decide whether the heading
-    // itself needs to move to a fresh page.
+    // itself needs to move to a fresh page. Uses the exact same
+    // requiresWholeBlock() the per-block placement loop below uses, so
+    // this estimate can never again diverge from what actually happens
+    // when that block is placed.
     const firstBlock = section.blocks[0];
     let firstBlockMinChunk = 0;
     if (firstBlock && section.keepHeadingWithFirstBlock) {
       const measured = measuredBlockById.get(firstBlock.id);
       if (measured) {
-        const canKeepPartial = firstBlock.canSplit && measured.subItems.length > 0;
-        firstBlockMinChunk = canKeepPartial ? measured.headerHeightPx + tokens.bulletGapPx + measured.subItems[0].heightPx : measured.totalHeightPx;
+        firstBlockMinChunk = requiresWholeBlock(firstBlock, measured)
+          ? measured.totalHeightPx
+          : measured.headerHeightPx + tokens.bulletGapPx + measured.subItems[0].heightPx;
       }
     }
 
-    const neededForHeadingAndFirstBlock = (isFirstElementOnPage ? 0 : sectionGap) + headingTotalSpace + (isFirstElementOnPage ? 0 : tokens.entryGapPx) + firstBlockMinChunk;
+    // No entryGapPx term here: gapBeforeBlock is always 0 for a
+    // section's first block (see isFirstBlockInSection below) - the
+    // heading's own headingMarginBottomPx (already folded into
+    // headingTotalSpace) is the only gap the real render puts between
+    // the heading and its first block.
+    const neededForHeadingAndFirstBlock = (isFirstElementOnPage ? 0 : sectionGap) + headingTotalSpace + firstBlockMinChunk;
 
     if (headingTotalSpace > 0 && section.keepHeadingWithFirstBlock && firstBlockMinChunk > 0 && neededForHeadingAndFirstBlock > cursor.remainingPx && !isFirstElementOnPage) {
       advancePage();
@@ -150,9 +184,8 @@ export function buildPaginationPlan(
       // silently drop content; overflow is what triggers density
       // escalation one level up in densityAutoFit.ts).
       const total = measured.subItems.length;
-      const canReallySplit = block.canSplit && total > 0;
 
-      if (!canReallySplit || block.keepTogether === "whole-block" || block.keepTogether === "whole-entry-if-fits") {
+      if (requiresWholeBlock(block, measured)) {
         if (!isFirstElementOnPage) advancePage();
         consume(measured.totalHeightPx, 0);
         blockPlacements.push({ pageIndex: cursor.pageIndex, sectionKey: section.key, isContinuation: false, blockId: block.id });

@@ -279,6 +279,33 @@ function renderHierarchicalNodes(
       });
     }
   }
+
+  /*
+    Phase 6F.1 - real-resume hardening found a genuine content-loss bug
+    here: the `nodes.forEach` filter above (`if (!inRange...) return`)
+    decides BOTH "does this node get its own row on this page" AND,
+    implicitly, "do we ever recurse into this node's children" - the
+    two are conflated because a node whose own index fails inRange()
+    never reaches the runs/rendering loop above, so its children (which
+    can have their OWN, later indices legitimately in range) are never
+    visited at all. Confirmed via direct reproduction: a hierarchical
+    experience entry split so that a later page's subRange covers only
+    a deeply-nested bullet (its ancestor subheading's row already
+    rendered on an earlier page fragment, so the ancestor's own index
+    is out of THIS page's subRange) silently rendered zero content for
+    that bullet, even though a full unsliced render proves the bullet
+    exists. Fix: separately walk every node whose OWN row was NOT
+    rendered above and still recurse into its children - an ancestor
+    being off-page never implies its descendants are off-page too.
+  */
+  for (const node of nodes) {
+    const index = indexMap.get(node.id) ?? -1;
+    if (inRange(index, subRange)) continue; // already handled via the runs loop above
+    if (node.children.length > 0) {
+      rendered.push(...renderHierarchicalNodes(node.children, indexMap, subRange, isContinuation, spacing, depth + 1, seenRef));
+    }
+  }
+
   return rendered;
 }
 
