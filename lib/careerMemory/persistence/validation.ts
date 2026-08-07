@@ -18,6 +18,45 @@ function fail(errors: string[]): ValidationResult {
   return { valid: errors.length === 0, errors };
 }
 
+/*
+  Phase 6I.1 bug fix - key-order-independent deep equality. Postgres
+  jsonb does NOT preserve object key insertion order (confirmed via a
+  real round-trip of a full DPE-analyzed resume through
+  career_resume_versions.snapshot - every field came back with the
+  exact same values, only in a different key order). The naive
+  `JSON.stringify(a) !== JSON.stringify(b)` checks this function used
+  everywhere below were key-order-sensitive, so ANY resume with nested
+  objects (i.e. every real resume) would report a false "canonical
+  field loss" even though nothing was actually lost. Found while
+  building the Canonical Resume Import bridge's own real-DB test
+  (fixtures/scripts/phase6i1CanonicalResumeImport.realdb.test.mts) -
+  the first real-DB test in this repo to run a full, real,
+  DPE-analyzed structured resume through this exact round-trip check.
+*/
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => deepEqual(item, b[i]));
+  }
+  if (typeof a === "object" && typeof b === "object") {
+    // An explicit `key: undefined` (common on optional ResumeStructuredModel
+    // fields the extractors always initialize) and an absent key are the
+    // same thing once round-tripped through JSON/jsonb, which cannot
+    // represent `undefined` at all - filtering both sides down to their
+    // DEFINED keys before comparing is what makes this check "did the
+    // extractor's actual VALUES survive," not "did an unrepresentable
+    // undefined placeholder happen to be spelled out on both sides."
+    const aKeys = Object.keys(a as Record<string, unknown>).filter((k) => (a as Record<string, unknown>)[k] !== undefined);
+    const bKeys = Object.keys(b as Record<string, unknown>).filter((k) => (b as Record<string, unknown>)[k] !== undefined);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((key) => key in (b as Record<string, unknown>) && deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+  }
+  return false;
+}
+
 // ============================================================
 // validatePersistenceBundle - structural DB-row-level checks
 // ============================================================
@@ -137,13 +176,13 @@ export function validateSnapshotRowDivergence(bundle: CareerMemoryPersistenceBun
 export function validateRuntimeRoundTrip(original: CanonicalResumeRuntime, reconstructed: CanonicalResumeRuntime): ValidationResult {
   const errors: string[] = [];
 
-  if (JSON.stringify(original.resume) !== JSON.stringify(reconstructed.resume)) {
+  if (!deepEqual(original.resume, reconstructed.resume)) {
     errors.push("canonical field loss: resume does not match after round-trip");
     const keys = new Set([...Object.keys(original.resume), ...Object.keys(reconstructed.resume)]);
     for (const key of keys) {
-      const a = JSON.stringify((original.resume as Record<string, unknown>)[key]);
-      const b = JSON.stringify((reconstructed.resume as Record<string, unknown>)[key]);
-      if (a !== b) errors.push(`canonical field loss: resume.${key} diverged after round-trip`);
+      const a = (original.resume as Record<string, unknown>)[key];
+      const b = (reconstructed.resume as Record<string, unknown>)[key];
+      if (!deepEqual(a, b)) errors.push(`canonical field loss: resume.${key} diverged after round-trip`);
     }
   }
 
@@ -173,7 +212,7 @@ export function validateRuntimeRoundTrip(original: CanonicalResumeRuntime, recon
     original.sourceDocuments.forEach((doc, i) => {
       const other = reconstructed.sourceDocuments[i];
       if (doc.id !== other.id) errors.push(`order mismatch: sourceDocuments[${i}] expected id "${doc.id}", got "${other.id}"`);
-      else if (JSON.stringify(doc) !== JSON.stringify(other)) errors.push(`canonical field loss: sourceDocuments[${i}] (id "${doc.id}") diverged after round-trip`);
+      else if (!deepEqual(doc, other)) errors.push(`canonical field loss: sourceDocuments[${i}] (id "${doc.id}") diverged after round-trip`);
     });
   }
 
@@ -182,7 +221,7 @@ export function validateRuntimeRoundTrip(original: CanonicalResumeRuntime, recon
   } else {
     original.overlayState.history.forEach((record, i) => {
       const other = reconstructed.overlayState.history[i];
-      if (JSON.stringify(record) !== JSON.stringify(other)) errors.push(`overlay mismatch: overlayState.history[${i}] diverged after round-trip`);
+      if (!deepEqual(record, other)) errors.push(`overlay mismatch: overlayState.history[${i}] diverged after round-trip`);
     });
   }
 

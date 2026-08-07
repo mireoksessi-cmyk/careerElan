@@ -33,6 +33,16 @@ const MAX_REQUEST_BODY_BYTES = 256 * 1024;
 export type CanonicalRouteContext = {
   userId: string;
   repos: CanonicalRepositoryBundle;
+  /*
+    The raw RLS-authenticated client, exposed alongside `repos` so a
+    route can read a legacy table outside the canonical repository
+    bundle (e.g. `resumes`) with the same ownership guarantee every
+    other existing route already gets from `.eq("user_id", user.id)` -
+    see app/api/resumes/[id]/preview-url/route.ts's own pattern. Every
+    existing caller destructures only `{userId, repos}`, so this is a
+    purely additive field.
+  */
+  client: SupabaseClient;
 };
 
 /*
@@ -49,7 +59,7 @@ export async function runWithAuthenticatedContext(client: AuthClient & SupabaseC
   try {
     const userId = await getAuthenticatedUserId(client);
     const repos = createCanonicalRepositories(client);
-    return await handler({ userId, repos });
+    return await handler({ userId, repos, client });
   } catch (error) {
     return errorResponse(error);
   }

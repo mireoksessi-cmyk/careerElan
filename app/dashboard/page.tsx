@@ -970,6 +970,68 @@ const displayName =
 
 const [selectedResume, setSelectedResume] = useState("");
 const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
+
+/*
+  Phase 6I.1 - Canonical Resume Import trigger. Shown only when the
+  local Stage 1 canary's template selector flag is on AND the user has
+  no Canonical Career Memory profile/version yet (per this round's own
+  "no automatic merge" rule - once a profile exists, this bridge no
+  longer offers to import a second resume from here). Both checks hit
+  dev-only routes that 404 in real Netlify production
+  (withCanonicalAuth's own isNetlifyRuntime() gate), so this trigger is
+  simply invisible there - no separate production flag needed.
+*/
+const [canonicalImportEligible, setCanonicalImportEligible] = useState(false);
+const [importingResumeId, setImportingResumeId] = useState<string | null>(null);
+const [canonicalImportMessage, setCanonicalImportMessage] = useState<string | null>(null);
+
+useEffect(() => {
+  let cancelled = false;
+
+  async function checkEligibility() {
+    try {
+      const configRes = await fetch("/api/internal/canonical-generate-package/config");
+      const configData = configRes.ok ? await configRes.json() : { templateSelectorEnabled: false };
+      if (!configData.templateSelectorEnabled) {
+        if (!cancelled) setCanonicalImportEligible(false);
+        return;
+      }
+
+      const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
+      if (!cancelled) setCanonicalImportEligible(profileRes.status === 404);
+    } catch {
+      if (!cancelled) setCanonicalImportEligible(false);
+    }
+  }
+
+  checkEligibility();
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
+async function prepareResumeForCanonicalTemplates(resumeId: string) {
+  setImportingResumeId(resumeId);
+  setCanonicalImportMessage(null);
+  try {
+    const res = await fetch("/api/internal/canonical-career-memory/import-resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resumeId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setCanonicalImportMessage(data?.error?.message || "Could not prepare this resume for Canonical Templates.");
+      return;
+    }
+    setCanonicalImportEligible(false);
+    setCanonicalImportMessage("This resume is ready for Canonical Templates.");
+  } catch {
+    setCanonicalImportMessage("Could not prepare this resume for Canonical Templates.");
+  } finally {
+    setImportingResumeId(null);
+  }
+}
 const [
   selectedResumeScores,
   setSelectedResumeScores,
@@ -2864,8 +2926,23 @@ Choose which resume and cover letter will be used when generating your applicati
       >
         Preview
       </button>
+
+      {canonicalImportEligible && (
+        <button
+          type="button"
+          onClick={() => prepareResumeForCanonicalTemplates(resume.id)}
+          disabled={importingResumeId === resume.id}
+          className="shrink-0 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs font-bold text-purple-600 transition hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {importingResumeId === resume.id ? "Preparing..." : "Prepare this resume for Canonical Templates"}
+        </button>
+      )}
     </div>
   ))}
+
+  {canonicalImportMessage && (
+    <p className="mt-2 text-xs font-semibold text-slate-600">{canonicalImportMessage}</p>
+  )}
 </div>
 <div>
 
