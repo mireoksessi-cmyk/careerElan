@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withCanonicalAuth, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError, NotFoundError, PersistenceError } from "@/lib/careerMemory/errors/domainErrors";
+import { logCanonicalMetric } from "@/lib/careerMemory/orchestration/canonicalProductionMetrics";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 /*
@@ -32,15 +33,19 @@ export function makeHandleStatus(request: Request) {
       throw new ValidationError(["applicationId query parameter is required"]);
     }
 
+    const startedAt = Date.now();
     const { data, error } = await supabaseAdmin.rpc("get_canonical_generation_status", { p_user_id: ctx.userId, p_application_id: applicationId });
     if (error) {
+      logCanonicalMetric({ event: "canonical_status", applicationId, outcome: "error", errorCode: "persistence_failed", latencyMs: Date.now() - startedAt });
       throw new PersistenceError("Failed to read application canonical status.");
     }
     const result = data as { status: string; application?: Record<string, unknown> };
     if (result.status !== "success" || !result.application) {
+      logCanonicalMetric({ event: "canonical_status", applicationId, outcome: "error", errorCode: "not_found", latencyMs: Date.now() - startedAt });
       throw new NotFoundError("Application not found, or does not belong to the current user.");
     }
 
+    logCanonicalMetric({ event: "canonical_status", applicationId, outcome: "success", latencyMs: Date.now() - startedAt });
     return jsonResponse({ status: result.application });
   };
 }

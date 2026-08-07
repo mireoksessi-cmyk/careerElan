@@ -3,6 +3,7 @@ import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/l
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError, CanonicalVersionUnavailableError, TemplateRenderingError } from "@/lib/careerMemory/errors/domainErrors";
 import { isCanonicalGenerateEnabled } from "@/lib/careerMemory/orchestration/featureFlags";
+import { logCanonicalMetric, classifyErrorCode } from "@/lib/careerMemory/orchestration/canonicalProductionMetrics";
 import { resolveCanonicalTemplateId } from "@/lib/careerMemory/orchestration/canonicalRenderService";
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
 import { applyOverlay } from "@/lib/careerMemory/runtime/overlayRuntime";
@@ -75,6 +76,7 @@ export function makeHandlePreview(request: Request) {
     const locale = typeof body.locale === "string" && body.locale.length > 0 ? body.locale : "en";
 
     const templateId = resolveCanonicalTemplateId(body.templateId);
+    const startedAt = Date.now();
 
     // Ownership-scoped by RLS: ctx.repos is built from the authenticated
     // session client (see routeGuard.ts), so a tailored resume belonging
@@ -84,15 +86,18 @@ export function makeHandlePreview(request: Request) {
     // needed, unlike a service-role-backed route would require.
     const tailoredRow = await ctx.repos.tailoredResumes.getByApplicationId(body.applicationId);
     if (!tailoredRow) {
+      logCanonicalMetric({ event: "canonical_preview", applicationId: body.applicationId, templateId: body.templateId, format, outcome: "error", errorCode: "version_unavailable", latencyMs: Date.now() - startedAt });
       throw new CanonicalVersionUnavailableError("No prior canonical generation found for this applicationId - call /generate first.");
     }
 
     const memoryService = new CanonicalCareerMemoryService(ctx.repos);
     const runtime = await memoryService.getCanonicalRuntime(ctx.userId);
     if (!runtime || !runtime.version?.id) {
+      logCanonicalMetric({ event: "canonical_preview", applicationId: body.applicationId, templateId: body.templateId, format, outcome: "error", errorCode: "version_unavailable", latencyMs: Date.now() - startedAt });
       throw new CanonicalVersionUnavailableError("No canonical resume version exists for this profile.");
     }
     if (tailoredRow.resume_version_id && runtime.version.id !== tailoredRow.resume_version_id) {
+      logCanonicalMetric({ event: "canonical_preview", applicationId: body.applicationId, templateId: body.templateId, format, outcome: "error", errorCode: "conflict_stale_version", latencyMs: Date.now() - startedAt });
       return NextResponse.json(
         { error: { code: "CONFLICT", message: "The canonical resume has changed since this application was generated. Re-generate before previewing a different template." } },
         { status: 409, headers: { "cache-control": "no-store" } }
@@ -115,14 +120,17 @@ export function makeHandlePreview(request: Request) {
     try {
       if (format === "html") {
         const result = await renderTemplateFromRuntime(applied.runtime, { templateId, useTailored: true, paperSize, density, locale, generatedAt: new Date(0).toISOString() }, "html");
+        logCanonicalMetric({ event: "canonical_preview", applicationId: body.applicationId, templateId: body.templateId, format, outcome: "success", latencyMs: Date.now() - startedAt });
         return jsonResponse({ html: result.html, pageCount: result.pageCount, templateId });
       }
 
       const renderOptions = { templateId, useTailored: true, paperSize, density, locale, generatedAt: new Date(0).toISOString() };
       const result = format === "pdf" ? await renderTemplateFromRuntime(applied.runtime, renderOptions, "pdf") : await renderTemplateFromRuntime(applied.runtime, renderOptions, "docx");
       const contentType = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      logCanonicalMetric({ event: "canonical_preview", applicationId: body.applicationId, templateId: body.templateId, format, outcome: "success", latencyMs: Date.now() - startedAt });
       return new NextResponse(new Uint8Array(result.bytes), { status: 200, headers: { "content-type": contentType, "cache-control": "no-store" } });
     } catch (error) {
+      logCanonicalMetric({ event: "canonical_preview", applicationId: body.applicationId, templateId: body.templateId, format, outcome: "error", errorCode: "template_rendering_failed", latencyMs: Date.now() - startedAt });
       throw new TemplateRenderingError(error instanceof Error ? error.message.slice(0, 200) : "unknown rendering failure");
     }
   };

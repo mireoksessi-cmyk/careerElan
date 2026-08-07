@@ -4,6 +4,7 @@ import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { isCanonicalGenerateEnabled } from "@/lib/careerMemory/orchestration/featureFlags";
 import { generateCanonicalPackage } from "@/lib/careerMemory/orchestration/canonicalGeneratePackageService";
+import { logCanonicalMetric, classifyErrorCode } from "@/lib/careerMemory/orchestration/canonicalProductionMetrics";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/types";
 import type { TemplateDensity } from "@/lib/resumeTemplates/contracts/types";
@@ -78,16 +79,32 @@ export function makeHandleGenerate(request: Request) {
     const jobAnalysisSummary = typeof body.jobAnalysisSummary === "string" ? body.jobAnalysisSummary : "";
     const targetRole = typeof body.targetRole === "string" ? body.targetRole : undefined;
 
-    const result = await generateCanonicalPackage(supabaseAdmin, {
-      userId: ctx.userId,
+    const startedAt = Date.now();
+    let result;
+    try {
+      result = await generateCanonicalPackage(supabaseAdmin, {
+        userId: ctx.userId,
+        applicationId: body.applicationId,
+        jobDescriptionText: body.jobDescriptionText,
+        jobAnalysisSummary,
+        targetRole,
+        templateId: body.templateId,
+        paperSize,
+        density,
+        locale,
+      });
+    } catch (error) {
+      logCanonicalMetric({ event: "canonical_generate", applicationId: body.applicationId, templateId: body.templateId, outcome: "error", errorCode: classifyErrorCode(error), latencyMs: Date.now() - startedAt });
+      throw error;
+    }
+    logCanonicalMetric({
+      event: "canonical_generate",
       applicationId: body.applicationId,
-      jobDescriptionText: body.jobDescriptionText,
-      jobAnalysisSummary,
-      targetRole,
       templateId: body.templateId,
-      paperSize,
-      density,
-      locale,
+      outcome: "success",
+      latencyMs: Date.now() - startedAt,
+      pdfPersisted: result.render.documentStorage.persisted,
+      docxPersisted: result.render.documentStorage.persisted,
     });
 
     return jsonResponse({
