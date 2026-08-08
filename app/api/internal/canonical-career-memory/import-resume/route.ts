@@ -9,9 +9,10 @@ import { CanonicalResumeImportService } from "@/lib/careerMemory/services/canoni
   a real Canonical Career Memory profile/version. `userId` comes only
   from the authenticated session (withCanonicalAuth) - never from the
   request body, matching every other route under
-  app/api/internal/canonical-career-memory/**. Gated behind the same
-  isNetlifyRuntime() 404 every sibling route already has - not reachable
-  in real Production, local/dev manual testing only this round.
+  app/api/internal/canonical-career-memory/**. Reachable in every
+  runtime (Phase 6I.6.12 removed withCanonicalAuth's blanket Netlify
+  404 - see that file's own header comment) - auth is now the only
+  generic gate.
 */
 export function makeHandleImportResume(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {

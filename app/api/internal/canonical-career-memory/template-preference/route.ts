@@ -8,8 +8,10 @@ import { CanonicalTemplatePreferenceService } from "@/lib/careerMemory/services/
   Phase 6I.2 - profile-level canonical template preference. userId only
   ever comes from the authenticated session (withCanonicalAuth), never
   the request body, matching every other route under
-  app/api/internal/canonical-career-memory/**. Same dev-only
-  isNetlifyRuntime() 404 gate as every sibling route.
+  app/api/internal/canonical-career-memory/**. Reachable in every
+  runtime (Phase 6I.6.12 removed withCanonicalAuth's blanket Netlify
+  404 - see that file's own header comment) - auth is now the only
+  generic gate.
 
   GET: returns { defaultTemplateId: string | null } (null before the
   user has ever chosen one, or if no canonical profile exists yet -
