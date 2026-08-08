@@ -21,8 +21,8 @@ import OpenAI, { APIConnectionTimeoutError } from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveCanonicalResumeContext } from "../services/resolveCanonicalResumeContext";
 import { getCanonicalRuntimeViaServiceRole } from "./canonicalMemoryBundleFetch";
-import { applyOverlay } from "../runtime/overlayRuntime";
-import { validateAiTailoringResponse } from "./canonicalTailoringService";
+import { applyOverlay, resolveTailoredResume } from "../runtime/overlayRuntime";
+import { validateAiTailoringResponse, type CanonicalAnalysisRaw } from "./canonicalTailoringService";
 import { buildCanonicalTailoringPrompt } from "./canonicalTailoringPrompt";
 import { renderCanonicalPackage, type RenderCanonicalPackageResult } from "./canonicalRenderService";
 import { PACKAGE_GENERATION_MODEL } from "../../config/aiModels";
@@ -34,6 +34,8 @@ import {
 } from "../errors/domainErrors";
 import type { PaperSize } from "../../documentPreservation/professionalAtsHtml/types";
 import type { TemplateDensity } from "../../resumeTemplates/contracts/types";
+import type { ResumeStructuredModel } from "../../documentPreservation/resumeStructured/types";
+import { normalizePackageAnalysis, includesLoose, type PackageAnalysis } from "../../generatePackage/shared";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const OPENAI_CALL_TIMEOUT_MS = 60_000;
@@ -58,6 +60,15 @@ export type CanonicalGeneratePackageResult = {
   appliedEntryIds: string[];
   overlayRejections: string[];
   render: RenderCanonicalPackageResult;
+  /*
+    Phase 6I.6.5 - the SAME AI call's packageAnalysis, grounded (see
+    groundKeyChanges below) and mapped through legacy Generate Package's
+    own normalizePackageAnalysis() rather than a second, duplicated
+    shape. Always present (packageAnalysis was required in the AI
+    response and validated by canonicalTailoringService.ts) - keyChanges
+    may legitimately be an empty array if nothing survived grounding.
+  */
+  packageAnalysis: PackageAnalysis;
 };
 
 function extractJsonLoose(text: string): unknown {
@@ -65,6 +76,84 @@ function extractJsonLoose(text: string): unknown {
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) throw new Error("no JSON object found in AI response");
   return JSON.parse(text.slice(start, end + 1));
+}
+
+/*
+  Phase 6I.6.5 - flattens every piece of resume text the canonical
+  tailoring prompt was allowed to touch (professional summary + bullets
+  on professionalExperience/volunteerExperience/projects - the same
+  three entry kinds canonicalTailoringPrompt.ts's own editableEntries()
+  exposes) into one blob for includesLoose() containment checks. Never
+  used for anything but grounding - not persisted, not rendered.
+*/
+export function collectEditableResumeText(resume: ResumeStructuredModel): string {
+  const parts: string[] = [];
+  if (resume.professionalSummary?.text) parts.push(resume.professionalSummary.text);
+  for (const entry of [...resume.professionalExperience, ...resume.volunteerExperience]) {
+    for (const bullet of entry.bullets) parts.push(bullet.text);
+  }
+  for (const project of resume.projects) {
+    for (const bullet of project.bullets) parts.push(bullet.text);
+  }
+  return parts.join("\n");
+}
+
+/*
+  Phase 6I.6.5 - the round's own §4 requirement: "packageAnalysis.
+  keyChanges must correspond to REAL canonical overlay changes... do
+  not allow the model to claim original=X/revised=Y if the overlay did
+  not actually perform that change." The AI's keyChanges are advisory
+  prose describing what it believes it changed - this function is the
+  actual source of truth check, run AFTER the overlay has been applied,
+  against the real base/tailored resume text (not the AI's own claim
+  about itself). A keyChange survives only if:
+    - its "original" text (when non-empty - empty is legitimately a
+      brand-new bullet with no prior text) actually appears, loosely,
+      somewhere in the real BASE resume text, AND
+    - its "revised" text actually appears, loosely, somewhere in the
+      real TAILORED (post-overlay) resume text.
+  Anything that fails either check is dropped, not displayed as a
+  verified change (round §4's own instruction) - never silently
+  "corrected" into something it didn't claim.
+*/
+export function groundKeyChanges(
+  rawKeyChanges: CanonicalAnalysisRaw["keyChanges"],
+  beforeText: string,
+  afterText: string
+): CanonicalAnalysisRaw["keyChanges"] {
+  return rawKeyChanges.filter((kc) => {
+    const originalGrounded = !kc.original.trim() || includesLoose(beforeText, kc.original);
+    const revisedGrounded = includesLoose(afterText, kc.revised);
+    return originalGrounded && revisedGrounded;
+  });
+}
+
+/*
+  Phase 6I.6.5 - maps the grounded canonical analysis into legacy
+  Generate Package's own PackageAnalysis input shape, then hands it to
+  the EXISTING normalizePackageAnalysis() (lib/generatePackage/
+  shared.ts) for all defaulting/clamping/coercion - no duplicated
+  normalization logic. verification/mismatch.unsupportedClaims/
+  matches.transferableSkills/recommendation.nextSteps are intentionally
+  left absent here: canonical never re-runs legacy's own Canadian-
+  scope/regulated-role/bilingual classification (that would be a much
+  larger, unrelated prompt addition, and normalizePackageAnalysis
+  already defaults every one of these to a safe, honest empty shape
+  when absent - see that function's own behavior). applyRecommendation
+  is derived from the SAME 85/65/40 overallMatch thresholds
+  normalizePackageAnalysis itself uses for matchLevel, not invented.
+*/
+export function toPackageAnalysisInput(raw: CanonicalAnalysisRaw, groundedKeyChanges: CanonicalAnalysisRaw["keyChanges"]) {
+  const applyRecommendation =
+    raw.overallMatch >= 85 ? "recommended" : raw.overallMatch >= 40 ? "consider" : "not_recommended";
+
+  return {
+    overallMatch: raw.overallMatch,
+    keyChanges: groundedKeyChanges,
+    matches: { strongMatches: raw.strengths, transferableSkills: [] },
+    mismatch: { summary: "", missingRequirements: raw.gaps, unsupportedClaims: [] },
+    recommendation: { summary: raw.summary, applyRecommendation, nextSteps: [] },
+  };
 }
 
 async function callTailoringOpenAi(promptText: string): Promise<string> {
@@ -157,10 +246,29 @@ export async function generateCanonicalPackage(client_: SupabaseClient, input: C
   }
 
   // --- Apply overlay in-memory for rendering (pure, never mutates canonical facts) ---
+  const beforeText = collectEditableResumeText(resolveTailoredResume(runtime));
   const applied = applyOverlay(runtime, validated.overlay);
   if (applied.rejections.length > 0) {
     throw new CanonicalTailoringError(applied.rejections.map((r) => `${r.entryId ?? "summary"}: ${r.reason} (${r.detail})`));
   }
+
+  /*
+    Phase 6I.6.5 - ground packageAnalysis.keyChanges against the REAL
+    before/after resume text now that the overlay has actually been
+    applied (see groundKeyChanges's own header comment). Any keyChange
+    that fails grounding is dropped, never shown as a verified change -
+    round §4. This never fails/throws generation; a package with zero
+    grounded keyChanges still succeeds (round §14: "keyChanges may
+    validly be empty arrays").
+  */
+  const afterText = collectEditableResumeText(resolveTailoredResume(applied.runtime));
+  const groundedKeyChanges = groundKeyChanges(validated.packageAnalysisRaw.keyChanges, beforeText, afterText);
+  if (groundedKeyChanges.length < validated.packageAnalysisRaw.keyChanges.length) {
+    console.warn(
+      `[canonical-package-analysis] dropped ${validated.packageAnalysisRaw.keyChanges.length - groundedKeyChanges.length} ungrounded keyChange(s) for application ${input.applicationId}`
+    );
+  }
+  const packageAnalysis = normalizePackageAnalysis(toPackageAnalysisInput(validated.packageAnalysisRaw, groundedKeyChanges));
 
   // --- Persist the overlay (service-role-safe RPC, see canonicalRenderService.ts's own comment) ---
   const { data: overlayRpcResult, error: overlayError } = await client_.rpc("system_create_canonical_overlay", {
@@ -202,5 +310,6 @@ export async function generateCanonicalPackage(client_: SupabaseClient, input: C
     appliedEntryIds: applied.appliedEntryIds,
     overlayRejections: applied.rejections.map((r) => `${r.entryId ?? "summary"}: ${r.reason}`),
     render,
+    packageAnalysis,
   };
 }

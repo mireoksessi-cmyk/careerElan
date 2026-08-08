@@ -38,9 +38,34 @@ export type AiTailoringValidationIssue = {
   reason: string;
 };
 
+/*
+  Phase 6I.6.5 - the raw, not-yet-grounded shape of the SAME AI call's
+  packageAnalysis block. Deliberately untyped/loose beyond this
+  boundary (canonicalGeneratePackageService.ts grounds keyChanges
+  against real resume text, then maps this into legacy Generate
+  Package's own normalizePackageAnalysis() input shape - see that
+  file). This type only records what this validator itself checked:
+  every field is a string/array-of-strings of the right shape.
+*/
+export type CanonicalAnalysisKeyChangeRaw = {
+  section: string;
+  original: string;
+  revised: string;
+  reason: string;
+  evidence: string;
+};
+
+export type CanonicalAnalysisRaw = {
+  overallMatch: number;
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  keyChanges: CanonicalAnalysisKeyChangeRaw[];
+};
+
 export type AiTailoringValidationResult =
-  | { valid: true; overlay: TailoredResumeOverlay; droppedSkillEmphasis: boolean; issues: [] }
-  | { valid: false; overlay: null; droppedSkillEmphasis: false; issues: AiTailoringValidationIssue[] };
+  | { valid: true; overlay: TailoredResumeOverlay; droppedSkillEmphasis: boolean; packageAnalysisRaw: CanonicalAnalysisRaw; issues: [] }
+  | { valid: false; overlay: null; droppedSkillEmphasis: false; packageAnalysisRaw: null; issues: AiTailoringValidationIssue[] };
 
 const OVERLAY_SCHEMA_VERSION = "1.0.0";
 
@@ -71,10 +96,10 @@ export function validateAiTailoringResponse(raw: AiTailoringRawResponse, resume:
   const issues: AiTailoringValidationIssue[] = [];
 
   if (!isPlainObject(raw)) {
-    return { valid: false, overlay: null, droppedSkillEmphasis: false, issues: [{ path: "$", reason: "response is not a JSON object" }] };
+    return { valid: false, overlay: null, droppedSkillEmphasis: false, packageAnalysisRaw: null, issues: [{ path: "$", reason: "response is not a JSON object" }] };
   }
 
-  const allowedTopLevelKeys = new Set(["professionalSummaryText", "entries", "skillEmphasis"]);
+  const allowedTopLevelKeys = new Set(["professionalSummaryText", "entries", "skillEmphasis", "packageAnalysis"]);
   for (const key of Object.keys(raw)) {
     if (!allowedTopLevelKeys.has(key)) issues.push({ path: `$.${key}`, reason: "unrecognized field" });
   }
@@ -153,10 +178,80 @@ export function validateAiTailoringResponse(raw: AiTailoringRawResponse, resume:
     }
   }
 
+  /*
+    Phase 6I.6.5 - packageAnalysis is REQUIRED (the prompt always asks
+    for it as part of the SAME response). Shape-only validation here
+    (types/required fields) - grounding keyChanges against real resume
+    text happens later in canonicalGeneratePackageService.ts, once the
+    overlay has actually been applied and a real "after" text exists to
+    check against. A shape failure here is a normal validation issue,
+    handled by the caller's existing repair-retry loop exactly like any
+    other field - no separate retry path invented.
+  */
+  let packageAnalysisRaw: CanonicalAnalysisRaw | null = null;
+  if (!("packageAnalysis" in raw)) {
+    issues.push({ path: "$.packageAnalysis", reason: "packageAnalysis is required" });
+  } else if (!isPlainObject(raw.packageAnalysis)) {
+    issues.push({ path: "$.packageAnalysis", reason: "packageAnalysis must be an object" });
+  } else {
+    const pa = raw.packageAnalysis;
+    const allowedPaKeys = new Set(["overallMatch", "summary", "strengths", "gaps", "keyChanges"]);
+    for (const key of Object.keys(pa)) {
+      if (!allowedPaKeys.has(key)) issues.push({ path: `$.packageAnalysis.${key}`, reason: "unrecognized field" });
+    }
+
+    if (typeof pa.overallMatch !== "number" || !Number.isFinite(pa.overallMatch)) {
+      issues.push({ path: "$.packageAnalysis.overallMatch", reason: "must be a number" });
+    }
+    if (typeof pa.summary !== "string") {
+      issues.push({ path: "$.packageAnalysis.summary", reason: "must be a string" });
+    }
+    if (!Array.isArray(pa.strengths) || !pa.strengths.every((s) => typeof s === "string")) {
+      issues.push({ path: "$.packageAnalysis.strengths", reason: "must be an array of strings" });
+    }
+    if (!Array.isArray(pa.gaps) || !pa.gaps.every((s) => typeof s === "string")) {
+      issues.push({ path: "$.packageAnalysis.gaps", reason: "must be an array of strings" });
+    }
+
+    const keyChanges: CanonicalAnalysisKeyChangeRaw[] = [];
+    if (!Array.isArray(pa.keyChanges)) {
+      issues.push({ path: "$.packageAnalysis.keyChanges", reason: "must be an array" });
+    } else {
+      pa.keyChanges.forEach((kc, kcIndex) => {
+        const kcPath = `$.packageAnalysis.keyChanges[${kcIndex}]`;
+        if (!isPlainObject(kc)) {
+          issues.push({ path: kcPath, reason: "keyChange must be an object" });
+          return;
+        }
+        const allowedKcKeys = new Set(["section", "original", "revised", "reason", "evidence"]);
+        for (const key of Object.keys(kc)) {
+          if (!allowedKcKeys.has(key)) issues.push({ path: `${kcPath}.${key}`, reason: "unrecognized field" });
+        }
+        if (typeof kc.section !== "string" || typeof kc.original !== "string" || typeof kc.revised !== "string" || typeof kc.reason !== "string") {
+          issues.push({ path: kcPath, reason: "section/original/revised/reason must all be strings" });
+          return;
+        }
+        if (kc.revised.trim().length === 0) {
+          issues.push({ path: `${kcPath}.revised`, reason: "revised must be a non-empty string" });
+          return;
+        }
+        if ("evidence" in kc && typeof kc.evidence !== "string") {
+          issues.push({ path: `${kcPath}.evidence`, reason: "evidence must be a string when present" });
+          return;
+        }
+        keyChanges.push({ section: kc.section, original: kc.original, revised: kc.revised, reason: kc.reason, evidence: typeof kc.evidence === "string" ? kc.evidence : "" });
+      });
+    }
+
+    if (typeof pa.overallMatch === "number" && typeof pa.summary === "string" && Array.isArray(pa.strengths) && Array.isArray(pa.gaps)) {
+      packageAnalysisRaw = { overallMatch: pa.overallMatch, summary: pa.summary, strengths: pa.strengths as string[], gaps: pa.gaps as string[], keyChanges };
+    }
+  }
+
   if (issues.length > 0) {
-    return { valid: false, overlay: null, droppedSkillEmphasis: false, issues };
+    return { valid: false, overlay: null, droppedSkillEmphasis: false, packageAnalysisRaw: null, issues };
   }
 
   const overlay: TailoredResumeOverlay = { schemaVersion: OVERLAY_SCHEMA_VERSION, professionalSummaryText, entries };
-  return { valid: true, overlay, droppedSkillEmphasis, issues: [] };
+  return { valid: true, overlay, droppedSkillEmphasis, packageAnalysisRaw: packageAnalysisRaw as CanonicalAnalysisRaw, issues: [] };
 }

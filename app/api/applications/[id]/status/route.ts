@@ -119,6 +119,17 @@ export async function GET(
         documentStorage: {
           persisted: Boolean(row.generated_pdf_document_id && row.generated_docx_document_id),
         },
+        /*
+          Phase 6I.6.5 - same ai_insight column, same normalized
+          PackageAnalysis shape legacy's own branch below returns as
+          `packageAnalysis: row.ai_insight` - deliberately NOT
+          reintroducing resume/coverLetter/emailDraft here (canonical
+          obtains those via the rendered-document/resume-preview path,
+          not this text-trio field, per this branch's own header
+          comment above). Older canonical rows generated before this
+          phase simply have ai_insight = null here, same as before.
+        */
+        packageAnalysis: row.ai_insight,
         ...jobContext,
         ...progressInfo,
       });

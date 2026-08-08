@@ -122,6 +122,15 @@ export type PackageAnalysis = {
     original: string;
     revised: string;
     reason: string;
+    /*
+      Phase 6I.6.5 - additive. Legacy generations never populate this
+      (normalizePackageAnalysis coerces it to "" via getFirstText, same
+      as every other keyChanges field) - only canonical's grounded
+      keyChanges carry a real value. A short, human-readable paraphrase
+      of the job-posting requirement that motivated the change, never a
+      long verbatim quote.
+    */
+    evidence: string;
   }[];
 
   mismatch: {
@@ -312,7 +321,15 @@ function getStringOrArrayText(
   return "";
 }
 
-function normalizeForComparison(
+/*
+  Phase 6I.6.5 - exported (previously module-private) so
+  lib/careerMemory/orchestration/canonicalGeneratePackageService.ts can
+  reuse the SAME grounding primitive legacy's own
+  validateRequirementEvidence() uses, instead of duplicating text-
+  normalization/containment logic for canonical's keyChanges grounding
+  check. Behavior unchanged for every existing caller in this file.
+*/
+export function normalizeForComparison(
   value: string
 ): string {
   return String(value || "")
@@ -325,7 +342,7 @@ function normalizeForComparison(
     .trim();
 }
 
-function includesLoose(
+export function includesLoose(
   fullText: string,
   expected: string
 ): boolean {
@@ -2899,6 +2916,11 @@ export function normalizePackageAnalysis(
             reason:
               getFirstText(
                 item.reason
+              ),
+
+            evidence:
+              getFirstText(
+                item.evidence
               ),
           }))
       : [];

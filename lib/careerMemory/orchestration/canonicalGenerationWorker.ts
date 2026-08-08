@@ -91,6 +91,11 @@ export async function runCanonicalGeneration(applicationId: string): Promise<voi
         p_application_id: applicationId,
         p_user_id: userId,
         p_status: "succeeded",
+        // Phase 6I.6.5 - same completion transaction, same existing
+        // applications.ai_insight column legacy already uses; see this
+        // RPC's own migration comment for why a new optional parameter
+        // was the smallest safe signature change.
+        p_ai_insight: decision.result.packageAnalysis,
       });
       logCanonicalMetric({ event: "canonical_generate", applicationId, templateId, outcome: "success", latencyMs: Date.now() - startedAt, pdfPersisted: decision.result.render.documentStorage.persisted, docxPersisted: decision.result.render.documentStorage.persisted });
       return;

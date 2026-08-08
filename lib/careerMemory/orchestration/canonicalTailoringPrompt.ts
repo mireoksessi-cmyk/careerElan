@@ -13,6 +13,19 @@
   + professionalSummaryText + skillEmphasis (skillEmphasis is
   requested for AI grounding/rationale quality but dropped before it
   reaches the overlay engine - see that file's own header comment).
+
+  Phase 6I.6.5 - additive: the SAME single AI call is also asked to
+  return a "packageAnalysis" object (match score, summary, strengths,
+  gaps, keyChanges with before/after/reason/evidence) describing the
+  tailoring it just produced above, reusing legacy Generate Package's
+  own PackageAnalysis contract (lib/generatePackage/shared.ts) rather
+  than inventing a second shape. No new AI call is added - see this
+  round's own "ONE GENERATION. ONE TAILORING AI CALL. ONE PACKAGE
+  ANALYSIS RESULT." principle. The AI's keyChanges claims are NOT
+  trusted verbatim - canonicalGeneratePackageService.ts grounds every
+  claimed original/revised pair against the actual base/tailored resume
+  text after this response is validated and the overlay is applied,
+  dropping any keyChange that cannot be verified.
 */
 import type { ResumeStructuredModel } from "../../documentPreservation/resumeStructured/types";
 
@@ -63,7 +76,14 @@ export function buildCanonicalTailoringPrompt(opts: { resume: ResumeStructuredMo
     `JOB ANALYSIS SUMMARY: ${opts.jobAnalysisSummary}`,
     "",
     "Return ONLY a JSON object with EXACTLY this shape, no extra keys, no markdown fences:",
-    '{"professionalSummaryText": "string, rewritten summary", "entries": [{"entryId": "string, must match an existing entryId above", "bullets": [{"sourceContentId": "string, omit for a new bullet", "text": "string, rewritten or new bullet wording"}]}], "skillEmphasis": ["string", "..."]}',
+    '{"professionalSummaryText": "string, rewritten summary", "entries": [{"entryId": "string, must match an existing entryId above", "bullets": [{"sourceContentId": "string, omit for a new bullet", "text": "string, rewritten or new bullet wording"}]}], "skillEmphasis": ["string", "..."], "packageAnalysis": {"overallMatch": 0, "summary": "string", "strengths": ["string"], "gaps": ["string"], "keyChanges": [{"section": "string", "original": "string", "revised": "string", "reason": "string", "evidence": "string"}]}}',
     "Never introduce a company, title, date, institution, credential, or metric number not already present above. Never change an existing metric number.",
+    "",
+    "packageAnalysis describes the tailoring you just produced above - it does not change the resume, it explains it:",
+    "- overallMatch: integer 0-100, a job/resume ALIGNMENT score (how well the resume's real content matches this job), not a hiring-probability estimate. 85-100 strong, 65-84 moderate, 40-64 low, 0-39 critical mismatch. Do not inflate the score.",
+    "- summary: 1-2 sentences on overall fit.",
+    "- strengths: 0-5 short phrases, only things genuinely supported by the resume above and relevant to this job. Never invent a skill or experience the resume does not show.",
+    "- gaps: 0-5 short phrases naming a job requirement not clearly supported by the resume above. A gap must stay a gap - never resolve a gap by inventing experience in the EDITABLE CONTENT above.",
+    "- keyChanges: 0-4 items, ONLY for wording you actually changed in professionalSummaryText/bullets above. For each: section = which part of the resume (e.g. \"Professional Summary\" or the entry's organization/role); original = the EXACT original wording being replaced, copied verbatim from CURRENT PROFESSIONAL SUMMARY or the matching bullet's text above (empty string only for a brand-new bullet with no prior text); revised = the EXACT new wording, must match the professionalSummaryText or bullets[].text value you returned above, verbatim; reason = one concise sentence on why this change improves fit for this job; evidence = a short, concise paraphrase of the specific job-posting requirement or phrase that motivated the change (not a long verbatim quote). Do not describe a change you did not make. Never invent a requirement not present in the job description above.",
   ].join("\n");
 }

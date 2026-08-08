@@ -164,6 +164,11 @@ type PackageAnalysis = {
     original: string;
     revised: string;
     reason: string;
+    // Phase 6I.6.5 - populated for canonical-generated packages (a
+    // grounded, concise paraphrase of the job-posting requirement that
+    // motivated the change); "" for legacy packages, same as every
+    // other keyChanges field's default.
+    evidence: string;
   }[];
 
   mismatch: {
@@ -4512,6 +4517,18 @@ function PackageAnalysisPanel({
                     <div className="mt-3 border-t border-slate-200 pt-3">
                       <p className="text-xs leading-5 text-blue-700">
                         {change.reason}
+                      </p>
+                    </div>
+                  )}
+
+                  {change.evidence && (
+                    <div className="mt-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                        Evidence
+                      </p>
+
+                      <p className="mt-1 text-xs italic leading-5 text-gray-500">
+                        {change.evidence}
                       </p>
                     </div>
                   )}
