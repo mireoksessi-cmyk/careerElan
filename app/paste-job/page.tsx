@@ -303,6 +303,18 @@ type GeneratedPackage = {
   coverLetter: string;
   emailDraft: string;
   packageAnalysis: PackageAnalysis | null;
+  /*
+    "canonical" | "legacy" | undefined (treated as "legacy"). Only the
+    legacy engine (lib/generatePackage/generateCore.ts) computes
+    packageAnalysis - the canonical engine's single AI call
+    (canonicalTailoringPrompt.ts) tailors wording only and has no
+    analysis/rationale fields in its schema. Threaded through purely to
+    let PackageAnalysisPanel show an honest "not available for this
+    generation" message instead of a misleading "will appear after
+    generation is complete" for canonical-routed packages, where it
+    never will. Not a fix to the underlying gap - see the phase report.
+  */
+  generationEngine?: string;
 };
 
 /*
@@ -1317,6 +1329,7 @@ const [
       coverLetter: string;
       emailDraft: string;
       packageAnalysis: unknown;
+      engine?: string;
     } & Partial<JobContext>
   ) {
     clearGiveUpTimer();
@@ -1326,6 +1339,7 @@ const [
       emailDraft: result.emailDraft,
       packageAnalysis:
         (result.packageAnalysis as PackageAnalysis | null) || null,
+      generationEngine: result.engine,
     });
     setSelectedPreview("resume");
     setGenerated(true);
@@ -3836,7 +3850,7 @@ async function downloadDocx() {
                 {generated && (
   <div className="mt-6 grid items-start gap-5 xl:grid-cols-12">
     {/* 왼쪽: 원본 채용공고 */}
-    <aside className="xl:col-span-3">
+    <aside className="xl:col-span-4">
       <div className="h-full rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="border-b border-gray-100 p-5">
           <div className="flex items-center gap-3">
@@ -4045,7 +4059,7 @@ async function downloadDocx() {
     </aside>
 
     {/* 가운데: 생성된 Resume / Cover Letter / Email */}
-    <section className="xl:col-span-5">
+    <section className="xl:col-span-8">
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
           <div>
@@ -4312,12 +4326,13 @@ async function downloadDocx() {
       </div>
     </section>
 
-    {/* 오른쪽: AI 분석 카드 */}
-    <aside className="xl:col-span-4">
+    {/* 하단: AI 분석 카드 (전체 너비) */}
+    <aside className="xl:col-span-12">
       <PackageAnalysisPanel
         analysis={
           packageData.packageAnalysis
         }
+        generationEngine={packageData.generationEngine}
       />
     </aside>
   </div>
@@ -4334,18 +4349,31 @@ async function downloadDocx() {
 }
 function PackageAnalysisPanel({
   analysis,
+  generationEngine,
 }: {
   analysis: PackageAnalysis | null;
+  generationEngine?: string;
 }) {
   if (!analysis) {
+    /*
+      "canonical" packages never populate packageAnalysis - the
+      canonical tailoring call's schema has no analysis/rationale
+      fields (see GeneratedPackage's own comment on this field). Say so
+      honestly instead of implying the generic "will appear after
+      generation" message, which for a canonical package never becomes
+      true no matter how long the user waits.
+    */
+    const isCanonical = generationEngine === "canonical";
     return (
-      <div className="sticky top-6 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+      <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-extrabold">
           Package Analysis
         </h2>
 
         <p className="mt-3 text-sm leading-6 text-gray-500">
-          AI analysis will appear here after the package is generated.
+          {isCanonical
+            ? "Detailed AI match analysis isn't available for this package."
+            : "AI analysis will appear here after the package is generated."}
         </p>
       </div>
     );
@@ -4392,7 +4420,7 @@ function PackageAnalysisPanel({
         : "Consider Applying";
 
   return (
-    <div className="sticky top-6 space-y-5">
+    <div className="space-y-5">
       {/* Overall Match */}
       <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
         <p className="text-xs font-black uppercase tracking-wide text-blue-600">

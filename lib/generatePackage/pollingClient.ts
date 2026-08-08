@@ -143,6 +143,7 @@ export type GenerateResult =
       emailDraft: string;
       packageAnalysis: unknown;
       selectedResume: unknown;
+      engine?: string;
     }
   | { kind: "quota_reached"; limit: number; used: number | null }
   | { kind: "in_progress"; message: string; applicationId?: string }
@@ -231,6 +232,7 @@ export function parseGenerateResponse(
       emailDraft: typeof data.emailDraft === "string" ? data.emailDraft : "",
       packageAnalysis: data.packageAnalysis ?? null,
       selectedResume: data.selectedResume ?? null,
+      engine: typeof data.engine === "string" ? data.engine : undefined,
     };
   }
 
@@ -321,6 +323,7 @@ export type StatusResult =
       emailDraft: string;
       packageAnalysis: unknown;
       selectedResume: unknown;
+      engine?: string;
     } & JobContext)
   | ({ kind: "failed"; applicationId: string; code: string | null; message: string } & JobContext)
   /* 404, or an unowned/unknown applicationId - not a generation failure,
@@ -358,6 +361,7 @@ export function parseStatusResponse(
       emailDraft: typeof data.emailDraft === "string" ? data.emailDraft : "",
       packageAnalysis: data.packageAnalysis ?? null,
       selectedResume: data.selectedResume ?? null,
+      engine: typeof data.engine === "string" ? data.engine : undefined,
       ...jobContext,
     };
   }
