@@ -13,6 +13,23 @@ import {
   MAX_COVER_LETTERS,
 } from "@/lib/config/careerMemoryLimits";
 const DRAFT_KEY = "career-memory-draft";
+/*
+  Phase 6I.6.8 - order follows the canonical resume's own semantic
+  section order (PROFESSIONAL_ATS_SECTION_ORDER in
+  lib/documentPreservation/professionalAtsAssembly/sectionLabels.ts:
+  identity -> summary -> core_skills -> professional_experience ->
+  education -> certifications_licenses -> projects -> ...), so the user
+  fills out Career Memory in roughly the same sequence the information
+  later appears on the resume. Certifications now comes before Projects
+  and Education moves ahead of both (previously: Personal, Skills,
+  Experience, Projects, Education, Languages, Certifications, Career
+  Goals, Review). Languages has no canonical resume section (see
+  manualResumeRuntimeMapper.ts's own header comment) so it stays grouped
+  with the other supplementary, non-core-resume steps just before Career
+  Goals. This is a pure UI/navigation reorder - the currentStep===N
+  dispatch in renderStepForm() below was updated to match; no field
+  names, DB columns, or persisted data shape changed.
+*/
 const steps = [
   {
     title: "Personal Information",
@@ -33,27 +50,27 @@ const steps = [
     required: true,
   },
   {
-    title: "Projects",
-    description:
-      "Optional. School, personal, volunteer, or professional projects that showcase your experience.",
-    required: false,
-  },
-  {
     title: "Education",
     description:
       "Optional. Schools, degrees, GPA, coursework, and academic achievements that strengthen your profile.",
     required: false,
   },
   {
-    title: "Languages",
-    description:
-      "Optional. Languages you speak and your proficiency level, such as English, French, or Korean.",
-    required: false,
-  },
-  {
     title: "Certifications",
     description:
       "Optional. Professional certifications, licenses, awards, and completed training.",
+    required: false,
+  },
+  {
+    title: "Projects",
+    description:
+      "Optional. School, personal, volunteer, or professional projects that showcase your experience.",
+    required: false,
+  },
+  {
+    title: "Languages",
+    description:
+      "Optional. Languages you speak and your proficiency level, such as English, French, or Korean.",
     required: false,
   },
   {
@@ -415,6 +432,117 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   }
 
   const inlineTemplateBlocksContinue = inlineTemplateStatus !== "not-applicable" && inlineTemplateStatus !== "ready";
+
+  /*
+    Phase 6I.6.8 - Manual ("build" mode) Step 9 template selection. A
+    dedicated state/flow, deliberately NOT sharing canonicalPreviewStatus/
+    canonicalPreviewTemplateId (the mount-only effect above) or the
+    upload flow's inlineTemplate* state - both of those can legitimately
+    reflect an UNRELATED resume (e.g. a prior upload) which must never
+    become the implicit preview/selection for a Manual entry (this is
+    the exact wrong-resume-fallback risk this round's own root-cause
+    audit identified). manualPreviousVersionSource distinguishes three
+    cases returned by import-manual: "none" (brand new profile - nothing
+    to preselect), "manual" (re-entering Step 9 for a Manual resume that
+    was already saved once - restore its own persisted selection), and
+    "uploaded" (this user's ONE career_profiles row currently holds an
+    UPLOADED resume's canonical version - a Manual save is about to
+    replace it, but the uploaded resume's default_template_id must NOT
+    be silently inherited; the user must choose again).
+  */
+  const [manualTemplateStatus, setManualTemplateStatus] = useState<"idle" | "not-applicable" | "importing" | "import-error" | "selecting" | "saving-template" | "ready">("idle");
+  const [manualTemplates, setManualTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
+  const [manualSelectedTemplateId, setManualSelectedTemplateId] = useState<string | null>(null);
+  const [manualTemplateError, setManualTemplateError] = useState<string | null>(null);
+  const [manualPreviousVersionSource, setManualPreviousVersionSource] = useState<"none" | "manual" | "uploaded" | null>(null);
+
+  async function runManualCanonicalFlow() {
+    setManualTemplateStatus("importing");
+    setManualTemplateError(null);
+    try {
+      // Same canary/feature-flag gate the uploaded-resume flow's own
+      // runInlineCanonicalFlow() already checks - a Manual resume must
+      // not attempt canonical import/persistence for a user the Stage 1
+      // canary hasn't been enabled for. "not-applicable" falls back to
+      // the pre-existing legacy Step 9 review (renderFullResumePreview()),
+      // matching this user's behavior before this round shipped.
+      const configRes = await fetch("/api/internal/canonical-generate-package/config");
+      const configData = configRes.ok ? await configRes.json() : { generateEnabled: false, templateSelectorEnabled: false };
+      if (!configData.generateEnabled || !configData.templateSelectorEnabled) {
+        setManualTemplateStatus("not-applicable");
+        return;
+      }
+
+      const importRes = await fetch("/api/internal/canonical-career-memory/import-manual", { method: "POST" });
+      const importData = await importRes.json().catch(() => null);
+      if (!importRes.ok) {
+        setManualTemplateError(importData?.error?.message || "Could not prepare your resume for canonical templates.");
+        setManualTemplateStatus("import-error");
+        return;
+      }
+      setManualPreviousVersionSource(importData.previousVersionSource ?? "none");
+
+      const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+      const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+      setManualTemplates(templatesData.templates ?? []);
+
+      if (importData.previousVersionSource === "manual") {
+        // Re-entering Step 9 for a Manual resume that already has a
+        // persisted template - restore it, do not force a reselect.
+        const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
+        const prefData = prefRes.ok ? await prefRes.json() : { defaultTemplateId: null };
+        setManualSelectedTemplateId(prefData.defaultTemplateId ?? null);
+        setManualTemplateStatus(prefData.defaultTemplateId ? "ready" : "selecting");
+      } else {
+        // "none" (brand new profile) or "uploaded" (an existing default
+        // came from a DIFFERENT, uploaded resume) - never implicitly
+        // selected for a Manual entry; the user must choose explicitly.
+        setManualSelectedTemplateId(null);
+        setManualTemplateStatus("selecting");
+      }
+    } catch {
+      setManualTemplateError("Could not prepare your resume for canonical templates.");
+      setManualTemplateStatus("import-error");
+    }
+  }
+
+  async function selectManualTemplate(templateId: string) {
+    setManualTemplateStatus("saving-template");
+    setManualTemplateError(null);
+    try {
+      const res = await fetch("/api/internal/canonical-career-memory/template-preference", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setManualTemplateError(data?.error?.message || "Could not save your template selection.");
+        setManualTemplateStatus("selecting");
+        return;
+      }
+      setManualSelectedTemplateId(data.defaultTemplateId);
+      setManualPreviousVersionSource("manual");
+      setManualTemplateStatus("ready");
+    } catch {
+      setManualTemplateError("Could not save your template selection.");
+      setManualTemplateStatus("selecting");
+    }
+  }
+
+  useEffect(() => {
+    if (mode !== "build") return;
+    if (currentStep !== steps.length - 1) return;
+    runManualCanonicalFlow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, currentStep]);
+
+  const manualCanonicalSelectionRequired = manualTemplateStatus !== "not-applicable" && manualTemplateStatus !== "idle";
+  const manualSaveDisabled =
+    mode === "build" &&
+    currentStep === steps.length - 1 &&
+    manualCanonicalSelectionRequired &&
+    !(manualTemplateStatus === "ready" && manualSelectedTemplateId !== null);
 
   /*
     Revokes the previous object URL whenever a new file is uploaded (the
@@ -1136,6 +1264,20 @@ function continueUploadedDashboard() {
 
   if (currentStep < steps.length - 1) {
     setCurrentStep((prev) => prev + 1);
+    return;
+  }
+
+  /*
+    Phase 6I.6.8 Part D - server/save-boundary enforcement, never relying
+    solely on the disabled button below. A Manual resume must have an
+    explicit canonical template selection (manualSelectedTemplateId,
+    itself only ever set from a successful template-preference PUT,
+    which validates the id against the real registry server-side -
+    see selectManualTemplate()/lib/careerMemory/services/
+    canonicalTemplatePreferenceService.ts's validateTemplateId() call)
+    before "Finish Memory" may complete.
+  */
+  if (mode === "build" && manualTemplateStatus !== "not-applicable" && manualTemplateStatus !== "idle" && !(manualTemplateStatus === "ready" && manualSelectedTemplateId !== null)) {
     return;
   }
 
@@ -2438,6 +2580,78 @@ return;
   }
 
   /*
+    Phase 6I.6.8 - Manual ("build" mode) Step 9's own template review,
+    deliberately separate from renderFullResumePreview()/
+    renderLiveResumePreviewContent() above (those stay exactly as they
+    were for the uploaded-resume flow's own final preview screen - see
+    the manualTemplateStatus state's own header comment for why sharing
+    canonicalPreviewStatus/canonicalPreviewTemplateId here would risk
+    showing an unrelated resume). Exactly ONE canonical resume preview
+    iframe renders at a time (only once a template is selected); no
+    legacy CareerMemoryTemplatePreview/3-item list ever renders for a
+    Manual resume that has real canonical content.
+  */
+  function renderManualTemplateReview() {
+    if (manualTemplateStatus === "not-applicable") {
+      // Canonical templates are not enabled for this user (Stage 1
+      // canary off) - fall back to the exact pre-existing legacy Step 9
+      // preview content, unchanged.
+      return <div className="mt-6">{renderLiveResumePreviewContent()}</div>;
+    }
+    if (manualTemplateStatus === "idle" || manualTemplateStatus === "importing") {
+      return (
+        <div className="mt-6 flex min-h-[300px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 p-10 text-center">
+          <p className="text-sm font-semibold text-slate-500">Preparing your resume for template selection…</p>
+        </div>
+      );
+    }
+    if (manualTemplateStatus === "import-error") {
+      return (
+        <div className="mt-6 flex min-h-[300px] flex-col items-center justify-center rounded-2xl border border-red-200 bg-red-50 p-10 text-center">
+          <p className="text-sm font-semibold text-red-700">{manualTemplateError || "Could not prepare your resume for canonical templates."}</p>
+          <button onClick={() => runManualCanonicalFlow()} className="mt-4 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white">Try again</button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,65%)]">
+        <div className="min-w-0">
+          <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose a template</p>
+          <h3 className="mt-1 text-xl font-black text-slate-950">Pick the design for your resume</h3>
+          <p className="mt-2 text-sm text-slate-600">Required. Select one of the four resume designs below - this is the same template lineup used for uploaded resumes.</p>
+          {manualTemplateError && <p className="mt-3 text-sm font-semibold text-red-600">{manualTemplateError}</p>}
+          <div className="mt-4">
+            <CanonicalTemplatePicker
+              templates={manualTemplates as any}
+              selectedTemplateId={manualSelectedTemplateId as any}
+              onSelect={(templateId) => selectManualTemplate(templateId)}
+              disabled={manualTemplateStatus === "saving-template"}
+              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+            />
+          </div>
+        </div>
+        <div className="min-w-0">
+          {manualSelectedTemplateId ? (
+            <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
+              <iframe
+                key={manualSelectedTemplateId}
+                src={`/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html`}
+                title="Canonical resume preview"
+                className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
+              />
+            </div>
+          ) : (
+            <div className="flex min-h-[500px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
+              <p className="text-sm font-semibold text-slate-500">Select a template to preview your resume.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /*
     Phase 6I.5 - the Career Memory side-by-side template workspace (spec
     Part B). Renders as soon as analysis finishes (importStage ===
     "parsed"), replacing the old flow where the picker and the full
@@ -2594,7 +2808,7 @@ return;
     if (currentStep === 0) return (
       <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn (optional)" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
     );
-    if  (currentStep === 4) {
+    if  (currentStep === 3) {
   return (
     <ArraySection
       title="Education"
@@ -3004,7 +3218,7 @@ return;
   );
 }
     if (currentStep === 1) return <div className="mt-6"><Textarea rows={8} placeholder="Add skills separated by commas. Example: Excel, Outlook, Client Service, Legal Research, Data Entry..." value={memoryData.skills} onChange={(v) => updateMemory("skills", v)} className="w-full" /></div>;
-   if (currentStep === 5) {
+   if (currentStep === 6) {
   return (
     <ArraySection
       title="Language"
@@ -3063,10 +3277,10 @@ return;
     />
   );
 }
-    if (currentStep === 6) return <ArraySection title="Certification" items={memoryData.certifications} section="certifications" emptyItem={emptyCertification} addLabel="+ Add Certification" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Certification / Award Name" value={item.name} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "name", v)} /><Input placeholder="Issuer / Organization" value={item.issuer} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "issuer", v)} /><Input placeholder="Date" value={item.date} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "date", v)} className="md:col-span-2" /><Textarea rows={4} placeholder="Description or details..." value={item.description} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "description", v)} className="md:col-span-2" /></div>} />;
-    if (currentStep === 3) return <ArraySection title="Project" items={memoryData.projects} section="projects" emptyItem={emptyProject} addLabel="+ Add Project" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Project Name" value={item.name} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "name", v)} /><Input placeholder="Role / Your Contribution" value={item.role} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "role", v)} /><Input placeholder="Dates" value={item.dates} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "dates", v)} className="md:col-span-2" /><Textarea rows={5} placeholder="Describe the project, tools used, result, and impact..." value={item.description} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "description", v)} className="md:col-span-2" /></div>} />;
+    if (currentStep === 4) return <ArraySection title="Certification" items={memoryData.certifications} section="certifications" emptyItem={emptyCertification} addLabel="+ Add Certification" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Certification / Award Name" value={item.name} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "name", v)} /><Input placeholder="Issuer / Organization" value={item.issuer} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "issuer", v)} /><Input placeholder="Date" value={item.date} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "date", v)} className="md:col-span-2" /><Textarea rows={4} placeholder="Description or details..." value={item.description} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "description", v)} className="md:col-span-2" /></div>} />;
+    if (currentStep === 5) return <ArraySection title="Project" items={memoryData.projects} section="projects" emptyItem={emptyProject} addLabel="+ Add Project" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Project Name" value={item.name} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "name", v)} /><Input placeholder="Role / Your Contribution" value={item.role} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "role", v)} /><Input placeholder="Dates" value={item.dates} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "dates", v)} className="md:col-span-2" /><Textarea rows={5} placeholder="Describe the project, tools used, result, and impact..." value={item.description} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "description", v)} className="md:col-span-2" /></div>} />;
     if (currentStep === 7) return <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="Target Roles" value={memoryData.targetRoles} onChange={(v) => updateMemory("targetRoles", v)} /><Input placeholder="Target Industry" value={memoryData.targetIndustry} onChange={(v) => updateMemory("targetIndustry", v)} /><Input placeholder="Preferred Location" value={memoryData.targetLocation} onChange={(v) => updateMemory("targetLocation", v)} /><Input placeholder="Salary Expectation" value={memoryData.salaryExpectation} onChange={(v) => updateMemory("salaryExpectation", v)} /><Textarea rows={6} placeholder="Describe your short-term and long-term career goals..." value={memoryData.careerGoalSummary} onChange={(v) => updateMemory("careerGoalSummary", v)} className="md:col-span-2" /></div>;
-    return <div><div className="mt-6 rounded-2xl bg-blue-50 p-5"><h3 className="font-extrabold">Career Memory Review</h3><p className="mt-2 text-sm text-gray-600">Source: {memoryData.resumeSource === "uploaded" ? "Uploaded Resume" : "Built From Scratch"}</p>{memoryData.uploadedResumeName && <p className="mt-1 text-sm font-bold text-blue-700">Uploaded: {memoryData.uploadedResumeName}</p>}<p className="mt-3 text-sm font-semibold text-slate-600">Required sections: {requiredCount}/3 · Overall strength: {memoryStrength()}%</p></div>{renderFullResumePreview()}</div>;
+    return <div><div className="mt-6 rounded-2xl bg-blue-50 p-5"><h3 className="font-extrabold">Career Memory Review</h3><p className="mt-2 text-sm text-gray-600">Source: {memoryData.resumeSource === "uploaded" ? "Uploaded Resume" : "Built From Scratch"}</p>{memoryData.uploadedResumeName && <p className="mt-1 text-sm font-bold text-blue-700">Uploaded: {memoryData.uploadedResumeName}</p>}<p className="mt-3 text-sm font-semibold text-slate-600">Required sections: {requiredCount}/3 · Overall strength: {memoryStrength()}%</p></div>{renderManualTemplateReview()}</div>;
   }
 
   return (
@@ -3573,7 +3787,9 @@ return;
             <button
               type="button"
               onClick={handleSaveAndContinue}
-              className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white"
+              disabled={manualSaveDisabled}
+              title={manualSaveDisabled ? "Select a resume template above before finishing." : undefined}
+              className={`rounded-xl px-6 py-3 font-bold text-white ${manualSaveDisabled ? "cursor-not-allowed bg-slate-300" : "bg-blue-600"}`}
             >
               {currentStep === steps.length - 1
                 ? "Finish Memory"

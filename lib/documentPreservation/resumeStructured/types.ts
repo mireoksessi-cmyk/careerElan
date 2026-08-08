@@ -18,6 +18,17 @@
   never invented. See structuredValidator.ts.
 */
 
+/* The one real schemaVersion every ResumeStructuredModel in this codebase
+   is built with - both the real Phase 1/2 parser (buildStructuredResume.ts)
+   and the manual-entry bridge (manualResumeRuntimeMapper.ts) must import
+   this instead of each hardcoding their own literal, so the two can never
+   drift out of sync again (see the Phase 6I.6.8 postWriteBundleValidation
+   bug this constant was extracted to fix - career_profiles.schema_version
+   is set once at profile creation and never updated on later saves, so a
+   version saved with a different schemaVersion than the profile's existing
+   one always fails structural validation). */
+export const RESUME_STRUCTURED_SCHEMA_VERSION = "1.0.0";
+
 export type ResumeSlotKey =
   | "identity"
   | "professional_summary"

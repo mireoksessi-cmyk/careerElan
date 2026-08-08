@@ -32,7 +32,7 @@ import { normalizeBulletPresentation } from "./bulletPresentation";
 import { splitEmbeddedCanonicalSubsections } from "./embeddedSubsectionSplitter";
 import { detectMetricGrids } from "./metricGridExtractor";
 import { validateStructuredResume } from "./structuredValidator";
-import type { CustomResumeSection, ResumeSlotKey, ResumeStructuredModel, SourceTrace } from "./types";
+import { RESUME_STRUCTURED_SCHEMA_VERSION, type CustomResumeSection, type ResumeSlotKey, type ResumeStructuredModel, type SourceTrace } from "./types";
 
 function bodyBlocksOf(section: LosslessResumeSection): SemanticContentBlock[] {
   return section.blocks.filter((b) => b.blockType !== "heading");
@@ -149,7 +149,7 @@ function buildEmbeddedResidualSubsection(
 
 export function buildStructuredResume(document: LosslessResumeDocument): ResumeStructuredModel {
   const model: ResumeStructuredModel = {
-    schemaVersion: "1.0.0",
+    schemaVersion: RESUME_STRUCTURED_SCHEMA_VERSION,
     source: document.source,
     identity: undefined,
     professionalSummary: undefined,

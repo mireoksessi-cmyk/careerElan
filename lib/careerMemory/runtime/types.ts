@@ -53,6 +53,15 @@ export type RuntimeVersion = {
   reason: RuntimeVersionReason;
   createdAt: string;
   parentVersionId?: string;
+  /* career_resume_versions.source_document_id for THIS specific version row -
+     distinct from the runtime's own top-level `sourceDocuments` array, which
+     lists every document ever attached to the whole profile (Phase 6D's own
+     profile-wide history), not just the one (if any) behind this particular
+     version. Added to fix classifyPreviousVersionSource() incorrectly
+     reading "uploaded" forever once a profile had ANY real upload in its
+     history, even after a later version was purely manually entered - see
+     manualResumeRuntimeMapper.ts's own header comment on that function. */
+  sourceDocumentId?: string;
 };
 
 /*

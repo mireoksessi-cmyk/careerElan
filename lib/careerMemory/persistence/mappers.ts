@@ -659,6 +659,7 @@ export function careerProfileToCanonicalRuntime(bundle: CareerMemoryPersistenceB
     reason: bundle.latestVersion.reason,
     createdAt: bundle.latestVersion.created_at,
     parentVersionId: bundle.latestVersion.parent_version_id ?? undefined,
+    sourceDocumentId: bundle.latestVersion.source_document_id ?? undefined,
   };
 
   return {
