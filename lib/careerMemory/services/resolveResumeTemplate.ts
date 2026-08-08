@@ -166,3 +166,78 @@ export async function setResumeTemplatePreference(
 
   return { resumeId, templateId };
 }
+
+/*
+  Phase 6I.6.15 - the piece Phase 6I.6.14 deliberately left unwired: a
+  NEW Generate Package application never called resolveResumeTemplate()
+  at all, so an uploaded resume's own explicit template preference
+  silently never reached the generated package. The canonical dispatch
+  path (canonicalGenerateDispatchService.ts) instead always fell back
+  to a hardcoded "professional-ats" literal, since the Paste Job client
+  never sends a templateId in its POST body (server-resolved resume
+  selection - see app/paste-job/page.tsx's own comment on that).
+
+  Resolves the template id a NEW application should snapshot into
+  applications.selected_template_id, bound to the SAME selectedResume
+  identity (source + resumeId) that resolveSelectedResume() already
+  resolved for the application's CONTENT - never an independent lookup
+  that could disagree about which resume is active.
+
+  Priority:
+    1. explicitTemplateId, only if the caller intentionally provided
+       one (an actual override - e.g. the canary /canonical-generate-
+       package/generate route's own body.templateId; the Paste Job
+       flow never sets this).
+    2. Uploaded resume: resolveResumeTemplate()'s own resolution for
+       THAT resumeId, if it resolved to "canonical" - this already
+       implements resume-explicit -> profile-default fallback (see
+       that function's own header comment), so no separate profile
+       lookup is needed here for the uploaded case.
+       Manual/career_memory: career_profiles.default_template_id
+       directly - Manual owns no resumes row to have an explicit
+       per-resume preference on (Phase 6I.6.14's own boundary,
+       preserved unchanged).
+    3. FALLBACK_TEMPLATE_ID - the same "professional-ats" ultimate
+       default this logic previously hardcoded inline, kept only as a
+       last resort (selection-required / not-yet-imported / no profile
+       default at all) - never a silent substitute for a real
+       resume-level or profile-level preference that WAS resolvable.
+*/
+const FALLBACK_TEMPLATE_ID: TemplateId = "professional-ats";
+
+export async function resolveGenerationTemplateId(
+  repos: CanonicalRepositoryBundle,
+  client: SupabaseClient,
+  userId: string,
+  selectedResume: { source: "uploaded" | "career_memory"; resumeId: string | null },
+  explicitTemplateId?: string
+): Promise<TemplateId> {
+  if (explicitTemplateId) {
+    try {
+      return validateTemplateId(explicitTemplateId);
+    } catch {
+      // unknown/retired explicit id - fall through to the resolved
+      // resume/profile preference rather than hard-failing generation
+    }
+  }
+
+  if (selectedResume.source === "uploaded" && selectedResume.resumeId) {
+    try {
+      const resolution = await resolveResumeTemplate(repos, client, userId, selectedResume.resumeId);
+      if (resolution.kind === "canonical") return resolution.templateId;
+    } catch {
+      // ownership/not-found errors fall through to the ultimate default below
+    }
+    return FALLBACK_TEMPLATE_ID;
+  }
+
+  const profile = await repos.profiles.getByUserId(userId);
+  if (profile?.default_template_id) {
+    try {
+      return validateTemplateId(profile.default_template_id);
+    } catch {
+      // retired/invalid stored id - fall through
+    }
+  }
+  return FALLBACK_TEMPLATE_ID;
+}

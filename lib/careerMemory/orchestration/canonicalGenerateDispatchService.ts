@@ -32,6 +32,8 @@ import { buildCareerMemoryDraftText } from "../../resume-builder";
 import { GENERATE_PACKAGE_LIFETIME_LIMIT, isNetlifyProductionRuntime } from "../../config/packageQuota";
 import { resolveBackgroundFunctionSecret, resolveNamedBackgroundFunctionUrl } from "../../generatePackage/backgroundTarget";
 import { getFirstText, fallbackPackage, safeResumeResolutionMessage } from "../../generatePackage/shared";
+import { createCanonicalRepositories } from "../repositories/createRepositories";
+import { resolveGenerationTemplateId } from "../services/resolveResumeTemplate";
 import type { createClient } from "../../supabase-server";
 
 const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
@@ -140,11 +142,27 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
     inputCoverLetterText = getFirstText(memory?.cover_letter) || null;
   }
 
+  /*
+    Phase 6I.6.15 - bound to the SAME resolvedResume identity (source +
+    resumeId) already resolved above for CONTENT, not an independent
+    lookup - see resolveGenerationTemplateId()'s own header comment for
+    the full priority chain (resume-explicit -> profile-default ->
+    ultimate fallback for uploaded resumes; profile-default only for
+    Manual/career_memory selections, which own no resumes row).
+  */
+  const resolvedTemplateId = await resolveGenerationTemplateId(
+    createCanonicalRepositories(supabase),
+    supabase,
+    userId,
+    { source: resolvedResume.source, resumeId: resolvedResume.resumeId },
+    typeof body.templateId === "string" ? body.templateId : undefined
+  );
+
   const canonicalInputManifest = {
     jobDescriptionText: jobText,
     jobAnalysisSummary: getFirstText((analysis as { summary?: unknown }).summary) || "",
     targetRole: typeof body.targetRole === "string" ? body.targetRole : undefined,
-    templateId: typeof body.templateId === "string" && body.templateId.length > 0 ? body.templateId : "professional-ats",
+    templateId: resolvedTemplateId,
     paperSize: typeof body.paperSize === "string" ? body.paperSize : "letter",
     density: typeof body.density === "string" ? body.density : "comfortable",
     locale: typeof body.locale === "string" ? body.locale : "en",
