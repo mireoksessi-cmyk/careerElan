@@ -286,6 +286,120 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   }, [user]);
 
   /*
+    Phase 6I.4 - the inline "choose your resume design" step on the
+    Career Memory completion screen itself (spec: the 4 cards render
+    right under "Resume analyzed successfully," not a Dashboard-only
+    follow-up). "not-applicable" covers every case the picker must NOT
+    appear: the canonical feature flags are off (matches the config
+    check every other canonical UI surface already uses - keeps
+    Production, where these flags are off by default, on the exact
+    pre-6I.4 behavior), or a default_template_id is already set
+    (returning user - never force re-selection), or nothing canonical
+    applies (legacy-only). "import-error"/"save-error" keep the
+    Continue buttons disabled per spec section 4 ("If persistence
+    fails: keep buttons disabled") - there is deliberately no
+    client-only bypass.
+  */
+  const [inlineTemplateStatus, setInlineTemplateStatus] = useState<"checking" | "not-applicable" | "importing" | "import-error" | "selecting" | "saving" | "ready">("checking");
+  const [inlineTemplates, setInlineTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
+  const [inlineSelectedTemplateId, setInlineSelectedTemplateId] = useState<string | null>(null);
+  const [inlineTemplateError, setInlineTemplateError] = useState<string | null>(null);
+
+  async function loadInlineTemplateList() {
+    const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+    const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+    setInlineTemplates(templatesData.templates ?? []);
+  }
+
+  /*
+    Called once, right after analysis succeeds (see
+    applyResumeAnalysisResult's two call sites) - resumeId is the row
+    just created/analyzed in THIS upload. Never runs canonical import
+    for a resumeId that isn't the one just analyzed, and never runs it
+    twice for the same resume (import-resume's own idempotent-replay
+    behavior from Phase 6I.1 makes a duplicate call harmless anyway,
+    but this function is only invoked from the two analysis-success
+    call sites, so a duplicate call never actually happens in practice).
+  */
+  async function runInlineCanonicalFlow(resumeId: string) {
+    setInlineTemplateStatus("checking");
+    setInlineTemplateError(null);
+    try {
+      const configRes = await fetch("/api/internal/canonical-generate-package/config");
+      const configData = configRes.ok ? await configRes.json() : { generateEnabled: false, templateSelectorEnabled: false };
+      if (!configData.generateEnabled || !configData.templateSelectorEnabled) {
+        setInlineTemplateStatus("not-applicable");
+        return;
+      }
+
+      const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
+      const prefData = prefRes.ok ? await prefRes.json() : { defaultTemplateId: null };
+      if (prefData.defaultTemplateId) {
+        // Spec section 8: an existing default is never re-selected for a new upload.
+        setInlineTemplateStatus("not-applicable");
+        return;
+      }
+
+      const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
+      if (profileRes.status === 404) {
+        // No canonical profile yet - this IS the resume that should become one.
+        setInlineTemplateStatus("importing");
+        const importRes = await fetch("/api/internal/canonical-career-memory/import-resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resumeId }),
+        });
+        if (!importRes.ok) {
+          const importData = await importRes.json().catch(() => null);
+          setInlineTemplateError(importData?.error?.message || "Could not prepare this resume for canonical templates.");
+          setInlineTemplateStatus("import-error");
+          return;
+        }
+      }
+      // Either the import above just succeeded, or a canonical profile
+      // already existed with no default yet (spec section 8's other
+      // branch: "NULL default forces picker") - either way, show the 4
+      // templates now.
+      await loadInlineTemplateList();
+      setInlineTemplateStatus("selecting");
+    } catch {
+      setInlineTemplateError("Could not prepare this resume for canonical templates.");
+      setInlineTemplateStatus("import-error");
+    }
+  }
+
+  async function selectInlineTemplate(templateId: string) {
+    setInlineTemplateStatus("saving");
+    setInlineTemplateError(null);
+    try {
+      const res = await fetch("/api/internal/canonical-career-memory/template-preference", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setInlineTemplateError(data?.error?.message || "Could not save your template selection.");
+        setInlineTemplateStatus("selecting");
+        return;
+      }
+      setInlineSelectedTemplateId(data.defaultTemplateId);
+      setInlineTemplateStatus("ready");
+      // Keep the existing Phase 6I.3 Career Memory preview state in
+      // sync immediately, so "Continue to Preview" (renderFullResumePreview)
+      // shows the just-selected canonical template without waiting for
+      // its own mount-only effect to re-run.
+      setCanonicalPreviewTemplateId(data.defaultTemplateId);
+      setCanonicalPreviewStatus("canonical");
+    } catch {
+      setInlineTemplateError("Could not save your template selection.");
+      setInlineTemplateStatus("selecting");
+    }
+  }
+
+  const inlineTemplateBlocksContinue = inlineTemplateStatus !== "not-applicable" && inlineTemplateStatus !== "ready";
+
+  /*
     Revokes the previous object URL whenever a new file is uploaded (the
     cleanup below runs before the effect re-fires) and on unmount - object
     URLs are otherwise never released and leak for the life of the tab.
@@ -1485,6 +1599,7 @@ return;
     // 동일한 성공 처리.
     if (analyzeResponse.ok && analyzeResult.success === true && analyzeResult.data) {
       applyResumeAnalysisResult(file, analyzeResult.data);
+      runInlineCanonicalFlow(insertedResumeId);
       return;
     }
 
@@ -1634,6 +1749,7 @@ return;
       if (statusResult.status === "succeeded") {
         resumePollTimeoutRef.current = null;
         applyResumeAnalysisResult(file, statusResult.data);
+        runInlineCanonicalFlow(resumeId);
         return;
       }
 
@@ -3041,6 +3157,43 @@ return;
           />
         )}
 
+        {/*
+          Phase 6I.4 - the inline "Choose your resume design" step, right
+          under "Resume analyzed successfully" on this SAME screen -
+          replaces the old requirement to visit Dashboard and click
+          "Prepare this resume for Canonical Templates" separately for a
+          normal new upload. Only appears once analysis has actually
+          finished (importStage === "parsed") and inlineTemplateStatus
+          says it's actually needed.
+        */}
+        {importStage === "parsed" && inlineTemplateStatus !== "not-applicable" && inlineTemplateStatus !== "checking" && (
+          <div className="mt-6 rounded-2xl border border-blue-100 bg-white p-6">
+            <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose your resume design</p>
+            <p className="mt-1 text-sm text-slate-500">Select exactly one template. This becomes your default design everywhere until you change it.</p>
+
+            {inlineTemplateStatus === "importing" && (
+              <p className="mt-4 text-sm font-semibold text-slate-500">Preparing your resume for canonical templates...</p>
+            )}
+
+            {inlineTemplateStatus === "import-error" && (
+              <p className="mt-4 text-sm font-semibold text-red-600">{inlineTemplateError}</p>
+            )}
+
+            {(inlineTemplateStatus === "selecting" || inlineTemplateStatus === "saving" || inlineTemplateStatus === "ready") && (
+              <div className="mt-4">
+                {inlineTemplateError && <p className="mb-3 text-sm font-semibold text-red-600">{inlineTemplateError}</p>}
+                <CanonicalTemplatePicker
+                  templates={inlineTemplates as any}
+                  selectedTemplateId={inlineSelectedTemplateId as any}
+                  onSelect={(templateId) => selectInlineTemplate(templateId)}
+                  disabled={inlineTemplateStatus === "saving"}
+                  livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {importMessage && (
           <p className="mt-5 rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">
             {importMessage}
@@ -3074,9 +3227,9 @@ return;
           <button
             type="button"
             onClick={continueToImportPreview}
-            disabled={importStage !== "parsed"}
+            disabled={importStage !== "parsed" || inlineTemplateBlocksContinue}
             className={`rounded-xl border px-6 py-3 font-bold ${
-              importStage === "parsed"
+              importStage === "parsed" && !inlineTemplateBlocksContinue
                 ? "border-blue-600 text-blue-600"
                 : "cursor-not-allowed border-slate-200 text-slate-400"
             }`}
@@ -3087,7 +3240,8 @@ return;
           <button
             type="button"
             onClick={continueToDashboard}
-            className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white"
+            disabled={inlineTemplateBlocksContinue}
+            className={`rounded-xl px-6 py-3 font-bold text-white ${inlineTemplateBlocksContinue ? "cursor-not-allowed bg-slate-300" : "bg-blue-600"}`}
           >
             Continue to Dashboard
           </button>
