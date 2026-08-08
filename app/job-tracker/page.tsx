@@ -50,6 +50,8 @@ const rejected = applications.filter(
   const [search, setSearch] = useState("");
 const [filterStatus, setFilterStatus] =
   useState("All");
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
 
   useEffect(() => {
   if (!user) return;
@@ -328,6 +330,68 @@ async function deleteApplication() {
   loadApplications();
 }
 
+/*
+  Phase 6I.6.10 - Delete All. Deliberately the SAME operation as
+  deleteApplication() above, just without the `.eq("id", ...)` filter -
+  "Delete All = individual delete semantics x every application this
+  user owns" (this round's own explicit invariant). A single bulk
+  DELETE is inherently one atomic Postgres statement (no partial-failure
+  risk to guard against), reuses the exact same RLS-enforced ownership
+  boundary (`application_delete` policy: auth.uid() = user_id) as the
+  individual delete, and - because `applications` carries no outbound
+  FK that CASCADEs into any other table (career_tailored_resumes.
+  application_id is the only inbound FK, ON DELETE SET NULL, not
+  CASCADE - confirmed via \d applications) - produces byte-for-byte the
+  same downstream effect on every other table as calling
+  deleteApplication() once per row would. No RPC/migration needed.
+
+  Unlike deleteApplication(), an empty `data` result here is NOT an
+  error - deleteApplication() targets exactly one id that is expected
+  to exist, so zero rows affected means something is wrong; Delete All
+  has no such expectation (a second click after everything is already
+  gone, or a genuine zero-application account, are both legitimate,
+  successful "nothing left to delete" outcomes - Phase 6I.6.10's own
+  idempotency requirement).
+*/
+async function deleteAllApplications() {
+  if (!user || deletingAll) return;
+  if (applications.length === 0) {
+    setShowDeleteAllModal(false);
+    return;
+  }
+
+  setDeletingAll(true);
+
+  const { error } = await supabase
+    .from("applications")
+    .delete()
+    .eq("user_id", user.id)
+    .select("id");
+
+  setDeletingAll(false);
+
+  if (error) {
+    alert("Unable to delete all applications. Please try again.");
+    return;
+  }
+
+  setShowDeleteAllModal(false);
+  setSelectedApplication(null);
+
+  try {
+    window.localStorage.setItem(
+      "careerelan:applications-changed",
+      String(Date.now())
+    );
+  } catch {
+    // Best-effort only - localStorage can be unavailable (private browsing).
+  }
+
+  await loadApplications();
+
+  alert("All applications deleted.");
+}
+
 async function downloadPackage(type: "docx" | "pdf") {
   if (!selectedApplication) return;
 
@@ -474,6 +538,8 @@ return (
   setNotes={setNotes}
   setStatus={setStatus}
   setInterviewDate={setInterviewDate}
+  onDeleteAllClick={() => setShowDeleteAllModal(true)}
+  deletingAll={deletingAll}
 />
 
 </div>
@@ -517,6 +583,44 @@ return (
       </section>
 
     </div>
+
+    {showDeleteAllModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+
+        <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
+
+          <h2 className="text-2xl font-bold">
+            Delete all applications?
+          </h2>
+
+          <p className="mt-3 text-sm text-gray-600">
+            This will permanently delete all applications and generated packages in your Job Tracker. Your Career Memory and saved resumes will not be deleted.
+          </p>
+
+          <div className="mt-8 flex justify-end gap-3">
+
+            <button
+              onClick={() => setShowDeleteAllModal(false)}
+              disabled={deletingAll}
+              className="rounded-xl border px-5 py-2 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+
+            <button
+              disabled={deletingAll}
+              onClick={deleteAllApplications}
+              className="rounded-xl bg-red-600 px-5 py-2 font-bold text-white disabled:opacity-40"
+            >
+              {deletingAll ? "Deleting…" : "Delete All Applications"}
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+    )}
 
   </main>
 );

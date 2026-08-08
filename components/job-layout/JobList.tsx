@@ -11,6 +11,21 @@ type Props = {
   setNotes: any;
   setStatus: any;
   setInterviewDate: any;
+
+  /*
+    Phase 6I.6.10 - "Delete All" only opens the confirmation modal;
+    JobList never performs the deletion itself, matching this component's
+    existing presentational-only convention (every other mutation -
+    saveNotes/saveStatus/deleteApplication/etc. - already lives in
+    app/job-tracker/page.tsx, never in a child component). `applications`
+    here is always the FULL, unfiltered array passed straight from page
+    state (this component applies its own .filter() below only for
+    DISPLAY) - so disabling on `applications.length === 0` and the actual
+    bulk delete both correctly ignore the current search/status filter,
+    per this round's own "filtered view must still delete all" invariant.
+  */
+  onDeleteAllClick: () => void;
+  deletingAll: boolean;
 };
 
 export default function JobList({
@@ -21,19 +36,36 @@ export default function JobList({
   setNotes,
   setStatus,
   setInterviewDate,
+  onDeleteAllClick,
+  deletingAll,
 }: Props) {
   return (
     <div className="rounded-3xl border border-blue-100 bg-white shadow-sm">
 
       <div className="border-b px-6 py-5">
 
-        <h2 className="text-xl font-bold">
-          Applications
-        </h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
 
-        <p className="mt-1 text-sm text-black">
-          Select a job to view details.
-        </p>
+          <div>
+            <h2 className="text-xl font-bold">
+              Applications
+            </h2>
+
+            <p className="mt-1 text-sm text-black">
+              Select a job to view details.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onDeleteAllClick}
+            disabled={applications.length === 0 || deletingAll}
+            className="shrink-0 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {deletingAll ? "Deleting…" : "Delete All"}
+          </button>
+
+        </div>
 
       </div>
 
