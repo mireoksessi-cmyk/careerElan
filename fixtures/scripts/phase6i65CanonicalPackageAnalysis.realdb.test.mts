@@ -176,6 +176,11 @@ function testValidatorShapeChecks() {
       gaps: ["b"],
       keyChanges: [{ section: "Summary", original: "x", revised: "y", reason: "z", evidence: "w" }],
     },
+    // Phase 6I.6.6 - coverLetterText/emailDraftText are now required top-level
+    // fields on every valid canonical AI response (see canonicalTailoringService.ts's
+    // own validation block), so a "valid shape" fixture must include them.
+    coverLetterText: "Dear Hiring Manager, ...",
+    emailDraftText: "Subject: Application ...",
   };
   const validResult = validateAiTailoringResponse(validRaw, resume);
   checkTrue("§3: valid packageAnalysis shape is accepted", validResult.valid);
