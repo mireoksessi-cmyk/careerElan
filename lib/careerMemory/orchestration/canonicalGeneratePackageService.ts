@@ -19,6 +19,7 @@
 */
 import OpenAI, { APIConnectionTimeoutError } from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveCanonicalResumeContext } from "../services/resolveCanonicalResumeContext";
 import { getCanonicalRuntimeViaServiceRole } from "./canonicalMemoryBundleFetch";
 import { applyOverlay } from "../runtime/overlayRuntime";
 import { validateAiTailoringResponse } from "./canonicalTailoringService";
@@ -80,23 +81,54 @@ async function callTailoringOpenAi(promptText: string): Promise<string> {
 }
 
 export async function generateCanonicalPackage(client_: SupabaseClient, input: CanonicalGeneratePackageInput): Promise<CanonicalGeneratePackageResult> {
-  let lookup;
+  /*
+    Phase 6I.6 - resolve the resume to generate from via
+    resolveCanonicalResumeContext() instead of always reaching for
+    "profile's globally-latest version" - honors
+    career_memory.selected_resume_id when the user has made an explicit
+    selection. "not-canonical" (the selection is the career_memory-
+    authored resume, which structurally can never have a canonical
+    version - see CanonicalResumeImportService's own applicability
+    boundary) and "legacy-only" (no selection has ever been made, or no
+    canonical profile exists at all) both fall back to the exact same
+    "profile's latest version" resolution this function used
+    unconditionally before this round - a disclosed, intentional
+    limitation, not a silent regression: those two cases have no
+    canonical-eligible identity to honor, so falling back to latest is
+    the best available proxy rather than an error a user could not act
+    on. A genuinely selected-but-unresolvable resume
+    (SELECTED_RESUME_UNAVAILABLE) is never silently substituted - it
+    propagates as a thrown error, same as every other domain error in
+    this function.
+  */
+  let resolved;
   try {
-    lookup = await getCanonicalRuntimeViaServiceRole(client_, input.userId);
+    resolved = await resolveCanonicalResumeContext({ mode: "service-role", client: client_, userId: input.userId });
   } catch (error) {
     throw new CanonicalDeserializationError(error instanceof Error ? error.message.slice(0, 200) : "unknown deserialization failure");
   }
-  if (!lookup.found) {
-    if (lookup.reason === "no_profile") throw new CanonicalProfileUnavailableError("no canonical profile exists for this user");
-    throw new CanonicalVersionUnavailableError("no resume version exists for this profile");
+
+  if (resolved.status === "not-canonical" || resolved.status === "legacy-only") {
+    let lookup;
+    try {
+      lookup = await getCanonicalRuntimeViaServiceRole(client_, input.userId);
+    } catch (error) {
+      throw new CanonicalDeserializationError(error instanceof Error ? error.message.slice(0, 200) : "unknown deserialization failure");
+    }
+    if (!lookup.found) {
+      if (lookup.reason === "no_profile") throw new CanonicalProfileUnavailableError("no canonical profile exists for this user");
+      throw new CanonicalVersionUnavailableError("no resume version exists for this profile");
+    }
+    if (!lookup.runtime.version?.id) throw new CanonicalVersionUnavailableError("no resume version exists for this profile");
+    resolved = { status: "resolved", source: "profile-latest", profileId: lookup.profile.id, versionId: lookup.runtime.version.id, sourceDocumentId: null, runtime: lookup.runtime } as const;
   }
-  const { profile, runtime } = lookup;
-  if (!runtime.version?.id) {
-    throw new CanonicalVersionUnavailableError("no resume version exists for this profile");
+  if (!resolved.runtime) {
+    throw new CanonicalDeserializationError("resolved canonical resume context did not include a runtime");
   }
 
-  const canonicalProfileId = profile.id;
-  const canonicalResumeVersionId = runtime.version.id;
+  const canonicalProfileId = resolved.profileId;
+  const canonicalResumeVersionId = resolved.versionId;
+  const runtime = resolved.runtime;
 
   // --- AI tailoring call: raw JSON -> deterministic validator, 1 repair retry ---
   const prompt = buildCanonicalTailoringPrompt({ resume: runtime.resume, jobDescriptionText: input.jobDescriptionText, jobAnalysisSummary: input.jobAnalysisSummary, targetRole: input.targetRole });

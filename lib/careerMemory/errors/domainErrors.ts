@@ -34,7 +34,17 @@ export type DomainErrorCode =
   | "INVALID_TEMPLATE_ID"
   | "CANONICAL_PROFILE_UNAVAILABLE"
   | "TEMPLATE_PREFERENCE_PERSIST_FAILED"
-  | "TEMPLATE_PREVIEW_FAILED";
+  | "TEMPLATE_PREVIEW_FAILED"
+  /* Phase 6I.6 addition - Selected Resume <-> Canonical Version Binding.
+     Distinct from CanonicalVersionUnavailableError (NOT_FOUND): that one
+     means "no canonical version exists for this profile at all", this one
+     means "a resume IS selected, but it cannot be resolved to a canonical
+     version right now" (deleted since selection, foreign, or genuinely
+     never imported) - resolveCanonicalResumeContext() must never silently
+     substitute "profile's latest version" for this case (round spec's own
+     explicit prohibition), so it needs its own code the caller can branch
+     on distinctly from a generic 404. */
+  | "SELECTED_RESUME_UNAVAILABLE";
 
 export abstract class DomainError extends Error {
   abstract readonly code: DomainErrorCode;
@@ -244,6 +254,21 @@ export class TemplatePreviewFailedError extends DomainError {
   readonly code = "TEMPLATE_PREVIEW_FAILED" as const;
   constructor(detail: string) {
     super(`Template preview failed: ${detail}`);
+  }
+}
+
+/*
+  Phase 6I.6 - see the DomainErrorCode union above for why this is a
+  distinct code. `reason` is included on the error (not just the message)
+  so a caller can build UI-specific copy (e.g. "re-select a resume" vs
+  "re-upload it") without string-matching the message.
+*/
+export class SelectedResumeUnavailableError extends DomainError {
+  readonly code = "SELECTED_RESUME_UNAVAILABLE" as const;
+  readonly reason: "resume-deleted" | "resume-not-owned" | "not-yet-importable";
+  constructor(reason: SelectedResumeUnavailableError["reason"], message: string) {
+    super(message);
+    this.reason = reason;
   }
 }
 

@@ -29,6 +29,8 @@ const STATUS_BY_CODE: Record<DomainErrorCode, number> = {
   CANONICAL_PROFILE_UNAVAILABLE: 404,
   TEMPLATE_PREFERENCE_PERSIST_FAILED: 500,
   TEMPLATE_PREVIEW_FAILED: 500,
+  /* Phase 6I.6 addition - Selected Resume <-> Canonical Version Binding. */
+  SELECTED_RESUME_UNAVAILABLE: 409,
 };
 
 export function errorResponse(error: unknown): NextResponse {

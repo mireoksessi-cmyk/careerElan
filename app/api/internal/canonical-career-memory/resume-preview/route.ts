@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import { withCanonicalAuth, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { ValidationError, CanonicalProfileUnavailableForTemplateError, CanonicalVersionUnavailableError, TemplateRenderingError } from "@/lib/careerMemory/errors/domainErrors";
 import { resolveCanonicalTemplateId } from "@/lib/careerMemory/orchestration/canonicalRenderService";
+import { resolveCanonicalResumeContext, loadRuntimeForResolvedVersion } from "@/lib/careerMemory/services/resolveCanonicalResumeContext";
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
 import { renderTemplateFromRuntime } from "@/lib/resumeTemplates/engine/renderTemplate";
 import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/types";
@@ -57,6 +58,23 @@ export function extractFirstPageDocument(fullHtml: string): string {
   called directly, mirroring how /preview itself bypasses
   canonicalRenderService's own upload+RPC steps for the same reason
   (see that route's own header comment).
+
+  Phase 6I.6 - resolves the resume via resolveCanonicalResumeContext()
+  instead of always calling getCanonicalRuntime(userId) (= profile's
+  globally-latest version regardless of what career_memory.selected_
+  resume_id says - the exact gap this round's audit confirmed here).
+  "not-canonical" (selection is the career_memory-authored resume,
+  which can never have a canonical version) and "legacy-only" (no
+  selection ever made, or no canonical profile at all) both fall back
+  to the same "profile's latest version" this route used
+  unconditionally before this round - a disclosed limitation, not a
+  regression: with no canonical-eligible identity to honor, latest is
+  the best available proxy, and changing that would require broader
+  callers (Career Memory/Paste Job/Dashboard) to handle a distinct
+  "no canonical preview available" UI state, out of scope for this
+  route-level fix. A genuinely selected-but-unresolvable resume
+  (SELECTED_RESUME_UNAVAILABLE) is never silently substituted - it
+  propagates as a thrown 409, same as every other domain error here.
 */
 function isValidPaperSize(value: unknown): value is PaperSize {
   return value === "letter" || value === "a4";
@@ -98,13 +116,15 @@ export function makeHandleResumePreview(request: Request) {
 
     const templateId = resolveCanonicalTemplateId(rawTemplateId);
 
-    const memoryService = new CanonicalCareerMemoryService(ctx.repos);
-    const runtime = await memoryService.getCanonicalRuntime(ctx.userId);
-    if (!runtime) {
-      throw new CanonicalProfileUnavailableForTemplateError();
-    }
-    if (!runtime.version?.id) {
-      throw new CanonicalVersionUnavailableError("No canonical resume version exists for this profile.");
+    const resolved = await resolveCanonicalResumeContext({ mode: "session", repos: ctx.repos, client: ctx.client, userId: ctx.userId });
+    let runtime;
+    if (resolved.status === "not-canonical" || resolved.status === "legacy-only") {
+      const memoryService = new CanonicalCareerMemoryService(ctx.repos);
+      runtime = await memoryService.getCanonicalRuntime(ctx.userId);
+      if (!runtime) throw new CanonicalProfileUnavailableForTemplateError();
+      if (!runtime.version?.id) throw new CanonicalVersionUnavailableError("No canonical resume version exists for this profile.");
+    } else {
+      runtime = resolved.runtime ?? (await loadRuntimeForResolvedVersion(ctx.repos, resolved.versionId));
     }
 
     const renderOptions = { templateId, useTailored: false as const, paperSize: rawPaperSize, density: rawDensity, locale, generatedAt: new Date(0).toISOString() };
