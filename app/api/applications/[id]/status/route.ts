@@ -122,14 +122,27 @@ export async function GET(
         /*
           Phase 6I.6.5 - same ai_insight column, same normalized
           PackageAnalysis shape legacy's own branch below returns as
-          `packageAnalysis: row.ai_insight` - deliberately NOT
-          reintroducing resume/coverLetter/emailDraft here (canonical
-          obtains those via the rendered-document/resume-preview path,
-          not this text-trio field, per this branch's own header
-          comment above). Older canonical rows generated before this
-          phase simply have ai_insight = null here, same as before.
+          `packageAnalysis: row.ai_insight`.
         */
         packageAnalysis: row.ai_insight,
+        /*
+          Phase 6I.6.6 - same cover_letter_text/email_draft columns
+          legacy's own branch below returns, now also written by
+          canonical (see canonicalGenerationWorker.ts/the widened
+          complete_canonical_generate_worker RPC). Deliberately still
+          NOT returning `resume` here - the tailored resume itself stays
+          on the rendered-document/canonical-preview path, only these
+          two free-text application documents are returned as plain
+          strings, matching legacy's own field names exactly so the
+          client's existing coverLetter/emailDraft tabs and JobDetail's
+          rendering work unchanged regardless of engine. Older canonical
+          rows generated before this phase simply have these columns
+          null here, same as ai_insight was before Phase 6I.6.5.
+        */
+        coverLetter: row.cover_letter_text
+          ? stripCoverLetterContactBlock(row.cover_letter_text)
+          : row.cover_letter_text,
+        emailDraft: row.email_draft,
         ...jobContext,
         ...progressInfo,
       });

@@ -24,7 +24,9 @@
     from the existing tailored resume row) - never calls /generate,
     never touches AI, never consumes generate-package quota.
 */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useIframeFitScale } from "../shared/useIframeFitScale";
+import { PAPER_DIMENSIONS } from "../../lib/resumeTemplates/shared/paperSizes";
 
 const TEMPLATES: Array<{ id: string; name: string; description: string; atsLevel: string }> = [
   { id: "professional-ats", name: "Professional ATS", description: "Clean single-column layout tuned for applicant tracking systems.", atsLevel: "High ATS compatibility" },
@@ -45,6 +47,9 @@ export default function CanonicalTemplateSelector({ applicationId }: { applicati
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const { scale, nativeHeight, scaledHeight, recompute } = useIframeFitScale(containerRef, iframeRef, PAPER_DIMENSIONS.letter.widthPx);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +118,27 @@ export default function CanonicalTemplateSelector({ applicationId }: { applicati
     [applicationId]
   );
 
+  /*
+    Phase 6I.6.6 - auto-load the resume-tab's ONLY preview surface as
+    soon as a canonical status resolves, instead of leaving previewHtml
+    null until the user manually clicks a template card. Round spec §3:
+    "Do not show empty tabs after successful package generation" applies
+    here too - with the legacy resumePdfUrl/A4Preview duplicate removed
+    from app/paste-job/page.tsx's resume tab (see that file's own Phase
+    6I.6.6 comment), this component is now the sole resume preview, so
+    it must render content on its own, not only after a click. Guarded
+    by applicationId so a later analyzed-a-new-job cycle (a fresh
+    applicationId) re-triggers exactly once, never re-fetching on every
+    unrelated re-render for the SAME application.
+  */
+  const autoLoadedApplicationIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!status || !applicationId || !activeTemplateId) return;
+    if (autoLoadedApplicationIdRef.current === applicationId) return;
+    autoLoadedApplicationIdRef.current = applicationId;
+    void handleSelectTemplate(activeTemplateId);
+  }, [status, applicationId, activeTemplateId, handleSelectTemplate]);
+
   const handleDownload = useCallback(
     async (format: "pdf" | "docx") => {
       if (!applicationId || !activeTemplateId) return;
@@ -142,7 +168,7 @@ export default function CanonicalTemplateSelector({ applicationId }: { applicati
   return (
     <div className="mt-4 rounded-2xl border border-purple-100 bg-purple-50/40 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-sm font-bold text-purple-800">Canonical Templates (internal preview)</h4>
+        <h4 className="text-sm font-bold text-purple-800">Resume Template</h4>
         <div className="flex gap-2">
           <button onClick={() => handleDownload("docx")} disabled={!activeTemplateId} className="rounded-lg border border-purple-200 bg-white px-3 py-1 text-[11px] font-bold text-purple-700 hover:bg-purple-50 disabled:opacity-50">
             Download DOCX
@@ -172,8 +198,37 @@ export default function CanonicalTemplateSelector({ applicationId }: { applicati
       {error ? <p className="mt-2 text-[11px] font-semibold text-red-600">{error}</p> : null}
 
       {previewHtml ? (
-        <div className="mt-3 max-h-[480px] overflow-auto rounded-xl border border-purple-100 bg-white p-2">
-          <iframe title="Canonical template preview" srcDoc={previewHtml} className="h-[440px] w-full border-0" sandbox="" />
+        /*
+          Phase 6I.6.6 (round spec §12/§15) - this is now the resume
+          tab's ONLY preview surface (see app/paste-job/page.tsx's own
+          Phase 6I.6.6 comment removing the legacy duplicate below it),
+          so it gets a materially larger "Fit Page" frame instead of the
+          old 480px "internal preview" widget size. useIframeFitScale
+          shrinks the iframe (never enlarges past 100%, matching
+          A4Preview/A4DocumentPreview's own established convention) so
+          the FULL first page - and any subsequent pages via scroll -
+          is visible without horizontal clipping, while the actual
+          rendered PDF/DOCX and its template CSS stay completely
+          unchanged (only this container's own scale/height responds to
+          available width).
+        */
+        <div ref={containerRef} className="mt-3 max-h-[1400px] overflow-auto rounded-xl border border-purple-100 bg-white p-2">
+          <div style={{ height: scaledHeight ?? PAPER_DIMENSIONS.letter.heightPx * scale }}>
+            <iframe
+              ref={iframeRef}
+              title="Canonical template preview"
+              srcDoc={previewHtml}
+              onLoad={recompute}
+              sandbox="allow-same-origin"
+              style={{
+                width: PAPER_DIMENSIONS.letter.widthPx,
+                height: nativeHeight ?? PAPER_DIMENSIONS.letter.heightPx,
+                border: 0,
+                transform: `scale(${scale})`,
+                transformOrigin: "top left",
+              }}
+            />
+          </div>
         </div>
       ) : null}
     </div>

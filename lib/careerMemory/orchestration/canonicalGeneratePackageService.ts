@@ -47,6 +47,16 @@ export type CanonicalGeneratePackageInput = {
   jobDescriptionText: string;
   jobAnalysisSummary: string;
   targetRole?: string;
+  /*
+    Phase 6I.6.6 - company/existingCoverLetterText feed the SAME AI
+    call's cover-letter/email prompt section (canonicalTailoringPrompt.ts),
+    mirroring legacy's buildCoverLetterEmailPrompt({company,
+    existingCoverLetter, ...}). Both optional/absent-safe: an unknown
+    company or no prior cover letter to use as a style reference are
+    normal, valid states, not errors.
+  */
+  company?: string;
+  existingCoverLetterText?: string;
   templateId: string;
   paperSize: PaperSize;
   density: TemplateDensity;
@@ -69,6 +79,15 @@ export type CanonicalGeneratePackageResult = {
     may legitimately be an empty array if nothing survived grounding.
   */
   packageAnalysis: PackageAnalysis;
+  /*
+    Phase 6I.6.6 - the SAME AI call's cover letter/email draft, reusing
+    applications.cover_letter_text/email_draft (the exact columns
+    legacy Generate Package already writes) rather than new columns.
+    Always a non-empty string - validated required by
+    canonicalTailoringService.ts, same treatment as packageAnalysis.
+  */
+  coverLetterText: string;
+  emailDraftText: string;
 };
 
 function extractJsonLoose(text: string): unknown {
@@ -220,7 +239,14 @@ export async function generateCanonicalPackage(client_: SupabaseClient, input: C
   const runtime = resolved.runtime;
 
   // --- AI tailoring call: raw JSON -> deterministic validator, 1 repair retry ---
-  const prompt = buildCanonicalTailoringPrompt({ resume: runtime.resume, jobDescriptionText: input.jobDescriptionText, jobAnalysisSummary: input.jobAnalysisSummary, targetRole: input.targetRole });
+  const prompt = buildCanonicalTailoringPrompt({
+    resume: runtime.resume,
+    jobDescriptionText: input.jobDescriptionText,
+    jobAnalysisSummary: input.jobAnalysisSummary,
+    targetRole: input.targetRole,
+    company: input.company,
+    existingCoverLetterText: input.existingCoverLetterText,
+  });
 
   let validated: ReturnType<typeof validateAiTailoringResponse> | null = null;
   for (let attempt = 1; attempt <= MAX_TAILORING_ATTEMPTS; attempt++) {
@@ -311,5 +337,7 @@ export async function generateCanonicalPackage(client_: SupabaseClient, input: C
     overlayRejections: applied.rejections.map((r) => `${r.entryId ?? "summary"}: ${r.reason}`),
     render,
     packageAnalysis,
+    coverLetterText: validated.coverLetterText,
+    emailDraftText: validated.emailDraftText,
   };
 }

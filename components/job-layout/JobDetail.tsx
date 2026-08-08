@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import A4Preview from "@/app/job-tracker/A4Preview";
 import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
 import ApplicationTemplateSwitcher from "@/components/canonicalGeneratePackage/ApplicationTemplateSwitcher";
+import { useIframeFitScale } from "@/components/shared/useIframeFitScale";
+import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
 
 type Props = {
   selectedApplication: any;
@@ -107,6 +109,17 @@ export default function JobDetail({
   */
   const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"idle" | "loading" | "ready" | "not-applicable" | "error">("idle");
   const [canonicalPreviewHtml, setCanonicalPreviewHtml] = useState<string | null>(null);
+  /*
+    Phase 6I.6.6 (round spec §15) - same shared "Fit Page" scaling as
+    Paste Job's CanonicalTemplateSelector, so the now-wider (xl:col-span-6,
+    up from 5) resume column actually grows the visible page instead of
+    the fixed-pixel-width srcDoc page just sitting at native 816px inside
+    a wider card. See useIframeFitScale.ts's own header comment for why
+    this can't be a per-call-site transform.
+  */
+  const canonicalPreviewContainerRef = useRef<HTMLDivElement | null>(null);
+  const canonicalPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const { scale: canonicalPreviewScale, nativeHeight: canonicalPreviewNativeHeight, scaledHeight: canonicalPreviewScaledHeight, recompute: recomputeCanonicalPreviewScale } = useIframeFitScale(canonicalPreviewContainerRef, canonicalPreviewIframeRef, PAPER_DIMENSIONS.letter.widthPx);
 
   const loadCanonicalPreview = useCallback(async () => {
     if (!selectedApplication || selectedApplication.generation_engine !== "canonical") {
@@ -385,7 +398,25 @@ export default function JobDetail({
         {selectedTab === "resume" && (
           <>
             {canonicalPreviewStatus === "ready" ? (
-              <iframe key={selectedApplication.id} srcDoc={canonicalPreviewHtml ?? ""} title="Canonical resume preview" className="h-[1100px] w-full rounded-2xl border border-slate-200 bg-white" />
+              <div ref={canonicalPreviewContainerRef} className="max-h-[1500px] overflow-auto rounded-2xl border border-slate-200 bg-white p-2">
+                <div style={{ height: canonicalPreviewScaledHeight ?? PAPER_DIMENSIONS.letter.heightPx * canonicalPreviewScale }}>
+                  <iframe
+                    key={selectedApplication.id}
+                    ref={canonicalPreviewIframeRef}
+                    srcDoc={canonicalPreviewHtml ?? ""}
+                    onLoad={recomputeCanonicalPreviewScale}
+                    title="Canonical resume preview"
+                    sandbox="allow-same-origin"
+                    style={{
+                      width: PAPER_DIMENSIONS.letter.widthPx,
+                      height: canonicalPreviewNativeHeight ?? PAPER_DIMENSIONS.letter.heightPx,
+                      border: 0,
+                      transform: `scale(${canonicalPreviewScale})`,
+                      transformOrigin: "top left",
+                    }}
+                  />
+                </div>
+              </div>
             ) : canonicalPreviewStatus === "loading" ? (
               <div className="flex h-[600px] items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-500">Loading resume preview...</div>
             ) : (

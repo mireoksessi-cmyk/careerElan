@@ -64,8 +64,8 @@ export type CanonicalAnalysisRaw = {
 };
 
 export type AiTailoringValidationResult =
-  | { valid: true; overlay: TailoredResumeOverlay; droppedSkillEmphasis: boolean; packageAnalysisRaw: CanonicalAnalysisRaw; issues: [] }
-  | { valid: false; overlay: null; droppedSkillEmphasis: false; packageAnalysisRaw: null; issues: AiTailoringValidationIssue[] };
+  | { valid: true; overlay: TailoredResumeOverlay; droppedSkillEmphasis: boolean; packageAnalysisRaw: CanonicalAnalysisRaw; coverLetterText: string; emailDraftText: string; issues: [] }
+  | { valid: false; overlay: null; droppedSkillEmphasis: false; packageAnalysisRaw: null; coverLetterText: null; emailDraftText: null; issues: AiTailoringValidationIssue[] };
 
 const OVERLAY_SCHEMA_VERSION = "1.0.0";
 
@@ -96,10 +96,10 @@ export function validateAiTailoringResponse(raw: AiTailoringRawResponse, resume:
   const issues: AiTailoringValidationIssue[] = [];
 
   if (!isPlainObject(raw)) {
-    return { valid: false, overlay: null, droppedSkillEmphasis: false, packageAnalysisRaw: null, issues: [{ path: "$", reason: "response is not a JSON object" }] };
+    return { valid: false, overlay: null, droppedSkillEmphasis: false, packageAnalysisRaw: null, coverLetterText: null, emailDraftText: null, issues: [{ path: "$", reason: "response is not a JSON object" }] };
   }
 
-  const allowedTopLevelKeys = new Set(["professionalSummaryText", "entries", "skillEmphasis", "packageAnalysis"]);
+  const allowedTopLevelKeys = new Set(["professionalSummaryText", "entries", "skillEmphasis", "packageAnalysis", "coverLetterText", "emailDraftText"]);
   for (const key of Object.keys(raw)) {
     if (!allowedTopLevelKeys.has(key)) issues.push({ path: `$.${key}`, reason: "unrecognized field" });
   }
@@ -248,10 +248,42 @@ export function validateAiTailoringResponse(raw: AiTailoringRawResponse, resume:
     }
   }
 
+  /*
+    Phase 6I.6.6 - coverLetterText/emailDraftText are REQUIRED (the
+    prompt always asks for both as part of the SAME response, mirroring
+    packageAnalysis's own required-field treatment above). No grounding
+    check here beyond non-empty-string - unlike keyChanges' before/after
+    claims, cover letter/email prose has no single verbatim source
+    string to contain-check against; the prompt's own "never invent"
+    rules (canonicalTailoringPrompt.ts) are the only defense, same as
+    legacy's equivalent free-form buildCoverLetterEmailPrompt() output.
+  */
+  let coverLetterText: string | null = null;
+  if (typeof raw.coverLetterText !== "string" || raw.coverLetterText.trim().length === 0) {
+    issues.push({ path: "$.coverLetterText", reason: "must be a non-empty string" });
+  } else {
+    coverLetterText = raw.coverLetterText;
+  }
+
+  let emailDraftText: string | null = null;
+  if (typeof raw.emailDraftText !== "string" || raw.emailDraftText.trim().length === 0) {
+    issues.push({ path: "$.emailDraftText", reason: "must be a non-empty string" });
+  } else {
+    emailDraftText = raw.emailDraftText;
+  }
+
   if (issues.length > 0) {
-    return { valid: false, overlay: null, droppedSkillEmphasis: false, packageAnalysisRaw: null, issues };
+    return { valid: false, overlay: null, droppedSkillEmphasis: false, packageAnalysisRaw: null, coverLetterText: null, emailDraftText: null, issues };
   }
 
   const overlay: TailoredResumeOverlay = { schemaVersion: OVERLAY_SCHEMA_VERSION, professionalSummaryText, entries };
-  return { valid: true, overlay, droppedSkillEmphasis, packageAnalysisRaw: packageAnalysisRaw as CanonicalAnalysisRaw, issues: [] };
+  return {
+    valid: true,
+    overlay,
+    droppedSkillEmphasis,
+    packageAnalysisRaw: packageAnalysisRaw as CanonicalAnalysisRaw,
+    coverLetterText: coverLetterText as string,
+    emailDraftText: emailDraftText as string,
+    issues: [],
+  };
 }

@@ -1221,6 +1221,20 @@ const [
 
   useEffect(() => {
     if (!(selectedPreview === "resume" && resumeViewMode === "preview")) return;
+    /*
+      Phase 6I.6.6 - for a canonical-engine package, the resume tab's
+      ONLY preview surface is CanonicalTemplateSelector (application-
+      bound to applications.tailored_resume_id/selected_template_id -
+      see that component's own header comment). This legacy blob-PDF
+      path must never run for a canonical package: it was previously
+      building a DIFFERENT, untailored/profile-default preview (or, if
+      no profile-level canonical default existed, an effectively-blank
+      legacy PDF from packageData.resume === "" - canonical never
+      populates that field) and rendering it as a confusing second
+      "duplicate" resume beneath the real one. See this file's own
+      resume-tab JSX below for the matching render-side guard.
+    */
+    if (packageData.generationEngine === "canonical") return;
     if (!packageData.resume && !canonicalPreviewTemplateId) return;
     if (resumePdfKeyRef.current === resumePdfKey() && resumePdfUrl) return;
 
@@ -1240,7 +1254,7 @@ const [
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPreview, resumeViewMode, packageData.resume, packageData.packageAnalysis, resumeTemplateId, canonicalPreviewTemplateId]);
+  }, [selectedPreview, resumeViewMode, packageData.resume, packageData.packageAnalysis, packageData.generationEngine, resumeTemplateId, canonicalPreviewTemplateId]);
 
   useEffect(() => {
     return () => {
@@ -4085,6 +4099,7 @@ async function downloadDocx() {
             </p>
           </div>
 
+          {selectedPreview === "resume" && packageData.generationEngine === "canonical" ? null : (
           <div className="flex flex-wrap gap-2">
             <button
               onClick={copyPreviewText}
@@ -4121,6 +4136,7 @@ async function downloadDocx() {
               </>
             )}
           </div>
+          )}
         </div>
 
         <div className="grid border-b border-gray-100 md:grid-cols-3">
@@ -4169,7 +4185,7 @@ async function downloadDocx() {
           ))}
         </div>
 
-        <div className="h-[900px] overflow-y-auto bg-gray-100 p-6">
+        <div className="h-[1450px] overflow-y-auto bg-gray-100 p-6">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
@@ -4189,7 +4205,7 @@ async function downloadDocx() {
               </div>
             </div>
 
-            {selectedPreview === "resume" && (
+            {selectedPreview === "resume" && packageData.generationEngine !== "canonical" && (
               <div className="flex overflow-hidden rounded-lg border border-gray-200 text-xs font-bold">
                 <button
                   type="button"
@@ -4221,7 +4237,7 @@ async function downloadDocx() {
             <CanonicalTemplateSelector applicationId={applicationId} />
           )}
 
-          {selectedPreview === "resume" && resumeViewMode === "preview" ? (
+          {selectedPreview === "resume" && packageData.generationEngine === "canonical" ? null : selectedPreview === "resume" && resumeViewMode === "preview" ? (
             resumePdfError ? (
               <div className="rounded-2xl border border-red-100 bg-red-50 p-5 shadow-sm">
                 <p className="text-sm font-semibold text-red-700">
@@ -4232,10 +4248,10 @@ async function downloadDocx() {
               <iframe
                 src={resumePdfUrl}
                 title="Resume PDF preview"
-                className="h-[900px] w-full rounded-2xl border border-gray-100 bg-white shadow-sm"
+                className="h-[1350px] w-full rounded-2xl border border-gray-100 bg-white shadow-sm"
               />
             ) : (
-              <div className="h-[900px] w-full animate-pulse rounded-2xl border border-gray-100 bg-slate-50" />
+              <div className="h-[1350px] w-full animate-pulse rounded-2xl border border-gray-100 bg-slate-50" />
             )
           ) : selectedPreview ===
           "emailDraft" ? (
@@ -4275,6 +4291,7 @@ async function downloadDocx() {
             </div>
           )}
 
+          {selectedPreview === "resume" && packageData.generationEngine === "canonical" ? null : (
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             <button
               onClick={copyPreviewText}
@@ -4311,6 +4328,7 @@ async function downloadDocx() {
               </>
             )}
           </div>
+          )}
         </div>
       </div>
 

@@ -464,7 +464,7 @@ return (
 
       <div className="mt-6 grid grid-cols-1 gap-8 xl:grid-cols-12">
 
-       <div className="min-w-0 xl:col-span-4">
+       <div className="min-w-0 xl:col-span-3">
 
 <JobList
   applications={applications}
@@ -478,7 +478,7 @@ return (
 
 </div>
 
-        <div className="min-w-0 xl:col-span-5">
+        <div className="min-w-0 xl:col-span-6">
 
 <JobDetail
   selectedApplication={selectedApplication}

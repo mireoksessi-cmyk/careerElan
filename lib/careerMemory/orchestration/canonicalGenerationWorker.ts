@@ -79,6 +79,13 @@ export async function runCanonicalGeneration(applicationId: string): Promise<voi
         jobDescriptionText: manifest.jobDescriptionText || "",
         jobAnalysisSummary: manifest.jobAnalysisSummary || "",
         targetRole: manifest.targetRole,
+        // Phase 6I.6.6 - company/existingCoverLetterText come straight
+        // off the claimed row (claim_canonical_generate_worker now
+        // returns company/job_title/generation_input_cover_letter_text
+        // - the SAME snapshot columns the legacy fallback path already
+        // relies on), not the canonical-specific manifest.
+        company: claimed.company || undefined,
+        existingCoverLetterText: claimed.generation_input_cover_letter_text || undefined,
         templateId,
         paperSize,
         density,
@@ -96,6 +103,11 @@ export async function runCanonicalGeneration(applicationId: string): Promise<voi
         // RPC's own migration comment for why a new optional parameter
         // was the smallest safe signature change.
         p_ai_insight: decision.result.packageAnalysis,
+        // Phase 6I.6.6 - same completion transaction, same existing
+        // applications.cover_letter_text/email_draft columns legacy
+        // already writes.
+        p_cover_letter_text: decision.result.coverLetterText,
+        p_email_draft: decision.result.emailDraftText,
       });
       logCanonicalMetric({ event: "canonical_generate", applicationId, templateId, outcome: "success", latencyMs: Date.now() - startedAt, pdfPersisted: decision.result.render.documentStorage.persisted, docxPersisted: decision.result.render.documentStorage.persisted });
       return;
