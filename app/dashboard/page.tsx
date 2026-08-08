@@ -57,6 +57,25 @@ type PreviewAsset =
       type: "cover-letter";
       item: any;
     }
+  | {
+      /*
+        Phase 6I.6.2 - the CURRENTLY SELECTED resume, rendered through the
+        canonical Template Engine (selected resume + career_profiles.
+        default_template_id), on demand only (opened via the same Preview
+        button/modal every other PreviewAsset variant already uses - see
+        this round's own header comment on why 6I.6.1's always-visible
+        inline iframe was removed in favor of this). Distinct from
+        "uploaded-resume" (which always shows a SPECIFIC row's raw
+        original file, regardless of selection) - this variant is only
+        ever set for the resume that IS career_memory.selected_resume_id,
+        and only when a canonical default template actually exists;
+        otherwise the existing "uploaded-resume" legacy branch is used,
+        preserving today's behavior for non-canonical accounts.
+      */
+      type: "canonical-resume";
+      templateId: string;
+      fileName?: string;
+    }
   | null;
 
 
@@ -2423,6 +2442,24 @@ function renderPreviewContent() {
   }
 
   /*
+    Phase 6I.6.2 - selected resume, rendered canonically on demand. Same
+    resume-preview route + iframe pattern Career Memory's own live
+    preview and this round's Paste Job fix already use -
+    resolveCanonicalResumeContext() (session mode) resolves the resume
+    itself server-side, so no resumeId is threaded through here.
+  */
+  if (previewAsset.type === "canonical-resume") {
+    return (
+      <iframe
+        key={`${previewAsset.templateId}::${selectedResume}`}
+        src={`/api/internal/canonical-career-memory/resume-preview?templateId=${previewAsset.templateId}&format=html`}
+        title="Selected resume preview"
+        className="h-[820px] w-full rounded-xl border-0"
+      />
+    );
+  }
+
+  /*
     업로드한 Cover Letter - 이력서의 uploaded-resume 분기와 동일하게, 원본
     파일 인식 공유 렌더러에 위임한다. 레거시(원본 파일 처리 파이프라인이
     없던 시절) 커버레터와 처리 실패/대기 상태는 CoverLetterPreviewRenderer
@@ -2469,15 +2506,13 @@ if (!user) {
           </p>
 
           <h2 className="mt-1 text-xl font-black text-slate-950">
-            {previewAsset.type ===
-            "career-memory-resume"
+            {previewAsset.type === "career-memory-resume"
               ? "Career Memory Resume"
-              : previewAsset.type ===
-                "uploaded-resume"
-              ? previewAsset.item.file_name ||
-                "Uploaded Resume"
-              : previewAsset.item.file_name ||
-                "Uploaded Cover Letter"}
+              : previewAsset.type === "uploaded-resume"
+              ? previewAsset.item.file_name || "Uploaded Resume"
+              : previewAsset.type === "canonical-resume"
+              ? previewAsset.fileName || "Your Selected Resume"
+              : previewAsset.item.file_name || "Uploaded Cover Letter"}
           </h2>
         </div>
 
@@ -2991,12 +3026,21 @@ Choose which resume and cover letter will be used when generating your applicati
 
       <button
         type="button"
-        onClick={() =>
-          setPreviewAsset({
-            type: "uploaded-resume",
-            item: resume,
-          })
-        }
+        onClick={() => {
+          /*
+            Phase 6I.6.2 - only the resume that IS the current selection,
+            AND only when a canonical default template actually exists,
+            previews canonically (selected resume + default_template_id).
+            Any other row (not selected, or selected but no canonical
+            profile/template yet) keeps today's exact legacy behavior -
+            its own raw uploaded file, via ResumePreviewRenderer.
+          */
+          if (resume.id === selectedResume && templateGateStatus === "selected" && selectedTemplateId) {
+            setPreviewAsset({ type: "canonical-resume", templateId: selectedTemplateId, fileName: resume.file_name });
+          } else {
+            setPreviewAsset({ type: "uploaded-resume", item: resume });
+          }
+        }}
         className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
       >
         Preview
@@ -3038,53 +3082,39 @@ Choose which resume and cover letter will be used when generating your applicati
   )}
 
   {templateGateStatus === "selected" && selectedTemplateId && (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold text-slate-600">
-          Default template: <span className="text-slate-900">{selectedTemplateId}</span>
-        </p>
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
-              const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
-              setAvailableTemplates(templatesData.templates ?? []);
-              setTemplateSaveError(null);
-              setTemplateGateStatus("needs-selection");
-            } catch {
-              setTemplateSaveError("Could not load templates.");
-            }
-          }}
-          className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
-        >
-          Change Template
-        </button>
-      </div>
+    <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
       {/*
-        Phase 6I.6.1 - Dashboard previously only showed this template id as
-        plain text, never actually rendering the selected resume in it -
-        the exact bug this round fixes. Reuses the same canonical
-        resume-preview route + iframe pattern Career Memory's own live
-        preview already uses (career-memory/page.tsx's
-        renderCanonicalResumePreview()), rather than a second renderer.
-        The route itself resolves the resume via
-        resolveCanonicalResumeContext() (session mode), so this
-        automatically tracks whatever career_memory.selected_resume_id
-        currently is - no separate resume-identity fetch needed here.
-        key includes `selectedResume` (not just the template id) so
-        switching which resume is selected - with the template
-        unchanged - still forces the iframe to refetch instead of
-        silently keeping a stale render.
+        Phase 6I.6.2 - Phase 6I.6.1 fixed the underlying bug (Dashboard
+        never actually rendering the selected template) by embedding a
+        permanently-visible canonical iframe here, but that produced its
+        own UX regression: a large document permanently taking up space
+        under these controls, even before the user asked to see it. The
+        fix stays (selecting/changing a template now genuinely changes
+        what Preview shows - see the "canonical-resume" PreviewAsset
+        branch and the per-row Preview button above), it's just no
+        longer rendered inline - it opens on demand in the SAME preview
+        modal every other Dashboard preview already uses.
       */}
-      <div className="mt-3 max-h-[600px] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
-        <iframe
-          key={`${selectedTemplateId}::${selectedResume}`}
-          src={`/api/internal/canonical-career-memory/resume-preview?templateId=${selectedTemplateId}&format=html`}
-          title="Your current resume preview"
-          className="h-[560px] w-full rounded-lg border border-slate-100"
-        />
-      </div>
+      <p className="text-xs font-semibold text-slate-600">
+        Default template: <span className="text-slate-900">{selectedTemplateId}</span>
+      </p>
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+            const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+            setAvailableTemplates(templatesData.templates ?? []);
+            setTemplateSaveError(null);
+            setTemplateGateStatus("needs-selection");
+          } catch {
+            setTemplateSaveError("Could not load templates.");
+          }
+        }}
+        className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+      >
+        Change Template
+      </button>
     </div>
   )}
 </div>
