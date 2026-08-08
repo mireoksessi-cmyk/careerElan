@@ -3020,7 +3020,32 @@ async function downloadDocx() {
             </div>
 
             <div className="p-4 sm:p-8">
-              {savedPreviewType === "resume" &&
+              {/*
+                Phase 6I.6.1 - the canonical, selection-and-template-aware
+                preview (canonicalPreviewTemplateId -> resume-preview route
+                -> resolveCanonicalResumeContext()) already existed in this
+                file but was only ever rendered inside the post-generation
+                {generated && (...)} block, so it was structurally
+                unreachable here - this is the exact bug this round fixes.
+                Takes priority over the legacy ResumePreviewRenderer/plain-
+                text branches below whenever a canonical default template
+                is resolved, matching Career Memory's own resolution
+                priority (canonical when available, legacy preserved
+                otherwise). key includes canonicalPreviewTemplateId so a
+                template change forces a fresh fetch; this modal's own
+                content only mounts when opened, so it always reflects
+                whatever is currently selected at open-time.
+              */}
+              {savedPreviewType === "resume" && canonicalPreviewTemplateId ? (
+                <div className="mx-auto max-h-[900px] max-w-[900px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                  <iframe
+                    key={canonicalPreviewTemplateId}
+                    src={`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=html`}
+                    title="Selected resume preview"
+                    className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
+                  />
+                </div>
+              ) : savedPreviewType === "resume" &&
               savedApplicationMaterial.resume.resumeRow ? (
                 <ResumePreviewRenderer
                   resume={savedApplicationMaterial.resume.resumeRow}

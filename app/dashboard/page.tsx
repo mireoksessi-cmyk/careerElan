@@ -3038,27 +3038,53 @@ Choose which resume and cover letter will be used when generating your applicati
   )}
 
   {templateGateStatus === "selected" && selectedTemplateId && (
-    <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="text-xs font-semibold text-slate-600">
-        Default template: <span className="text-slate-900">{selectedTemplateId}</span>
-      </p>
-      <button
-        type="button"
-        onClick={async () => {
-          try {
-            const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
-            const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
-            setAvailableTemplates(templatesData.templates ?? []);
-            setTemplateSaveError(null);
-            setTemplateGateStatus("needs-selection");
-          } catch {
-            setTemplateSaveError("Could not load templates.");
-          }
-        }}
-        className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
-      >
-        Change Template
-      </button>
+    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold text-slate-600">
+          Default template: <span className="text-slate-900">{selectedTemplateId}</span>
+        </p>
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+              const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+              setAvailableTemplates(templatesData.templates ?? []);
+              setTemplateSaveError(null);
+              setTemplateGateStatus("needs-selection");
+            } catch {
+              setTemplateSaveError("Could not load templates.");
+            }
+          }}
+          className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+        >
+          Change Template
+        </button>
+      </div>
+      {/*
+        Phase 6I.6.1 - Dashboard previously only showed this template id as
+        plain text, never actually rendering the selected resume in it -
+        the exact bug this round fixes. Reuses the same canonical
+        resume-preview route + iframe pattern Career Memory's own live
+        preview already uses (career-memory/page.tsx's
+        renderCanonicalResumePreview()), rather than a second renderer.
+        The route itself resolves the resume via
+        resolveCanonicalResumeContext() (session mode), so this
+        automatically tracks whatever career_memory.selected_resume_id
+        currently is - no separate resume-identity fetch needed here.
+        key includes `selectedResume` (not just the template id) so
+        switching which resume is selected - with the template
+        unchanged - still forces the iframe to refetch instead of
+        silently keeping a stale render.
+      */}
+      <div className="mt-3 max-h-[600px] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
+        <iframe
+          key={`${selectedTemplateId}::${selectedResume}`}
+          src={`/api/internal/canonical-career-memory/resume-preview?templateId=${selectedTemplateId}&format=html`}
+          title="Your current resume preview"
+          className="h-[560px] w-full rounded-lg border border-slate-100"
+        />
+      </div>
     </div>
   )}
 </div>
