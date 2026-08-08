@@ -26,10 +26,6 @@ export function makeHandleImportResume(request: Request) {
     const service = new CanonicalResumeImportService(ctx.repos, ctx.client);
     const result = await service.importResume(ctx.userId, body.resumeId);
 
-    if (result.status === "conflict") {
-      return jsonResponse({ error: { code: "CONFLICT", message: result.reason } }, 409);
-    }
-
     return jsonResponse(
       {
         profileId: result.profileId,

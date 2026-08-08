@@ -1,6 +1,6 @@
 /*
-  Phase 6I.4 - Inline Template Selection at Career Memory Completion,
-  real-DB verification. app/career-memory/page.tsx's own
+  Phase 6I.4/6I.5 - Inline Template Selection at Career Memory
+  Completion, real-DB verification. app/career-memory/page.tsx's own
   runInlineCanonicalFlow()/selectInlineTemplate() are plain client-side
   React state machines with no dedicated component-testing harness in
   this codebase (every phase this session has instead verified the real
@@ -10,27 +10,36 @@
   SAME sequence runInlineCanonicalFlow() performs, in the same order,
   against a REAL local Supabase instance:
 
-    GET config -> GET template-preference -> GET profile
-      -> [POST import-resume only if profile 404] -> GET templates
-      -> PUT template-preference
+    GET config -> POST import-resume (ALWAYS) -> GET templates
+      -> GET template-preference (decides auto-apply-existing-default
+      vs. requires-real-selection)
 
-  for every branch spec section 8 requires: brand-new user (import
-  runs), existing profile with NULL default (import skipped, picker
-  still required), existing profile WITH a default (picker skipped
-  entirely), and legacy-only (nothing applicable). No real OpenAI call
-  anywhere in this file - nothing in the import or template-preference
-  path can reach OpenAI (verified by what those modules import).
+  Phase 6I.5 rewrite - this file previously verified the OLD policy
+  ("an existing defaultTemplateId skips import-resume entirely," the
+  confirmed root cause of the wrong-resume-shown bug, and "importing a
+  different resumeId once a profile exists -> 409 CONFLICT"). Both are
+  now wrong on purpose: import-resume always runs, and a different
+  resume now succeeds by creating a new canonical version rather than
+  refusing. Section C below is rewritten to prove the NEW identity/
+  version policy end-to-end (resume-A -> V1, resume-B -> V2, V1
+  preserved, an existing default template auto-applies to B without
+  skipping B's own import). No real OpenAI call anywhere in this file -
+  nothing in the import or template-preference path can reach OpenAI
+  (verified by what those modules import).
 
   Run: npx tsx --env-file=.env.local fixtures/scripts/phase6i4InlineTemplateSelection.realdb.test.mts
   Requires local Supabase running.
 */
 import { readFileSync } from "fs";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { runWithAuthenticatedContext } from "../../lib/careerMemory/api/routeGuard";
+import { createCanonicalRepositories } from "../../lib/careerMemory/repositories/createRepositories";
 import { makeHandleConfig } from "../../app/api/internal/canonical-generate-package/config/route";
 import { handleGetTemplatePreference, makeHandlePutTemplatePreference } from "../../app/api/internal/canonical-career-memory/template-preference/route";
 import { handleGetProfile } from "../../app/api/internal/canonical-career-memory/profile/route";
 import { makeHandleImportResume } from "../../app/api/internal/canonical-career-memory/import-resume/route";
+import { makeHandleResumePreview } from "../../app/api/internal/canonical-career-memory/resume-preview/route";
 import { GET as getTemplates } from "../../app/api/internal/canonical-career-memory/templates/route";
 
 const URL = "http://127.0.0.1:54321";
@@ -139,14 +148,78 @@ async function main() {
     check("new user: replay returns the SAME profileId (no duplicate profile)", importRetryBody.profileId, importBody.profileId);
   }
 
-  // ==================== B. Existing user, default ALREADY set -> picker must be skipped entirely ====================
+  // ==================== B. Phase 6I.5 - existing default template must NOT skip import for a NEW resume ====================
+  const reposA = createCanonicalRepositories(userA.client);
+  let versionIdAfterA1: string | null = null;
+  let previewHtmlHashAfterA1: string | null = null;
   {
     const prefRes = await runWithAuthenticatedContext(userA.client as never, handleGetTemplatePreference);
     const prefBody = await prefRes.json();
-    checkTrue("existing default: template-preference now has a real defaultTemplateId (runInlineCanonicalFlow's own not-applicable branch precondition)", typeof prefBody.defaultTemplateId === "string" && prefBody.defaultTemplateId.length > 0);
+    checkTrue("B1: userA now has a real defaultTemplateId from section A (modern-sidebar)", prefBody.defaultTemplateId === "modern-sidebar");
+
+    const profileA = await reposA.profiles.getByUserId(userA.userId);
+    const latestVersionA1 = await reposA.resumeVersions.getLatestByProfileId(profileA!.id);
+    versionIdAfterA1 = latestVersionA1!.id;
+
+    const previewRespA1 = await runWithAuthenticatedContext(userA.client as never, makeHandleResumePreview(new Request(`http://x/resume-preview?templateId=modern-sidebar&format=html&variant=thumbnail`)));
+    const previewHtmlA1 = await previewRespA1.text();
+    previewHtmlHashAfterA1 = crypto.createHash("sha256").update(previewHtmlA1).digest("hex");
+    check("B2: preview renders successfully for resume-A's canonical version", previewRespA1.status, 200);
+
+    // Simulate runInlineCanonicalFlow(resumeIdB) for a genuinely
+    // DIFFERENT resume upload (resume-B), while userA already has a
+    // saved default template - this is the EXACT real-world scenario
+    // the user reported ("uploaded a different resume, preview still
+    // showed my previous one"). The fixed sequence always calls
+    // import-resume FIRST, never gated on defaultTemplateId.
+    const resumeIdB = await seedUploadedResume(admin, userA, "resume-B.pdf", false, FIXTURE_PDF_2_PATH);
+    const importResB = await runWithAuthenticatedContext(userA.client as never, makeHandleImportResume(jsonRequest("http://x/import-resume", "POST", { resumeId: resumeIdB })));
+    checkTrue("B3: import-resume for a genuinely different resume-B now SUCCEEDS (no more 409, no more skip)", importResB.status === 200 || importResB.status === 201);
+    const importBodyB = await importResB.json();
+    checkTrue("B4: resume-B's import is NOT a replay (new content)", importBodyB.alreadyImported === false);
+    checkTrue("B5: resume-B's import produced a DIFFERENT versionId than resume-A's", importBodyB.versionId !== versionIdAfterA1);
+
+    const { count: versionCountAfterB } = await userA.client.from("career_resume_versions").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
+    check("B6: exactly 2 version rows exist now (resume-A's V1 preserved, resume-B's V2 added)", versionCountAfterB, 2);
+
+    const oldVersionA1StillReadable = await reposA.resumeVersions.getById(versionIdAfterA1);
+    checkTrue("B7: resume-A's original version (V1) is still readable, untouched", oldVersionA1StillReadable !== null);
+
+    const latestVersionAfterB = await reposA.resumeVersions.getLatestByProfileId(profileA!.id);
+    check("B8: the profile's CURRENT LATEST version is now resume-B's (V2), not resume-A's", latestVersionAfterB?.id, importBodyB.versionId);
+
+    // Phase 6I.5 preview-identity fix: existing default (modern-sidebar)
+    // auto-applies to resume-B - the LEFT preview after B's import must
+    // render B's content under that template, never A's stale content.
+    const previewRespB = await runWithAuthenticatedContext(userA.client as never, makeHandleResumePreview(new Request(`http://x/resume-preview?templateId=modern-sidebar&format=html&variant=thumbnail`)));
+    const previewHtmlB = await previewRespB.text();
+    const previewHtmlHashB = crypto.createHash("sha256").update(previewHtmlB).digest("hex");
+    check("B9: preview after resume-B's import -> 200", previewRespB.status, 200);
+    checkTrue("B10: preview HTML after resume-B's import is DIFFERENT from resume-A's preview (no stale A content)", previewHtmlHashB !== previewHtmlHashAfterA1);
+
+    // Existing default template preference itself must be untouched -
+    // "auto-apply" means USE it for B, not silently clear/change it.
+    const prefResAfterB = await runWithAuthenticatedContext(userA.client as never, handleGetTemplatePreference);
+    const prefBodyAfterB = await prefResAfterB.json();
+    check("B11: userA's saved default template preference is unchanged (still modern-sidebar)", prefBodyAfterB.defaultTemplateId, "modern-sidebar");
   }
 
-  // ==================== C. Existing profile, NULL default (mid-selection from an earlier session) -> import skipped, picker still required ====================
+  // ==================== C. Re-uploading resume-B's identical content again -> idempotent replay, no V3 ====================
+  {
+    const profileA = await reposA.profiles.getByUserId(userA.userId);
+    const { count: versionCountBeforeReplay } = await userA.client.from("career_resume_versions").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
+
+    const resumeIdBRetry = await seedUploadedResume(admin, userA, "resume-B-retry.pdf", false, FIXTURE_PDF_2_PATH);
+    const importResBRetry = await runWithAuthenticatedContext(userA.client as never, makeHandleImportResume(jsonRequest("http://x/import-resume", "POST", { resumeId: resumeIdBRetry })));
+    check("C1: re-importing resume-B's identical content (new resumeId) -> 200 (replay, not 201)", importResBRetry.status, 200);
+    const importBodyBRetry = await importResBRetry.json();
+    checkTrue("C2: replay reports alreadyImported=true", importBodyBRetry.alreadyImported === true);
+
+    const { count: versionCountAfterReplay } = await userA.client.from("career_resume_versions").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
+    check("C3: version count unchanged after the identical-content re-upload (no V3)", versionCountAfterReplay, versionCountBeforeReplay);
+  }
+
+  // ==================== D. Existing profile, NULL default (mid-selection from an earlier session) -> import still runs, picker required ====================
   const userC = await makeTestUser(admin, "null-default");
   const resumeIdC = await seedUploadedResume(admin, userC, "standard-pdf-resume.pdf");
   {
@@ -158,18 +231,17 @@ async function main() {
     check("null-default: template-preference is null (profile exists, no default yet)", prefBodyC.defaultTemplateId, null);
 
     const profileResC = await runWithAuthenticatedContext(userC.client as never, handleGetProfile);
-    check("null-default: profile GET -> 200, NOT 404 (runInlineCanonicalFlow must skip re-import, go straight to picker)", profileResC.status, 200);
+    check("null-default: profile GET -> 200 (exists)", profileResC.status, 200);
 
-    // Attempting to import a DIFFERENT resumeId while a profile already
-    // exists must be refused (Phase 6I.1's own no-silent-overwrite rule) -
-    // proves why runInlineCanonicalFlow() is correct to check profile
-    // existence BEFORE ever calling import for this branch.
+    // Phase 6I.5 - a SECOND, genuinely different resume for this same
+    // no-default-yet user must ALSO succeed now (not 409), becoming the
+    // new current version, exactly like section B above.
     const otherResumeId = await seedUploadedResume(admin, userC, "second-resume.pdf", false, FIXTURE_PDF_2_PATH);
-    const conflictRes = await runWithAuthenticatedContext(userC.client as never, makeHandleImportResume(jsonRequest("http://x/import-resume", "POST", { resumeId: otherResumeId })));
-    check("null-default: importing a DIFFERENT resumeId for an existing profile -> 409 CONFLICT (confirms the skip-import branch is necessary, not optional)", conflictRes.status, 409);
+    const secondImportRes = await runWithAuthenticatedContext(userC.client as never, makeHandleImportResume(jsonRequest("http://x/import-resume", "POST", { resumeId: otherResumeId })));
+    checkTrue("null-default: importing a DIFFERENT resumeId for an existing (no-default) profile now SUCCEEDS", secondImportRes.status === 200 || secondImportRes.status === 201);
   }
 
-  // ==================== D. Legacy-only user (never uploaded/imported anything) -> not-applicable ====================
+  // ==================== E. Legacy-only user (never uploaded/imported anything) -> not-applicable ====================
   const userD = await makeTestUser(admin, "legacy-only");
   {
     const prefResD = await runWithAuthenticatedContext(userD.client as never, handleGetTemplatePreference);
@@ -180,7 +252,7 @@ async function main() {
     check("legacy-only: profile GET -> 404 (no canonical profile, no resume to import either - genuinely not-applicable)", profileResD.status, 404);
   }
 
-  // ==================== E. Cross-user isolation on the whole sequence ====================
+  // ==================== F. Cross-user isolation on the whole sequence ====================
   {
     const prefResA = await runWithAuthenticatedContext(userA.client as never, handleGetTemplatePreference);
     const prefBodyA = await prefResA.json();

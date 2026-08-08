@@ -22,14 +22,33 @@
   career_memory-sourced resume has no original document to preserve and
   is out of scope here, not silently coerced into a lossy import.
 
-  No-automatic-merge rule (this round's explicit constraint): if the
-  user already has ANY canonical profile/version, importing a
-  DIFFERENT resume (different file content) is refused with a
-  "conflict" result rather than silently creating a new version that
-  supersedes the existing one. Re-importing the SAME resume (same file
-  content, detected by a real SHA-256 hash - not resumeId, which lets a
-  file re-uploaded under a new resumeId still be recognized) is treated
-  as a safe, idempotent retry.
+  Phase 6I.5 policy update - the original Phase 6I.1 "no automatic
+  merge" rule (refuse a second, different resume outright with a
+  "conflict" result) is REPLACED by an explicit versioning policy:
+  uploading a new resume for a user who already has a canonical profile
+  no longer errors. It creates a NEW career_resume_versions row (via
+  save_canonical_runtime(), which already always INSERTS a new version
+  chained to the current one rather than overwriting it - see
+  supabase/migrations/20260806020000_career_memory_transaction_
+  idempotency.sql) that becomes the profile's current/latest version.
+  The OLD version, and the source document that produced it, are never
+  deleted or mutated - only superseded by created_at ordering, exactly
+  the versioning contract runtime/types.ts's RuntimeVersionReason
+  already documents ("import" is a listed version event). Only ONE case
+  still short-circuits without writing a new version: the new resume's
+  content is IDENTICAL (by SHA-256 hash) to the source that produced
+  the profile's CURRENT LATEST version - a genuine no-op replay, not a
+  new resume. This is deliberately narrower than the old "matches ANY
+  previously-seen resume" check: re-uploading an OLDER, no-longer-
+  current resume is treated as a fresh "this is now current again"
+  event (a new version), not silently ignored, since the entire point
+  of importing is "make this the active canonical source." Identity is
+  resolved by SHA-256 content hash, never resumeId or any other UI/
+  session state - two different resumeId rows can be the exact same
+  bytes (idempotent replay, no duplicate version) and a retried request
+  for the same resumeId never produces two versions for one real
+  upload (registerSourceDocument's own content_hash unique index, plus
+  a content-hash-keyed idempotency key on the version save below).
 */
 import crypto from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -50,19 +69,18 @@ import { classifyLosslessValidationFailure, classifyStructuredValidationFailure 
 const SUPPORTED_SOURCE_FORMATS: LayoutSourceFormat[] = ["pdf", "docx"];
 const RESUMES_STORAGE_BUCKET = "resumes";
 
-export type ImportResumeResult =
-  | {
-      status: "imported";
-      profileId: string;
-      versionId: string;
-      sourceDocumentId: string;
-      roundTripValid: boolean;
-      alreadyImported: boolean;
-    }
-  | {
-      status: "conflict";
-      reason: string;
-    };
+export type ImportResumeResult = {
+  status: "imported";
+  profileId: string;
+  versionId: string;
+  sourceDocumentId: string;
+  roundTripValid: boolean;
+  // true only for the genuine no-op replay case (same content as the
+  // profile's current latest version already) - a NEW version (whether
+  // this is the profile's first version ever, or a new one superseding
+  // an older resume) is always alreadyImported: false.
+  alreadyImported: boolean;
+};
 
 type ImportableResumeRow = {
   id: string;
@@ -99,14 +117,31 @@ export class CanonicalResumeImportService {
     const contentHash = crypto.createHash("sha256").update(buffer).digest("hex");
 
     const memoryService = new CanonicalCareerMemoryService(this.repos);
-    const existingRuntime = await memoryService.getCanonicalRuntime(userId);
-    if (existingRuntime) {
-      const sameResumeAlreadyImported = existingRuntime.sourceDocuments.some((doc) => doc.contentHash === contentHash);
-      if (!sameResumeAlreadyImported) {
+
+    /*
+      Phase 6I.5 - short-circuit ONLY when this content is already the
+      profile's CURRENT LATEST version's own source (a genuine replay of
+      the active resume), not "any resume this profile has ever seen."
+      Looked up via the raw repos (not getCanonicalRuntime(), which
+      returns the mapped Runtime and does not expose which source
+      document produced the current version) so this stays a cheap
+      existence check with no parsing before we know a real import is
+      even needed.
+    */
+    const existingProfile = await this.repos.profiles.getByUserId(userId);
+    if (existingProfile) {
+      const currentLatestVersion = await this.repos.resumeVersions.getLatestByProfileId(existingProfile.id);
+      const currentLatestSourceDoc = currentLatestVersion?.source_document_id
+        ? await this.repos.sourceDocuments.getById(currentLatestVersion.source_document_id)
+        : null;
+      if (currentLatestVersion && currentLatestSourceDoc && currentLatestSourceDoc.content_hash === contentHash) {
         return {
-          status: "conflict",
-          reason:
-            "A Canonical Career Memory profile already exists for this account, built from a different resume. Automatic merge is not supported this round - importing a second, different resume would silently replace the existing canonical data.",
+          status: "imported",
+          profileId: existingProfile.id,
+          versionId: currentLatestVersion.id,
+          sourceDocumentId: currentLatestSourceDoc.id,
+          roundTripValid: true,
+          alreadyImported: true,
         };
       }
     }
@@ -141,10 +176,18 @@ export class CanonicalResumeImportService {
       contentHash,
       storageBucket: RESUMES_STORAGE_BUCKET,
       storagePath: resume.storage_path as string,
-      // Deterministic per-resume key: a retried import of the SAME
-      // resumeId always registers (or replays) the SAME source
-      // document row, never a duplicate.
-      idempotencyKey: `canonical-import-source-doc:${resumeId}`,
+      /*
+        Phase 6I.5 - keyed by contentHash, not resumeId: two different
+        resumeId rows holding the exact same file bytes (e.g. a re-
+        upload after the original resumes row was deleted) must
+        register/replay the SAME source document row, never a
+        duplicate. registerSourceDocument's own (profile_id,
+        content_hash) unique index already enforces this at the DB
+        level - this idempotency key is the defense-in-depth layer on
+        top, matching that same real identity instead of the transient
+        resumeId.
+      */
+      idempotencyKey: `canonical-import-source-doc:${contentHash}`,
     });
 
     const nowIso = new Date().toISOString();
@@ -164,10 +207,17 @@ export class CanonicalResumeImportService {
 
     const saveResult = await memoryService.saveCanonicalRuntimeAcknowledgingGap(userId, {
       runtime,
-      // Deterministic per-resume key: a retried import of the SAME
-      // resumeId replays the ORIGINAL save result rather than creating
-      // a second version.
-      idempotencyKey: `canonical-import-resume:${resumeId}`,
+      /*
+        Phase 6I.5 - keyed by contentHash, not resumeId, for the same
+        reason as registerSourceDocument's key above: this is the
+        version-level idempotency guard for a genuinely concurrent/
+        retried request for the SAME content (the request-level race,
+        not the "is this already the current version" check already
+        handled above) - it must key off the real identity (the bytes),
+        not the transient resumeId, so two different resumeId rows for
+        identical content can never race their way into two versions.
+      */
+      idempotencyKey: `canonical-import-resume:${contentHash}`,
     });
 
     return {
@@ -176,7 +226,7 @@ export class CanonicalResumeImportService {
       versionId: saveResult.version.id,
       sourceDocumentId: registeredDoc.id,
       roundTripValid: saveResult.roundTripValid,
-      alreadyImported: existingRuntime !== null,
+      alreadyImported: false,
     };
   }
 

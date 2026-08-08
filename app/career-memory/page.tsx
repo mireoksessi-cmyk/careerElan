@@ -286,19 +286,32 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   }, [user]);
 
   /*
-    Phase 6I.4 - the inline "choose your resume design" step on the
+    Phase 6I.4/6I.5 - the inline "choose your resume design" step on the
     Career Memory completion screen itself (spec: the 4 cards render
     right under "Resume analyzed successfully," not a Dashboard-only
-    follow-up). "not-applicable" covers every case the picker must NOT
-    appear: the canonical feature flags are off (matches the config
-    check every other canonical UI surface already uses - keeps
+    follow-up). "not-applicable" now covers only the ONE case the picker
+    must NOT appear: the canonical feature flags are off (matches the
+    config check every other canonical UI surface already uses - keeps
     Production, where these flags are off by default, on the exact
-    pre-6I.4 behavior), or a default_template_id is already set
-    (returning user - never force re-selection), or nothing canonical
-    applies (legacy-only). "import-error"/"save-error" keep the
-    Continue buttons disabled per spec section 4 ("If persistence
-    fails: keep buttons disabled") - there is deliberately no
-    client-only bypass.
+    pre-6I.4 behavior). "import-error"/"save-error" keep the Continue
+    buttons disabled per spec section 7 ("If persistence fails: keep
+    buttons disabled") - there is deliberately no client-only bypass.
+
+    Phase 6I.5 fix - this function used to treat "a default template is
+    already set" as proof that THIS resumeId was already imported, and
+    returned immediately without ever calling import-resume. That was
+    the confirmed root cause of the "wrong resume shown after a new
+    upload" bug: a returning user's existing default_template_id has
+    nothing to do with whether the CURRENT upload's content has been
+    added to their canonical profile. Every analyzed upload now always
+    calls import-resume (identity is resolved server-side by content
+    hash - see canonicalResumeImportService.ts - so a truly redundant
+    re-upload is still a safe no-op, never a duplicate version). An
+    existing default template is applied AUTOMATICALLY to the resume
+    that import just made current/latest (spec section 8: "existing
+    default template does not skip B import... left preview of B
+    immediately uses [the existing default]"), while still letting the
+    user change it via the picker, which always stays visible now.
   */
   const [inlineTemplateStatus, setInlineTemplateStatus] = useState<"checking" | "not-applicable" | "importing" | "import-error" | "selecting" | "saving" | "ready">("checking");
   const [inlineTemplates, setInlineTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
@@ -314,16 +327,12 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   /*
     Called once, right after analysis succeeds (see
     applyResumeAnalysisResult's two call sites) - resumeId is the row
-    just created/analyzed in THIS upload. Never runs canonical import
-    for a resumeId that isn't the one just analyzed, and never runs it
-    twice for the same resume (import-resume's own idempotent-replay
-    behavior from Phase 6I.1 makes a duplicate call harmless anyway,
-    but this function is only invoked from the two analysis-success
-    call sites, so a duplicate call never actually happens in practice).
+    just created/analyzed in THIS upload.
   */
   async function runInlineCanonicalFlow(resumeId: string) {
     setInlineTemplateStatus("checking");
     setInlineTemplateError(null);
+    setInlineSelectedTemplateId(null);
     try {
       const configRes = await fetch("/api/internal/canonical-generate-package/config");
       const configData = configRes.ok ? await configRes.json() : { generateEnabled: false, templateSelectorEnabled: false };
@@ -332,36 +341,44 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
         return;
       }
 
-      const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
-      const prefData = prefRes.ok ? await prefRes.json() : { defaultTemplateId: null };
-      if (prefData.defaultTemplateId) {
-        // Spec section 8: an existing default is never re-selected for a new upload.
-        setInlineTemplateStatus("not-applicable");
+      // Always attempt import for THIS resume - server-side identity
+      // (content hash) decides whether it's a no-op replay or a new
+      // canonical version, never client UI state.
+      setInlineTemplateStatus("importing");
+      const importRes = await fetch("/api/internal/canonical-career-memory/import-resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeId }),
+      });
+      if (!importRes.ok) {
+        const importData = await importRes.json().catch(() => null);
+        setInlineTemplateError(importData?.error?.message || "Could not prepare this resume for canonical templates.");
+        setInlineTemplateStatus("import-error");
         return;
       }
 
-      const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
-      if (profileRes.status === 404) {
-        // No canonical profile yet - this IS the resume that should become one.
-        setInlineTemplateStatus("importing");
-        const importRes = await fetch("/api/internal/canonical-career-memory/import-resume", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ resumeId }),
-        });
-        if (!importRes.ok) {
-          const importData = await importRes.json().catch(() => null);
-          setInlineTemplateError(importData?.error?.message || "Could not prepare this resume for canonical templates.");
-          setInlineTemplateStatus("import-error");
-          return;
-        }
-      }
-      // Either the import above just succeeded, or a canonical profile
-      // already existed with no default yet (spec section 8's other
-      // branch: "NULL default forces picker") - either way, show the 4
-      // templates now.
+      // Phase 6I.5 - refresh preview identity explicitly right after a
+      // successful import, instead of relying on the mount-only
+      // resolve-template effect above (spec section 4: "Do not rely on
+      // a mount-only effect"). This is what makes the LEFT preview show
+      // THIS upload's content, not a stale earlier one.
       await loadInlineTemplateList();
-      setInlineTemplateStatus("selecting");
+
+      const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
+      const prefData = prefRes.ok ? await prefRes.json() : { defaultTemplateId: null };
+      if (prefData.defaultTemplateId) {
+        // Returning user: auto-apply their existing default to the
+        // resume that just became current - they may still change it.
+        setInlineSelectedTemplateId(prefData.defaultTemplateId);
+        setCanonicalPreviewTemplateId(prefData.defaultTemplateId);
+        setCanonicalPreviewStatus("canonical");
+        setInlineTemplateStatus("ready");
+      } else {
+        // First-time canonical user - no default to fall back to, a
+        // real selection is required before Continue unlocks.
+        setCanonicalPreviewStatus("selection-required");
+        setInlineTemplateStatus("selecting");
+      }
     } catch {
       setInlineTemplateError("Could not prepare this resume for canonical templates.");
       setInlineTemplateStatus("import-error");
@@ -2353,48 +2370,166 @@ return;
     );
   }
 
-  function renderFullResumePreview() {
+  /*
+    Phase 6I.5 - extracted out of renderFullResumePreview() so the new
+    side-by-side workspace's LEFT panel (renderInlineWorkspace()) and
+    the later full-screen review step share the EXACT same preview
+    logic instead of a second copy (spec section 6: "Do not duplicate
+    rendering logic"). One behavior change from the pre-6I.5 version:
+    "selection-required" now falls through to the uploaded original
+    file preview when one exists, instead of a blocking notice - the
+    side-by-side workspace's LEFT panel must show the real original
+    resume before a template is chosen (spec sections 6/12), not a
+    "choose a template" message sitting where the preview belongs. The
+    notice is kept only for the one case with no original file to fall
+    back to (a resume built from Career Memory fields directly).
+  */
+  function renderLiveResumePreviewContent() {
     const isUploadedResumePreview = memoryData.resumeSource === "uploaded" && (uploadedResumeUrl || memoryData.uploadedResumeText || uploadedResumeKind !== "none");
+    if (canonicalPreviewStatus === "canonical") {
+      return renderCanonicalResumePreview();
+    }
+    if (canonicalPreviewStatus === "selection-required" && !isUploadedResumePreview) {
+      return renderTemplateSelectionRequiredNotice();
+    }
+    /*
+      Template/Font/Style selection only applies to a resume built from
+      Career Memory fields (renderBuiltResumePreview) - it has no effect
+      on an uploaded resume's own preview (renderUploadedOriginalPreview
+      always shows the original file/text as-is), so showing those
+      controls next to an uploaded-resume review was misleading. The
+      sidebar itself is skipped for that case rather than left empty.
+      This whole legacy branch is unchanged for "legacy" (no canonical
+      profile) and while canonicalPreviewStatus is still "loading".
+    */
+    if (isUploadedResumePreview) {
+      return (
+        <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
+          {renderUploadedOriginalPreview()}
+        </div>
+      );
+    }
+    return (
+      <div className="grid gap-6 2xl:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-5 2xl:block 2xl:space-y-3">
+          <p className="text-sm font-black text-slate-900 sm:col-span-5 2xl:col-span-1">Template</p>
+          {resumeTemplates.map((template) => (
+            <button key={template} onClick={() => updateMemory("resumeTemplate", template)} className={`w-full rounded-xl px-4 py-3 text-left text-sm font-bold ${memoryData.resumeTemplate === template ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-blue-50"}`}>{template}</button>
+          ))}
+          <div className="pt-3 text-xs font-semibold leading-5 text-slate-500 sm:col-span-5 2xl:col-span-1">Style: {memoryData.themeColor} · {memoryData.font} · {memoryData.textSize}</div>
+        </aside>
+        <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
+          {renderBuiltResumePreview()}
+        </div>
+      </div>
+    );
+  }
+
+  function renderFullResumePreview() {
     return (
       <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div><p className="text-sm font-black uppercase tracking-wide text-blue-600">Full Resume Preview</p><h2 className="mt-1 text-3xl font-black text-slate-950">Review your resume before saving</h2></div>
           <div className="flex gap-3"><button onClick={() => (mode === "import" ? setImportStage("parsed") : setCurrentStep(7))} className="rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600">Back</button><button onClick={() => { persistMemory(); continueToDashboard(); }} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">Save & Continue</button></div>
         </div>
-        {canonicalPreviewStatus === "canonical" ? (
-          renderCanonicalResumePreview()
-        ) : canonicalPreviewStatus === "selection-required" ? (
-          renderTemplateSelectionRequiredNotice()
-        ) : (
-        /*
-          Template/Font/Style selection only applies to a resume built from
-          Career Memory fields (renderBuiltResumePreview) - it has no effect
-          on an uploaded resume's own preview (renderUploadedOriginalPreview
-          always shows the original file/text as-is), so showing those
-          controls next to an uploaded-resume review was misleading. The
-          sidebar itself is skipped for that case rather than left empty.
-          This whole legacy branch is unchanged for "legacy" (no canonical
-          profile) and while canonicalPreviewStatus is still "loading".
-        */
-        isUploadedResumePreview ? (
-          <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
-            {renderUploadedOriginalPreview()}
-          </div>
-        ) : (
-          <div className="grid gap-6 2xl:grid-cols-[220px_minmax(0,1fr)]">
-            <aside className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-5 2xl:block 2xl:space-y-3">
-              <p className="text-sm font-black text-slate-900 sm:col-span-5 2xl:col-span-1">Template</p>
-              {resumeTemplates.map((template) => (
-                <button key={template} onClick={() => updateMemory("resumeTemplate", template)} className={`w-full rounded-xl px-4 py-3 text-left text-sm font-bold ${memoryData.resumeTemplate === template ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-blue-50"}`}>{template}</button>
-              ))}
-              <div className="pt-3 text-xs font-semibold leading-5 text-slate-500 sm:col-span-5 2xl:col-span-1">Style: {memoryData.themeColor} · {memoryData.font} · {memoryData.textSize}</div>
-            </aside>
-            <div className="max-h-[900px] min-w-0 overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
-              {renderBuiltResumePreview()}
-            </div>
-          </div>
-        ))}
+        {renderLiveResumePreviewContent()}
       </div>
+    );
+  }
+
+  /*
+    Phase 6I.5 - the Career Memory side-by-side template workspace (spec
+    Part B). Renders as soon as analysis finishes (importStage ===
+    "parsed"), replacing the old flow where the picker and the full
+    preview lived on two mutually-exclusive screens (see this phase's
+    own investigation report for why that was the root cause of Problem
+    B). LEFT = renderLiveResumePreviewContent() (original file before a
+    template is chosen, canonical+template render immediately after -
+    spec section 6), RIGHT = the existing inline CanonicalTemplatePicker,
+    unchanged. Clicking a template calls the EXISTING selectInlineTemplate,
+    which already PUTs template-preference and syncs canonicalPreviewStatus/
+    canonicalPreviewTemplateId - no new API, no AI, no quota, no new
+    Resume Version (spec section 6/11).
+  */
+  function renderInlineWorkspace() {
+    return (
+      <>
+        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,65%)_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <p className="text-sm font-black uppercase tracking-wide text-blue-600">Live Resume Preview</p>
+            <p className="mt-1 text-sm text-slate-500">{inlineSelectedTemplateId ? "Selected template applied immediately." : "Your original resume, until you choose a design."}</p>
+            <div className="mt-3">{renderLiveResumePreviewContent()}</div>
+          </div>
+
+          <div className="min-w-0 rounded-2xl border border-blue-100 bg-white p-6">
+            <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose your design</p>
+            <p className="mt-1 text-sm text-slate-500">Select exactly one template. This becomes your default design everywhere until you change it.</p>
+
+            {(inlineTemplateStatus === "checking" || inlineTemplateStatus === "importing") && (
+              <p className="mt-4 text-sm font-semibold text-slate-500">Preparing your resume for canonical templates...</p>
+            )}
+
+            {inlineTemplateStatus === "import-error" && (
+              <p className="mt-4 text-sm font-semibold text-red-600">{inlineTemplateError}</p>
+            )}
+
+            {inlineTemplateStatus === "not-applicable" && (
+              <p className="mt-4 text-sm text-slate-500">Canonical templates aren&apos;t available right now. You can still continue.</p>
+            )}
+
+            {(inlineTemplateStatus === "selecting" || inlineTemplateStatus === "saving" || inlineTemplateStatus === "ready") && (
+              <div className="mt-4">
+                {inlineTemplateError && <p className="mb-3 text-sm font-semibold text-red-600">{inlineTemplateError}</p>}
+                <CanonicalTemplatePicker
+                  templates={inlineTemplates as any}
+                  selectedTemplateId={inlineSelectedTemplateId as any}
+                  onSelect={(templateId) => selectInlineTemplate(templateId)}
+                  disabled={inlineTemplateStatus === "saving"}
+                  livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {importMessage && (
+          <p className="mt-5 rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">
+            {importMessage}
+          </p>
+        )}
+
+        {resumeUploadError && (
+          <div role="alert" className="mt-5 rounded-xl border border-red-300 bg-red-50 px-5 py-4">
+            <p className="font-black text-red-700">Resume upload failed</p>
+            <p className="mt-1 text-sm leading-6 text-red-600">{resumeUploadError}</p>
+            <button type="button" onClick={() => setResumeUploadError("")} className="mt-3 text-sm font-bold text-red-700 underline">Dismiss</button>
+          </div>
+        )}
+
+        <div className="mt-8 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={continueToImportPreview}
+            disabled={importStage !== "parsed" || inlineTemplateBlocksContinue}
+            className={`rounded-xl border px-6 py-3 font-bold ${
+              importStage === "parsed" && !inlineTemplateBlocksContinue
+                ? "border-blue-600 text-blue-600"
+                : "cursor-not-allowed border-slate-200 text-slate-400"
+            }`}
+          >
+            Continue to Preview →
+          </button>
+
+          <button
+            type="button"
+            onClick={continueToDashboard}
+            disabled={inlineTemplateBlocksContinue}
+            className={`rounded-xl px-6 py-3 font-bold text-white ${inlineTemplateBlocksContinue ? "cursor-not-allowed bg-slate-300" : "bg-blue-600"}`}
+          >
+            Continue to Dashboard
+          </button>
+        </div>
+      </>
     );
   }
 
@@ -3096,6 +3231,8 @@ return;
 
     {importStage === "preview" ? (
       renderFullResumePreview()
+    ) : importStage === "parsed" ? (
+      renderInlineWorkspace()
     ) : (
       <>
         <h2 className="text-3xl font-extrabold">
@@ -3157,49 +3294,12 @@ return;
           />
         )}
 
-        {/*
-          Phase 6I.4 - the inline "Choose your resume design" step, right
-          under "Resume analyzed successfully" on this SAME screen -
-          replaces the old requirement to visit Dashboard and click
-          "Prepare this resume for Canonical Templates" separately for a
-          normal new upload. Only appears once analysis has actually
-          finished (importStage === "parsed") and inlineTemplateStatus
-          says it's actually needed.
-        */}
-        {importStage === "parsed" && inlineTemplateStatus !== "not-applicable" && inlineTemplateStatus !== "checking" && (
-          <div className="mt-6 rounded-2xl border border-blue-100 bg-white p-6">
-            <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose your resume design</p>
-            <p className="mt-1 text-sm text-slate-500">Select exactly one template. This becomes your default design everywhere until you change it.</p>
-
-            {inlineTemplateStatus === "importing" && (
-              <p className="mt-4 text-sm font-semibold text-slate-500">Preparing your resume for canonical templates...</p>
-            )}
-
-            {inlineTemplateStatus === "import-error" && (
-              <p className="mt-4 text-sm font-semibold text-red-600">{inlineTemplateError}</p>
-            )}
-
-            {(inlineTemplateStatus === "selecting" || inlineTemplateStatus === "saving" || inlineTemplateStatus === "ready") && (
-              <div className="mt-4">
-                {inlineTemplateError && <p className="mb-3 text-sm font-semibold text-red-600">{inlineTemplateError}</p>}
-                <CanonicalTemplatePicker
-                  templates={inlineTemplates as any}
-                  selectedTemplateId={inlineSelectedTemplateId as any}
-                  onSelect={(templateId) => selectInlineTemplate(templateId)}
-                  disabled={inlineTemplateStatus === "saving"}
-                  livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
         {importMessage && (
           <p className="mt-5 rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">
             {importMessage}
           </p>
         )}
-         
+
          {resumeUploadError && (
   <div
     role="alert"
@@ -3222,30 +3322,6 @@ return;
     </button>
   </div>
 )}
-
-        <div className="mt-8 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={continueToImportPreview}
-            disabled={importStage !== "parsed" || inlineTemplateBlocksContinue}
-            className={`rounded-xl border px-6 py-3 font-bold ${
-              importStage === "parsed" && !inlineTemplateBlocksContinue
-                ? "border-blue-600 text-blue-600"
-                : "cursor-not-allowed border-slate-200 text-slate-400"
-            }`}
-          >
-            Continue to Preview →
-          </button>
-
-          <button
-            type="button"
-            onClick={continueToDashboard}
-            disabled={inlineTemplateBlocksContinue}
-            className={`rounded-xl px-6 py-3 font-bold text-white ${inlineTemplateBlocksContinue ? "cursor-not-allowed bg-slate-300" : "bg-blue-600"}`}
-          >
-            Continue to Dashboard
-          </button>
-        </div>
       </>
     )}
   </div>

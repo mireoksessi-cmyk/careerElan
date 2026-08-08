@@ -127,12 +127,33 @@ async function main() {
   const { count: sourceDocCount } = await userA.client.from("career_source_documents").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
   check("B6: exactly 1 source document row exists after 2 identical imports (no duplicate)", sourceDocCount, 1);
 
-  // ==================== C. No-automatic-merge: importing a DIFFERENT resume once a profile exists ====================
+  // ==================== C. Phase 6I.5 policy: importing a DIFFERENT resume once a profile exists creates a NEW version (old preserved) ====================
   const resumeIdA2 = await seedUploadedResume(admin, userA, FIXTURE_PDF_2_PATH, "threepage-pdf-resume.pdf", false);
   const resultA3 = await importServiceA.importResume(userA.userId, resumeIdA2);
-  checkTrue("C1: importing a DIFFERENT resume for a user who already has a profile is refused", resultA3.status === "conflict");
-  const { count: versionCountAfterConflict } = await userA.client.from("career_resume_versions").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
-  check("C2: the refused import created NO new version (no silent overwrite/merge)", versionCountAfterConflict, 1);
+  checkTrue("C1: importing a DIFFERENT resume for a user who already has a profile now SUCCEEDS (status=imported)", resultA3.status === "imported");
+  if (resultA3.status === "imported" && resultA1.status === "imported") {
+    checkFalse("C2: the new-content import is not a replay (alreadyImported=false)", resultA3.alreadyImported);
+    checkTrue("C3: the new import produces a DIFFERENT versionId than the first resume's version", resultA3.versionId !== resultA1.versionId);
+    checkTrue("C4: the new import produces a DIFFERENT sourceDocumentId than the first resume's source", resultA3.sourceDocumentId !== resultA1.sourceDocumentId);
+  }
+  const { count: versionCountAfterSecondImport } = await userA.client.from("career_resume_versions").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
+  check("C5: exactly 2 version rows now exist (the old one preserved, not overwritten)", versionCountAfterSecondImport, 2);
+  const oldVersionStillExists = resultA1.status === "imported" ? await reposA.resumeVersions.getById(resultA1.versionId) : null;
+  checkTrue("C6: the FIRST resume's version row is still readable, untouched, after the second import", oldVersionStillExists !== null);
+  const latestVersionAfterC = await reposA.resumeVersions.getLatestByProfileId(profileA!.id);
+  if (resultA3.status === "imported") {
+    check("C7: the profile's current LATEST version is now the SECOND resume's version", latestVersionAfterC?.id, resultA3.versionId);
+  }
+
+  // ==================== C8-C9. Re-uploading the SAME (now-current) resume again is a no-op replay, not a V3 ====================
+  const resumeIdA2Retry = await seedUploadedResume(admin, userA, FIXTURE_PDF_2_PATH, "threepage-pdf-resume-retry.pdf", false);
+  const resultA4 = await importServiceA.importResume(userA.userId, resumeIdA2Retry);
+  checkTrue("C8: re-uploading identical content under a DIFFERENT resumeId is still recognized as a replay", resultA4.status === "imported" && resultA4.alreadyImported === true);
+  if (resultA3.status === "imported" && resultA4.status === "imported") {
+    check("C9: the replay returns the SAME versionId as the second resume's own import (no V3)", resultA4.versionId, resultA3.versionId);
+  }
+  const { count: versionCountAfterReplay } = await userA.client.from("career_resume_versions").select("id", { count: "exact", head: true }).eq("profile_id", profileA!.id);
+  check("C10: still exactly 2 version rows after the identical-content re-upload under a new resumeId", versionCountAfterReplay, 2);
 
   // ==================== D. Ownership: cannot import another user's resume ====================
   const userB = await makeTestUser(admin, "b");
