@@ -3,6 +3,7 @@ import { withCanonicalAuth, readJsonBody, type CanonicalRouteContext } from "@/l
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
 import { ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { CanonicalTemplatePreferenceService } from "@/lib/careerMemory/services/canonicalTemplatePreferenceService";
+import { setResumeTemplatePreference } from "@/lib/careerMemory/services/resolveResumeTemplate";
 
 /*
   Phase 6I.2 - profile-level canonical template preference. userId only
@@ -33,14 +34,36 @@ export async function handleGetTemplatePreference(ctx: CanonicalRouteContext): P
   return jsonResponse({ defaultTemplateId: result?.defaultTemplateId ?? null });
 }
 
+/*
+  Phase 6I.6.14 - an optional `resumeId` in the body scopes this write
+  to ONE saved resume's own template preference (resumes.
+  selected_template) instead of the shared career_profiles.
+  default_template_id - see resolveResumeTemplate.ts's own header
+  comment for why career_profiles.default_template_id alone can no
+  longer represent "which template does THIS resume own" once a user
+  has more than one canonical-eligible resume. Ownership of resumeId is
+  re-verified inside setResumeTemplatePreference() itself. Omitting
+  resumeId preserves the exact pre-existing profile-level behavior -
+  every caller that doesn't know about per-resume scoping (Manual
+  Career Memory Step 9, the inline upload flow) keeps working
+  unchanged.
+*/
 export function makeHandlePutTemplatePreference(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
     const parsed = await readJsonBody(request);
     if (!parsed.ok) return parsed.response;
-    const body = parsed.body as { templateId?: unknown };
+    const body = parsed.body as { templateId?: unknown; resumeId?: unknown };
 
     if (typeof body.templateId !== "string" || body.templateId.trim().length === 0) {
       throw new ValidationError(["templateId is required and must be a non-empty string"]);
+    }
+
+    if (body.resumeId !== undefined) {
+      if (typeof body.resumeId !== "string" || body.resumeId.trim().length === 0) {
+        throw new ValidationError(["resumeId, if present, must be a non-empty string"]);
+      }
+      const result = await setResumeTemplatePreference(ctx.client, ctx.userId, body.resumeId, body.templateId);
+      return jsonResponse({ resumeId: result.resumeId, templateId: result.templateId });
     }
 
     const service = new CanonicalTemplatePreferenceService(ctx.repos);

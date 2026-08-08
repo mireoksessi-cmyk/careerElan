@@ -45,6 +45,17 @@ type JobItem = {
   fallback?: boolean;
 };
 
+/*
+  Phase 6I.6.14 - mirrors the JSON shape
+  GET .../resolve-template?resumeId=X returns (see
+  lib/careerMemory/services/resolveResumeTemplate.ts's own header
+  comment for the full architecture).
+*/
+type ResumeTemplateResolution =
+  | { kind: "legacy" }
+  | { kind: "selection-required"; profileId: string }
+  | { kind: "canonical"; templateId: string; source: "resume-explicit" | "profile-default"; profileId: string; versionId: string };
+
 type PreviewAsset =
   | {
       type: "career-memory-resume";
@@ -59,21 +70,29 @@ type PreviewAsset =
     }
   | {
       /*
-        Phase 6I.6.2 - the CURRENTLY SELECTED resume, rendered through the
-        canonical Template Engine (selected resume + career_profiles.
-        default_template_id), on demand only (opened via the same Preview
-        button/modal every other PreviewAsset variant already uses - see
-        this round's own header comment on why 6I.6.1's always-visible
-        inline iframe was removed in favor of this). Distinct from
-        "uploaded-resume" (which always shows a SPECIFIC row's raw
-        original file, regardless of selection) - this variant is only
-        ever set for the resume that IS career_memory.selected_resume_id,
-        and only when a canonical default template actually exists;
-        otherwise the existing "uploaded-resume" legacy branch is used,
-        preserving today's behavior for non-canonical accounts.
+        Phase 6I.6.14 - THIS SPECIFIC resume (resumeId), rendered through
+        the canonical Template Engine using THAT resume's own resolved
+        template (resumeTemplateResolutions[resumeId] - resume-explicit
+        preference if set, else the profile-default compatibility
+        fallback - never career_memory.selected_resume_id). `versionId`
+        is threaded through to the resume-preview route's own existing
+        `canonicalVersionId` override param (the same mechanism Manual
+        Career Memory Step 9 already uses to pin its own preview - see
+        that route's own Phase 6I.6.9 comment) specifically so this
+        preview is correct regardless of which resume is currently
+        selected on this page (Bug A: previously this variant carried no
+        resume identity at all and relied on implicit session-based
+        resolution, which only ever happened to match because the
+        button that set it was ALSO gated on "is this the selected
+        resume" - removing that gate without this fix would have shown
+        the WRONG resume's content). Distinct from "uploaded-resume"
+        (always the row's raw original file) - this variant is set
+        whenever that resume has been imported into Canonical Career
+        Memory, regardless of selection state.
       */
       type: "canonical-resume";
       templateId: string;
+      versionId: string;
       fileName?: string;
     }
   | null;
@@ -992,58 +1011,58 @@ const [selectedResume, setSelectedResume] = useState("");
 const [selectedCoverLetter, setSelectedCoverLetter] = useState("");
 
 /*
-  Phase 6I.1 - Canonical Resume Import trigger. Shown only when the
-  local Stage 1 canary's template selector flag is on AND the user has
-  no Canonical Career Memory profile/version yet (per this round's own
-  "no automatic merge" rule - once a profile exists, this bridge no
-  longer offers to import a second resume from here). Both checks hit
-  dev-only routes that 404 in real Netlify production
-  (withCanonicalAuth's own isNetlifyRuntime() gate), so this trigger is
-  simply invisible there - no separate production flag needed.
+  Phase 6I.1 - Canonical Resume Import trigger, per-resume as of Phase
+  6I.6.14. `importingResumeId` and `canonicalImportMessage` stay
+  page-wide (only one import can be in flight from this page at a
+  time; the message is transient UI feedback, not per-row state worth
+  its own map). Both the import route and the resolve-template route
+  hit dev-only routes that 404 in real Netlify production
+  (withCanonicalAuth's own isNetlifyRuntime() gate), so this whole
+  surface is simply invisible there - no separate production flag
+  needed.
 */
-const [canonicalImportEligible, setCanonicalImportEligible] = useState(false);
 const [importingResumeId, setImportingResumeId] = useState<string | null>(null);
 const [canonicalImportMessage, setCanonicalImportMessage] = useState<string | null>(null);
 
 /*
-  Phase 6I.2 - the hard gate (spec section 13): once a canonical
-  profile exists, `default_template_id` is either a real value
-  ("selected") or NULL ("needs-selection", which blocks navigation-like
-  actions until resolved). "not-applicable" covers both "flag off" and
-  "no canonical profile yet" - both mean nothing to render here.
+  Phase 6I.6.14 - root cause of "changing Resume B's template changes
+  Resume A/C too" (this round's Bug B): every prior read/write here
+  went through career_profiles.default_template_id, ONE value per user
+  (career_profiles has a UNIQUE(user_id) constraint - confirmed via
+  direct DB inspection), shared by every resume bridged into that same
+  profile. Fixed by resolving/writing per resumeId now (see
+  lib/careerMemory/services/resolveResumeTemplate.ts's own header
+  comment for the full architecture and why no migration was needed -
+  resumes.selected_template already existed, unused, per-row).
+
+  `templateSelectorEnabled` replaces the old page-wide
+  canonicalImportEligible/templateGateStatus - it is the ONE genuinely
+  global signal (the canary flag itself), never resume-scoped.
+  `resumeTemplateResolutions` is keyed by resume.id; each entry is
+  exactly the ResumeTemplateResolution shape resolve-template?resumeId=
+  returns. `availableTemplates` (the 4 templates' display metadata) is
+  fetched once and reused for every row's picker - it does not vary by
+  resume. `templatePickerOpenForResumeId` tracks which ONE row's picker
+  is expanded, so opening B's picker cannot be confused with A's.
 */
-const [templateGateStatus, setTemplateGateStatus] = useState<"loading" | "not-applicable" | "needs-selection" | "selected">("loading");
+const [templateSelectorEnabled, setTemplateSelectorEnabled] = useState(false);
 const [availableTemplates, setAvailableTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
-const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-const [savingTemplate, setSavingTemplate] = useState(false);
-const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
+const [resumeTemplateResolutions, setResumeTemplateResolutions] = useState<Record<string, ResumeTemplateResolution>>({});
+const [templatePickerOpenForResumeId, setTemplatePickerOpenForResumeId] = useState<string | null>(null);
+const [savingResumeTemplateId, setSavingResumeTemplateId] = useState<string | null>(null);
+const [resumeTemplateSaveError, setResumeTemplateSaveError] = useState<string | null>(null);
 
-async function checkTemplateGate() {
+async function loadResumeTemplateResolution(resumeId: string) {
   try {
-    const prefRes = await fetch("/api/internal/canonical-career-memory/template-preference");
-    if (!prefRes.ok) {
-      setTemplateGateStatus("not-applicable");
+    const res = await fetch(`/api/internal/canonical-career-memory/resolve-template?resumeId=${encodeURIComponent(resumeId)}`);
+    if (!res.ok) {
+      setResumeTemplateResolutions((prev) => ({ ...prev, [resumeId]: { kind: "legacy" } }));
       return;
     }
-    const prefData = await prefRes.json();
-    if (prefData.defaultTemplateId) {
-      setSelectedTemplateId(prefData.defaultTemplateId);
-      setTemplateGateStatus("selected");
-      return;
-    }
-
-    const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
-    if (profileRes.status === 404) {
-      setTemplateGateStatus("not-applicable");
-      return;
-    }
-
-    const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
-    const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
-    setAvailableTemplates(templatesData.templates ?? []);
-    setTemplateGateStatus("needs-selection");
+    const data = await res.json();
+    setResumeTemplateResolutions((prev) => ({ ...prev, [resumeId]: data }));
   } catch {
-    setTemplateGateStatus("not-applicable");
+    setResumeTemplateResolutions((prev) => ({ ...prev, [resumeId]: { kind: "legacy" } }));
   }
 }
 
@@ -1054,23 +1073,16 @@ useEffect(() => {
     try {
       const configRes = await fetch("/api/internal/canonical-generate-package/config");
       const configData = configRes.ok ? await configRes.json() : { templateSelectorEnabled: false };
-      if (!configData.templateSelectorEnabled) {
-        if (!cancelled) {
-          setCanonicalImportEligible(false);
-          setTemplateGateStatus("not-applicable");
-        }
-        return;
-      }
-
-      const profileRes = await fetch("/api/internal/canonical-career-memory/profile");
       if (cancelled) return;
-      setCanonicalImportEligible(profileRes.status === 404);
-      await checkTemplateGate();
+      setTemplateSelectorEnabled(Boolean(configData.templateSelectorEnabled));
+      if (!configData.templateSelectorEnabled) return;
+
+      const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
+      if (cancelled) return;
+      const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
+      setAvailableTemplates(templatesData.templates ?? []);
     } catch {
-      if (!cancelled) {
-        setCanonicalImportEligible(false);
-        setTemplateGateStatus("not-applicable");
-      }
+      if (!cancelled) setTemplateSelectorEnabled(false);
     }
   }
 
@@ -1080,26 +1092,48 @@ useEffect(() => {
   };
 }, []);
 
-async function selectDefaultTemplate(templateId: string) {
-  setSavingTemplate(true);
-  setTemplateSaveError(null);
+/*
+  Re-resolves every uploaded resume's own template whenever the resume
+  list changes (initial load, upload, delete) - each row's Preview
+  button and template control need their OWN resolution, never a
+  shared/global one. Small N (MAX_UPLOADED_RESUMES caps this at 3), so
+  one fetch per row is not a real cost.
+*/
+useEffect(() => {
+  if (!templateSelectorEnabled || resumes.length === 0) return;
+  let cancelled = false;
+  (async () => {
+    for (const resume of resumes) {
+      if (cancelled) return;
+      await loadResumeTemplateResolution(resume.id);
+    }
+  })();
+  return () => {
+    cancelled = true;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [templateSelectorEnabled, resumes.map((r: any) => r.id).join(",")]);
+
+async function changeResumeTemplate(resumeId: string, templateId: string) {
+  setSavingResumeTemplateId(resumeId);
+  setResumeTemplateSaveError(null);
   try {
     const res = await fetch("/api/internal/canonical-career-memory/template-preference", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ templateId }),
+      body: JSON.stringify({ templateId, resumeId }),
     });
     const data = await res.json();
     if (!res.ok) {
-      setTemplateSaveError(data?.error?.message || "Could not save your template selection.");
+      setResumeTemplateSaveError(data?.error?.message || "Could not save this resume's template selection.");
       return;
     }
-    setSelectedTemplateId(data.defaultTemplateId);
-    setTemplateGateStatus("selected");
+    await loadResumeTemplateResolution(resumeId);
+    setTemplatePickerOpenForResumeId(null);
   } catch {
-    setTemplateSaveError("Could not save your template selection.");
+    setResumeTemplateSaveError("Could not save this resume's template selection.");
   } finally {
-    setSavingTemplate(false);
+    setSavingResumeTemplateId(null);
   }
 }
 
@@ -1117,9 +1151,8 @@ async function prepareResumeForCanonicalTemplates(resumeId: string) {
       setCanonicalImportMessage(data?.error?.message || "Could not prepare this resume for Canonical Templates.");
       return;
     }
-    setCanonicalImportEligible(false);
     setCanonicalImportMessage("This resume is ready for Canonical Templates. Choose a template below.");
-    await checkTemplateGate();
+    await loadResumeTemplateResolution(resumeId);
   } catch {
     setCanonicalImportMessage("Could not prepare this resume for Canonical Templates.");
   } finally {
@@ -2442,18 +2475,19 @@ function renderPreviewContent() {
   }
 
   /*
-    Phase 6I.6.2 - selected resume, rendered canonically on demand. Same
-    resume-preview route + iframe pattern Career Memory's own live
-    preview and this round's Paste Job fix already use -
-    resolveCanonicalResumeContext() (session mode) resolves the resume
-    itself server-side, so no resumeId is threaded through here.
+    Phase 6I.6.14 - THIS resume's own resolved template, rendered
+    canonically on demand. Same resume-preview route + iframe pattern
+    Career Memory's own live preview and Paste Job already use, pinned
+    to an explicit canonicalVersionId (see PreviewAsset's own header
+    comment for why this resume's identity, not implicit session
+    selection, must drive this render).
   */
   if (previewAsset.type === "canonical-resume") {
     return (
       <iframe
-        key={`${previewAsset.templateId}::${selectedResume}`}
-        src={`/api/internal/canonical-career-memory/resume-preview?templateId=${previewAsset.templateId}&format=html`}
-        title="Selected resume preview"
+        key={`${previewAsset.templateId}::${previewAsset.versionId}`}
+        src={`/api/internal/canonical-career-memory/resume-preview?templateId=${previewAsset.templateId}&format=html&canonicalVersionId=${previewAsset.versionId}`}
+        title="Resume preview"
         className="h-[820px] w-full rounded-xl border-0"
       />
     );
@@ -2988,134 +3022,135 @@ Choose which resume and cover letter will be used when generating your applicati
     </div>
   )}
 
-  {resumes.map((resume: any) => (
-    <div
-      key={resume.id}
-      className={`mb-3 flex flex-wrap items-center gap-3 rounded-xl border p-3 transition ${
-        selectedResume === resume.id
-          ? "border-blue-500 bg-blue-50/40"
-          : "border-slate-200 bg-white"
-      }`}
-    >
-      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
-        <input
-          type="radio"
-          name="resume"
-          checked={selectedResume === resume.id}
-          onChange={async () => {
-            setSelectedResume(resume.id);
+  {resumes.map((resume: any) => {
+    const resolution = resumeTemplateResolutions[resume.id];
+    const isPickerOpen = templatePickerOpenForResumeId === resume.id;
+    /*
+      Phase 6I.6.14 - the picker panel opens either because this resume
+      has NEVER had a template chosen at all (selection-required - a
+      real canonical version exists via import-resume, but
+      career_profiles.default_template_id was also never set for this
+      user) or because the user explicitly clicked "Change Template" on
+      THIS row (isPickerOpen). Either way it is scoped to resume.id
+      alone - opening B's picker can never affect what A or C show.
+    */
+    const showPicker = resolution?.kind === "selection-required" || isPickerOpen;
 
-            await saveSelection(
-              "uploaded",
-              resume.id,
-              selectedCoverLetter || null
-            );
-          }}
-        />
-
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">
-            Import Resume
-          </p>
-
-          <p className="truncate text-sm text-gray-500">
-            {resume.file_name}
-          </p>
-        </div>
-      </label>
-
-      <button
-        type="button"
-        onClick={() => {
-          /*
-            Phase 6I.6.2 - only the resume that IS the current selection,
-            AND only when a canonical default template actually exists,
-            previews canonically (selected resume + default_template_id).
-            Any other row (not selected, or selected but no canonical
-            profile/template yet) keeps today's exact legacy behavior -
-            its own raw uploaded file, via ResumePreviewRenderer.
-          */
-          if (resume.id === selectedResume && templateGateStatus === "selected" && selectedTemplateId) {
-            setPreviewAsset({ type: "canonical-resume", templateId: selectedTemplateId, fileName: resume.file_name });
-          } else {
-            setPreviewAsset({ type: "uploaded-resume", item: resume });
-          }
-        }}
-        className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
-      >
-        Preview
-      </button>
-
-      {canonicalImportEligible && (
-        <button
-          type="button"
-          onClick={() => prepareResumeForCanonicalTemplates(resume.id)}
-          disabled={importingResumeId === resume.id}
-          className="shrink-0 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs font-bold text-purple-600 transition hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50"
+    return (
+      <div key={resume.id} className="mb-3">
+        <div
+          className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 transition ${
+            selectedResume === resume.id
+              ? "border-blue-500 bg-blue-50/40"
+              : "border-slate-200 bg-white"
+          }`}
         >
-          {importingResumeId === resume.id ? "Preparing..." : "Prepare this resume for Canonical Templates"}
-        </button>
-      )}
-    </div>
-  ))}
+          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+            <input
+              type="radio"
+              name="resume"
+              checked={selectedResume === resume.id}
+              onChange={async () => {
+                setSelectedResume(resume.id);
+
+                await saveSelection(
+                  "uploaded",
+                  resume.id,
+                  selectedCoverLetter || null
+                );
+              }}
+            />
+
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">
+                Import Resume
+              </p>
+
+              <p className="truncate text-sm text-gray-500">
+                {resume.file_name}
+              </p>
+
+              {resolution?.kind === "canonical" && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Template: <span className="font-semibold text-slate-700">{resolution.templateId}</span>
+                </p>
+              )}
+            </div>
+          </label>
+
+          <button
+            type="button"
+            onClick={() => {
+              /*
+                Phase 6I.6.14 (Bug A fix) - THIS row's own resolved
+                canonical state drives Preview, never whether this
+                resume happens to be the currently-selected one. A
+                resume that has been imported (resolution.kind ===
+                "canonical") always previews canonically using its OWN
+                template + version; a resume never imported
+                (resolution.kind === "legacy", or resolution still
+                loading) keeps the pre-existing raw-original-file
+                preview - a real, correct fallback, not a bug, since no
+                canonical rendering exists for it yet.
+              */
+              if (resolution?.kind === "canonical") {
+                setPreviewAsset({ type: "canonical-resume", templateId: resolution.templateId, versionId: resolution.versionId, fileName: resume.file_name });
+              } else {
+                setPreviewAsset({ type: "uploaded-resume", item: resume });
+              }
+            }}
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+          >
+            Preview
+          </button>
+
+          {templateSelectorEnabled && resolution?.kind === "legacy" && (
+            <button
+              type="button"
+              onClick={() => prepareResumeForCanonicalTemplates(resume.id)}
+              disabled={importingResumeId === resume.id}
+              className="shrink-0 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs font-bold text-purple-600 transition hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {importingResumeId === resume.id ? "Preparing..." : "Prepare this resume for Canonical Templates"}
+            </button>
+          )}
+
+          {resolution?.kind === "canonical" && (
+            <button
+              type="button"
+              onClick={() => setTemplatePickerOpenForResumeId(isPickerOpen ? null : resume.id)}
+              className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+            >
+              {isPickerOpen ? "Cancel" : "Change Template"}
+            </button>
+          )}
+        </div>
+
+        {showPicker && (
+          <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+            <p className="mb-1 text-sm font-bold text-slate-900">
+              Template for <span className="text-blue-700">{resume.file_name}</span>
+            </p>
+            <p className="mb-3 text-xs text-slate-600">
+              Pick one of the 4 Canonical Templates. This is THIS resume&apos;s own template - Dashboard, Paste Job, and packages
+              generated from this resume all use it, and it never changes any other saved resume.
+            </p>
+            {resumeTemplateSaveError && <p className="mb-3 text-xs font-semibold text-red-600">{resumeTemplateSaveError}</p>}
+            <CanonicalTemplatePicker
+              templates={availableTemplates as any}
+              selectedTemplateId={(resolution?.kind === "canonical" ? resolution.templateId : null) as any}
+              onSelect={(templateId) => changeResumeTemplate(resume.id, templateId)}
+              disabled={savingResumeTemplateId === resume.id}
+              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+            />
+          </div>
+        )}
+      </div>
+    );
+  })}
 
   {canonicalImportMessage && (
     <p className="mt-2 text-xs font-semibold text-slate-600">{canonicalImportMessage}</p>
-  )}
-
-  {templateGateStatus === "needs-selection" && (
-    <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
-      <p className="mb-1 text-sm font-bold text-slate-900">Choose your resume template</p>
-      <p className="mb-3 text-xs text-slate-600">
-        Pick one of the 4 Canonical Templates. This becomes your default design everywhere — Dashboard, Paste Job, and generated
-        packages — until you change it.
-      </p>
-      {templateSaveError && <p className="mb-3 text-xs font-semibold text-red-600">{templateSaveError}</p>}
-      <CanonicalTemplatePicker
-        templates={availableTemplates as any}
-        selectedTemplateId={selectedTemplateId as any}
-        onSelect={(templateId) => selectDefaultTemplate(templateId)}
-        disabled={savingTemplate}
-        livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
-      />
-    </div>
-  )}
-
-  {templateGateStatus === "selected" && selectedTemplateId && (
-    <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-      {/*
-        Phase 6I.6.2 - Phase 6I.6.1 fixed the underlying bug (Dashboard
-        never actually rendering the selected template) by embedding a
-        permanently-visible canonical iframe here, but that produced its
-        own UX regression: a large document permanently taking up space
-        under these controls, even before the user asked to see it. The
-        fix stays (selecting/changing a template now genuinely changes
-        what Preview shows - see the "canonical-resume" PreviewAsset
-        branch and the per-row Preview button above), it's just no
-        longer rendered inline - it opens on demand in the SAME preview
-        modal every other Dashboard preview already uses.
-      */}
-      <p className="text-xs font-semibold text-slate-600">
-        Default template: <span className="text-slate-900">{selectedTemplateId}</span>
-      </p>
-      <button
-        type="button"
-        onClick={async () => {
-          try {
-            const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
-            const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
-            setAvailableTemplates(templatesData.templates ?? []);
-            setTemplateSaveError(null);
-            setTemplateGateStatus("needs-selection");
-          } catch {
-            setTemplateSaveError("Could not load templates.");
-          }
-        }}
-        className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
-      >
-        Change Template
-      </button>
-    </div>
   )}
 </div>
 <div>
