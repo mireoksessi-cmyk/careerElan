@@ -455,6 +455,17 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [manualSelectedTemplateId, setManualSelectedTemplateId] = useState<string | null>(null);
   const [manualTemplateError, setManualTemplateError] = useState<string | null>(null);
   const [manualPreviousVersionSource, setManualPreviousVersionSource] = useState<"none" | "manual" | "uploaded" | null>(null);
+  /*
+    Phase 6I.6.9 - this Manual entry's OWN canonical_resume_version_id,
+    from import-manual's own response. Passed as an explicit
+    `canonicalVersionId` override on every resume-preview request this
+    Step 9 makes, so the preview can never fall through to
+    career_memory.selected_resume_type/selected_resume_id (Dashboard-
+    only, never written by this wizard, and can point at a completely
+    different resume) - see resolveCanonicalResumeContext.ts's own
+    header comment on SessionModeInput.versionId for the full trace.
+  */
+  const [manualCanonicalVersionId, setManualCanonicalVersionId] = useState<string | null>(null);
 
   async function runManualCanonicalFlow() {
     setManualTemplateStatus("importing");
@@ -481,6 +492,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
         return;
       }
       setManualPreviousVersionSource(importData.previousVersionSource ?? "none");
+      setManualCanonicalVersionId(importData.versionId ?? null);
 
       const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
       const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
@@ -2627,7 +2639,7 @@ return;
               selectedTemplateId={manualSelectedTemplateId as any}
               onSelect={(templateId) => selectManualTemplate(templateId)}
               disabled={manualTemplateStatus === "saving-template"}
-              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
             />
           </div>
         </div>
@@ -2636,7 +2648,7 @@ return;
             <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
               <iframe
                 key={manualSelectedTemplateId}
-                src={`/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html`}
+                src={`/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
                 title="Canonical resume preview"
                 className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
               />

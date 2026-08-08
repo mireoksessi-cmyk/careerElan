@@ -6,6 +6,7 @@ import { resolveCanonicalTemplateId } from "@/lib/careerMemory/orchestration/can
 import { resolveCanonicalResumeContext, loadRuntimeForResolvedVersion } from "@/lib/careerMemory/services/resolveCanonicalResumeContext";
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
 import { renderTemplateFromRuntime } from "@/lib/resumeTemplates/engine/renderTemplate";
+import { buildPreviewOnlyResume } from "@/lib/resumeTemplates/preview/previewOnlyCompletion";
 import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/types";
 import type { TemplateDensity } from "@/lib/resumeTemplates/contracts/types";
 
@@ -116,7 +117,21 @@ export function makeHandleResumePreview(request: Request) {
 
     const templateId = resolveCanonicalTemplateId(rawTemplateId);
 
-    const resolved = await resolveCanonicalResumeContext({ mode: "session", repos: ctx.repos, client: ctx.client, userId: ctx.userId });
+    /*
+      Phase 6I.6.9 - explicit versionId override (Branch A2 of
+      resolveCanonicalResumeContext - see that file's own header comment
+      on SessionModeInput.versionId). Manual Career Memory Step 9 passes
+      its OWN canonical version id (from its own import-manual response)
+      here so this route can never fall through to career_memory.
+      selected_resume_type/selected_resume_id - a completely unrelated,
+      Dashboard-only selection that must never leak into a Manual
+      resume's own preview. Omitted entirely by every other existing
+      caller (Dashboard/Paste Job/JobDetail/uploaded-resume Career
+      Memory), whose behavior is therefore byte-for-byte unchanged.
+    */
+    const explicitVersionId = url.searchParams.get("canonicalVersionId") ?? undefined;
+
+    const resolved = await resolveCanonicalResumeContext({ mode: "session", repos: ctx.repos, client: ctx.client, userId: ctx.userId, versionId: explicitVersionId });
     let runtime;
     if (resolved.status === "not-canonical" || resolved.status === "legacy-only") {
       const memoryService = new CanonicalCareerMemoryService(ctx.repos);
@@ -126,6 +141,20 @@ export function makeHandleResumePreview(request: Request) {
     } else {
       runtime = resolved.runtime ?? (await loadRuntimeForResolvedVersion(ctx.repos, resolved.versionId));
     }
+
+    /*
+      Phase 6I.6.9 - PREVIEW-ONLY structural completion (see
+      previewOnlyCompletion.ts's own header comment). Returns `runtime`
+      unchanged whenever the resolved resume already renders
+      successfully as-is - a genuinely complete resume is never touched.
+      This is what lets Step 9 show all 4 templates for a brand-new,
+      zero-data Manual resume instead of throwing "missing-identity"
+      through renderTemplateFromRuntime -> TemplateRenderingError ->
+      PERSISTENCE_ERROR (this route's own pre-existing, unrelated
+      persistence-error-code reuse - see PersistenceError's own header
+      comment in domainErrors.ts) into the iframe as raw JSON.
+    */
+    runtime = { ...runtime, resume: buildPreviewOnlyResume(runtime.resume) };
 
     const renderOptions = { templateId, useTailored: false as const, paperSize: rawPaperSize, density: rawDensity, locale, generatedAt: new Date(0).toISOString() };
 

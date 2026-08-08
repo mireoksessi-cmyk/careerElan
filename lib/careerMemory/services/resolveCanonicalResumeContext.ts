@@ -74,7 +74,7 @@ const RESUMES_STORAGE_BUCKET = "resumes";
 export type ResolveCanonicalResumeContextResult =
   | {
       status: "resolved";
-      source: "application-binding" | "explicit-resume" | "selected-resume" | "profile-latest";
+      source: "application-binding" | "explicit-version" | "explicit-resume" | "selected-resume" | "profile-latest";
       profileId: string;
       versionId: string;
       sourceDocumentId: string | null;
@@ -120,6 +120,30 @@ type SessionModeInput = {
      applicationTemplateResolver.ts's own established pattern for the
      same legacy table. */
   applicationId?: string;
+  /*
+    Phase 6I.6.9 - explicit canonical_resume_version_id override (Branch
+    A2), for callers that already know EXACTLY which version they mean
+    and must never fall through to career_memory.selected_resume_type/
+    selected_resume_id. That column pair is written ONLY by the
+    Dashboard resume picker (grep-confirmed: no other call site in this
+    repo ever writes it) - it reflects "which UPLOADED resume is
+    selected on Dashboard," a completely different concept from "which
+    Manual Career Memory version is currently being edited," and is
+    never updated by the Manual wizard. Without this override, a user
+    who previously selected an uploaded resume B on Dashboard and then
+    opens a brand-new (or existing) Manual resume A would have Step 9's
+    preview silently resolve to B's content instead of A's - the exact
+    cross-resume leak the round's own "SELECTED RESUME = A -> PREVIEW
+    SOURCE = A ONLY" invariant forbids (found via this round's own root-
+    cause trace, not previously covered by any test since every prior
+    UAT/test account only ever had one canonical version in play at a
+    time, coincidentally masking the gap). Ownership is enforced by
+    career_resume_versions' own RLS - resumeVersions.getById() returns
+    null for a version this session cannot see, exactly the same
+    enforcement loadRuntimeForResolvedVersion() already relies on - no
+    new ownership check invented here, no RLS change.
+  */
+  versionId?: string;
 };
 
 type ServiceRoleModeInput = {
@@ -161,6 +185,13 @@ async function resolveSessionMode(input: SessionModeInput): Promise<ResolveCanon
     if (application?.canonical_resume_version_id && application?.canonical_profile_id) {
       return { status: "resolved", source: "application-binding", profileId: application.canonical_profile_id, versionId: application.canonical_resume_version_id, sourceDocumentId: null };
     }
+  }
+
+  // Branch A2 - explicit versionId override (Phase 6I.6.9) - see SessionModeInput.versionId's own header comment.
+  if (input.versionId) {
+    const row = await repos.resumeVersions.getById(input.versionId);
+    if (!row) throw new SelectedResumeUnavailableError("resume-deleted", `Resolved resume version "${input.versionId}" could not be found or is not owned by this user.`);
+    return { status: "resolved", source: "explicit-version", profileId: row.profile_id, versionId: row.id, sourceDocumentId: row.source_document_id ?? null };
   }
 
   // Branch B/C - explicit resumeId override, or the user's current career_memory selection.
