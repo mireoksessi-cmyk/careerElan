@@ -2497,9 +2497,9 @@ if (!user) {
 
     <main className="min-h-screen bg-[#f6fbff] text-gray-900">
      {previewAsset && (
-  <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
-    <div className="mx-auto w-full max-w-5xl rounded-3xl bg-slate-100 shadow-2xl">
-      <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-3xl border-b border-slate-200 bg-white px-6 py-4">
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
+    <div className="mx-auto flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-slate-100 shadow-2xl">
+      <div className="flex items-center justify-between rounded-t-3xl border-b border-slate-200 bg-white px-6 py-4">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-blue-600">
             Document Preview
@@ -2525,13 +2525,13 @@ if (!user) {
         </button>
       </div>
 
-      <div className="p-4 sm:p-8">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-8">
         <div className="rounded-2xl bg-white shadow">
           {renderPreviewContent()}
         </div>
       </div>
 
-      <div className="sticky bottom-0 flex justify-end rounded-b-3xl border-t border-slate-200 bg-white px-6 py-4">
+      <div className="flex justify-end rounded-b-3xl border-t border-slate-200 bg-white px-6 py-4">
         <button
           type="button"
           onClick={() => setPreviewAsset(null)}
