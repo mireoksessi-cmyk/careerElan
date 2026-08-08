@@ -1,5 +1,7 @@
 "use client";
 
+import { getApplicationStatusPresentation } from "@/lib/jobTracker/applicationStatusPresentation";
+
 type Props = {
   applications: any[];
 
@@ -142,25 +144,10 @@ export default function JobList({
                     py-1
                     text-xs
                     font-bold
-
-                    ${
-                      app.status === "Applied"
-                        ? "bg-blue-100 text-blue-700"
-
-                        : app.status === "Interview"
-                        ? "bg-yellow-100 text-yellow-700"
-
-                        : app.status === "Offer"
-                        ? "bg-purple-100 text-purple-700"
-
-                        : app.status === "Accepted"
-                        ? "bg-green-100 text-green-700"
-
-                        : "bg-red-100 text-red-700"
-                    }
+                    ${getApplicationStatusPresentation(app.status).badgeClass}
                   `}
                 >
-                  {app.status}
+                  {getApplicationStatusPresentation(app.status).label}
                 </span>
 
               </div>
