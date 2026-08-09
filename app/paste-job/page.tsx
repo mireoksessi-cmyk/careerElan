@@ -1173,6 +1173,29 @@ export default function PasteJobPage() {
   const [showDefaultApplication, setShowDefaultApplication] = useState(false);
 
   /*
+    Phase 6I.6.20 - unsaved-changes protection. Set true only from the two
+    genuine user-typing entry points (the Resume/Cover Letter A4Preview
+    onChange and the Email Draft textarea onChange below), never from
+    programmatic setPackageData calls (initial generation, "Apply with
+    Saved Resume" populating materials, poller success) - those aren't
+    edits the user could lose by navigating away. Cleared only after a
+    successful savePackage() (see savePackage()'s own comment on this),
+    never on a failed save, so a failed save leaves both the edited text
+    and the dirty flag intact for the user to retry.
+  */
+  const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (!isDirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  /*
     Display-only hint for the lifetime Generate Package quota (Production
     only - enforced is false everywhere else, including local dev). Never
     used to decide whether to allow a click; the server always re-checks
@@ -2949,6 +2972,7 @@ async function downloadDocx() {
   alert("Application package has been saved successfully!");
 
   setMessage("Application package saved to cloud.");
+  setIsDirty(false);
 }
 
   function sanitizeFileName(value: string) {
@@ -4304,15 +4328,16 @@ async function downloadDocx() {
               value={
                 packageData.emailDraft
               }
-              onChange={(event) =>
+              onChange={(event) => {
                 setPackageData(
                   (previous) => ({
                     ...previous,
                     emailDraft:
                       event.target.value,
                   })
-                )
-              }
+                );
+                setIsDirty(true);
+              }}
               className="min-h-[520px] w-full resize-y rounded-2xl border border-gray-100 bg-slate-50 p-6 text-sm leading-7 text-gray-700 outline-none"
             />
           ) : (
@@ -4323,15 +4348,16 @@ async function downloadDocx() {
                     selectedPreview
                   ]
                 }
-                onChange={(value) =>
+                onChange={(value) => {
                   setPackageData(
                     (previous) => ({
                       ...previous,
                       [selectedPreview]:
                         value,
                     })
-                  )
-                }
+                  );
+                  setIsDirty(true);
+                }}
               />
             </div>
           )}

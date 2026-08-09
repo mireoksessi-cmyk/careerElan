@@ -51,41 +51,102 @@ function normalizeForPdf(text: string): string {
     .replace(/\t/g, " ");
 }
 
-function paginateLikeExportPdf(text: string): string[] {
+/*
+  Phase 6I.6.20 - P0 data-loss fix. The previous version of this function
+  paginated by WRAPPED sub-lines (pdf.splitTextToSize() applied to the
+  WHOLE text at once), then joined each page's wrapped sub-lines back
+  together as that page's editable textarea value. That is lossy by
+  construction even with zero edits: splitTextToSize() re-wraps prose at
+  word boundaries, so "pages.join('\n')" never reproduces the original
+  text's real line-break structure - and the caller (A4Preview's single
+  shared onChange, see below) was replacing the ENTIRE document with
+  whichever one page's wrapped text last changed, destroying every other
+  page on the very first keystroke.
+
+  The fix paginates by RAW newline-delimited lines (text.split("\n"))
+  instead. This is losslessly reversible - rawLines.join("\n") always
+  reconstructs the exact original text, split/join being exact inverses
+  for any string - so a page's stored/editable content is always a
+  verbatim slice of the source, never a re-flowed approximation. Per-line
+  wrapped sub-line COUNTS (via splitTextToSize on each raw line
+  individually) are still used to replicate the same y-position/page-break
+  math the original algorithm used for vertical spacing parity with the
+  real PDF export (verified empirically: splitting first then wrapping
+  each piece produces the identical wrapped-line sequence splitTextToSize
+  produces on the whole text at once - blank lines, paragraph wraps, and
+  all). The one accepted trade-off: a single raw line is never split
+  across two pages (it moves to the page where it starts), so an
+  anomalously long unbroken line may occasionally cause a page to run a
+  little over/under the true PDF's break point. Real resume/cover-letter
+  content is line-structured (headers, bullets, short paragraphs) so this
+  essentially never differs from the prior wrapped-sub-line pagination in
+  practice, and it trades a rare, cosmetic page-break mismatch for a
+  guarantee of zero data loss, which is this phase's non-negotiable
+  invariant.
+*/
+function computeWrappedLineCounts(pdf: jsPDF, rawLines: string[]): number[] {
+  return rawLines.map(
+    (line) => Math.max(1, pdf.splitTextToSize(normalizeForPdf(line), TEXT_WIDTH_MM).length)
+  );
+}
+
+/*
+  Returns the [start, end) raw-line index range owned by each page. Ranges
+  are contiguous, non-overlapping, and together cover every raw line
+  exactly once - this is what guarantees no content can be dropped or
+  duplicated regardless of how many pages result.
+*/
+function paginateRawLineRanges(rawLines: string[], wrappedCounts: number[]): [number, number][] {
+  const ranges: [number, number][] = [];
+  let pageStart = 0;
+  let y = FIRST_LINE_Y_MM;
+
+  for (let i = 0; i < rawLines.length; i++) {
+    if (y > LAST_LINE_Y_MM && i > pageStart) {
+      ranges.push([pageStart, i]);
+      pageStart = i;
+      y = FIRST_LINE_Y_MM;
+    }
+    y += wrappedCounts[i] * LINE_HEIGHT_MM;
+  }
+
+  ranges.push([pageStart, rawLines.length]);
+  return ranges;
+}
+
+function makeMeasurementPdf(): jsPDF {
   const pdf = new jsPDF({
     orientation: "portrait",
     unit: "mm",
     format: PDF_FORMAT,
   });
-
   pdf.setFont(FONT_NAME);
   pdf.setFontSize(FONT_SIZE_PT);
+  return pdf;
+}
 
-  const lines: string[] = pdf.splitTextToSize(
-    normalizeForPdf(text),
-    TEXT_WIDTH_MM
-  );
+/*
+  Pure, DOM-free pagination core - exported so
+  lib/resumeTemplates/tests/multiPageEditingDataLoss6I620.test.ts can
+  exercise the exact same logic the component renders with, without a
+  React/DOM test harness. The component below is a thin wiring layer
+  over these two functions.
+*/
+export function computeA4Pages(text: string): { pages: string[]; pageLineRanges: [number, number][] } {
+  const rawLines = text.split("\n");
+  const pdf = makeMeasurementPdf();
+  const wrappedCounts = computeWrappedLineCounts(pdf, rawLines);
+  const pageLineRanges = paginateRawLineRanges(rawLines, wrappedCounts);
+  const pages = pageLineRanges.map(([start, end]) => rawLines.slice(start, end).join("\n"));
+  return { pages, pageLineRanges };
+}
 
-  const pages: string[] = [];
-  let current: string[] = [];
-  let y = FIRST_LINE_Y_MM;
-
-  for (const line of lines) {
-    if (y > LAST_LINE_Y_MM) {
-      pages.push(current.join("\n"));
-      current = [];
-      y = FIRST_LINE_Y_MM;
-    }
-
-    current.push(line);
-    y += LINE_HEIGHT_MM;
-  }
-
-  if (current.length > 0 || pages.length === 0) {
-    pages.push(current.join("\n"));
-  }
-
-  return pages;
+export function reconstructFullTextAfterPageEdit(text: string, pageIndex: number, newPageText: string): string {
+  const rawLines = text.split("\n");
+  const { pageLineRanges } = computeA4Pages(text);
+  const [start, end] = pageLineRanges[pageIndex];
+  const newLines = newPageText.split("\n");
+  return [...rawLines.slice(0, start), ...newLines, ...rawLines.slice(end)].join("\n");
 }
 
 export default function A4Preview({
@@ -95,7 +156,30 @@ export default function A4Preview({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
 
-  const pages = useMemo(() => paginateLikeExportPdf(text), [text]);
+  /*
+    Recomputed fresh from `text` on every render (never kept as separate
+    local state) - `text` is the ONLY source of truth here, pages are
+    purely a derived presentation of it. This is what makes reflow (page
+    count changing after an edit) just work: the next render re-derives
+    page boundaries from the new text, nothing needs to be manually kept
+    in sync.
+  */
+  const { pages } = useMemo(() => computeA4Pages(text), [text]);
+
+  /*
+    Reconstructs the FULL document by replacing only the edited page's
+    own raw-line range with the user's new text, leaving every other
+    page's raw lines byte-identical. This is the actual P0 fix: the old
+    code called the single shared `onChange` prop with just the edited
+    page's own text, which the caller (app/paste-job/page.tsx) wrote
+    straight into the full-document state, silently discarding every
+    other page. Passing the full reconstructed text instead means the
+    caller's state always remains complete.
+  */
+  function handlePageChange(pageIndex: number, newPageText: string) {
+    if (!onChange) return;
+    onChange(reconstructFullTextAfterPageEdit(text, pageIndex, newPageText));
+  }
 
   /*
     Scale is purely a visual zoom (CSS transform on the outer wrapper) -
@@ -164,7 +248,7 @@ export default function A4Preview({
               <textarea
                 readOnly={!onChange}
                 value={page}
-                onChange={(e) => onChange?.(e.target.value)}
+                onChange={(e) => handlePageChange(index, e.target.value)}
                 style={{
                   width: textWidthPx,
                   height: pageHeightPx - paddingTopPx * 2,
