@@ -14,7 +14,7 @@ import React from "react";
 import { normalizeResume, type NormalizedEducationEntry, type NormalizedExperienceEntry } from "../../shared/contentAdapters";
 import { CREATIVE_TIMELINE_COLORS } from "../../shared/colorTokens";
 import { CREATIVE_TIMELINE_FONTS, MIN_SAFE_FONT_SIZE_PT } from "../../shared/typography";
-import { HTML_DENSITY_SPACING } from "../../shared/spacing";
+import { HTML_DENSITY_SPACING, type HtmlSpacingTokens } from "../../shared/spacing";
 import { PAPER_DIMENSIONS } from "../../shared/paperSizes";
 import { ContentItemsView } from "../../shared/ContentItemsView";
 import { renderHtmlDocument } from "../../shared/documentShell";
@@ -42,17 +42,37 @@ function TimelineItem({ colors, children }: { colors: Colors; children: React.Re
   );
 }
 
-function heading(label: string, colors: Colors): React.ReactElement {
-  return <h2 style={{ fontFamily: CREATIVE_TIMELINE_FONTS.heading, fontSize: "1em", letterSpacing: "0.03em", color: colors.accent, margin: "0 0 8px 0" }}>{label}</h2>;
+/*
+  Phase 6I.6.17 - see executiveMinimal/html.tsx's identical fix and its
+  own header comment for the full rationale, INCLUDING the margin-
+  collapse correction: tokens.sectionGapPx is applied via paddingTop,
+  not marginTop (skipped for the first rendered section), since a
+  marginTop here would collapse through the unpadded <section>/
+  <div data-flow-id> ancestor chain and go uncounted by
+  measureFlowLayout's height measurement, overflowing the real
+  rendered PDF onto an extra page. TimelineItem's own small
+  marginBottom (the vertical rhythm between entries within ONE
+  section) is left untouched, preserving the timeline's visual cadence
+  within a section while still making section boundaries visibly
+  larger than that within-section rhythm.
+*/
+function makeHeading(colors: Colors, tokens: HtmlSpacingTokens) {
+  let firstSeen = false;
+  return (label: string): React.ReactElement => {
+    const paddingTop = firstSeen ? tokens.sectionGapPx : 0;
+    firstSeen = true;
+    return <h2 style={{ fontFamily: CREATIVE_TIMELINE_FONTS.heading, fontSize: "1em", letterSpacing: "0.03em", color: colors.accent, paddingTop, margin: `0 0 ${tokens.headingMarginBottomPx}px 0` }}>{label}</h2>;
+  };
 }
 
-function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: Colors): { items: FlowItem[]; headingsInOrder: string[] } {
+function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: Colors, tokens: HtmlSpacingTokens): { items: FlowItem[]; headingsInOrder: string[] } {
   const items: FlowItem[] = [];
   const headingsInOrder: string[] = [];
+  const heading = makeHeading(colors, tokens);
 
   if (normalized.summary) {
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.summary);
-    items.push({ id: "summary", sectionKey: "summary", node: (<section>{heading(CREATIVE_TIMELINE_LABELS.summary, colors)}<p style={{ color: colors.text, margin: 0 }}>{normalized.summary}</p></section>) });
+    items.push({ id: "summary", sectionKey: "summary", node: (<section>{heading(CREATIVE_TIMELINE_LABELS.summary)}<p style={{ color: colors.text, margin: 0 }}>{normalized.summary}</p></section>) });
   }
 
   if (normalized.metricGrids.some((g) => g.entries.length > 0)) {
@@ -81,7 +101,7 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
           <ContentItemsView items={entry.items} textColor={colors.text} />
         </TimelineItem>
       );
-      items.push({ id: `${key}-${entry.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS[key], colors)}{body}</section>) : body });
+      items.push({ id: `${key}-${entry.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS[key])}{body}</section>) : body });
     });
   }
 
@@ -99,7 +119,7 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
           {edu.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </TimelineItem>
       );
-      items.push({ id: `edu-${edu.id}`, sectionKey: "education", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.education, colors)}{body}</section>) : body });
+      items.push({ id: `edu-${edu.id}`, sectionKey: "education", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.education)}{body}</section>) : body });
     });
   }
 
@@ -107,7 +127,7 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.projects);
     normalized.projects.forEach((p, i) => {
       const body = (
-        <div style={{ marginBottom: "8px" }}>
+        <div style={{ marginBottom: tokens.entryGapPx }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontWeight: 700, color: colors.heading }}>{p.name}</span>
             <span style={{ color: colors.muted, fontSize: "0.85em" }}>{p.dateRangeText}</span>
@@ -117,7 +137,7 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
           {p.technologies.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>Technologies: {p.technologies.join(", ")}</div>}
         </div>
       );
-      items.push({ id: `project-${p.id}`, sectionKey: "projects", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.projects, colors)}{body}</section>) : body });
+      items.push({ id: `project-${p.id}`, sectionKey: "projects", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.projects)}{body}</section>) : body });
     });
   }
 
@@ -125,13 +145,13 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.credentials);
     normalized.credentials.forEach((c, i) => {
       const body = (
-        <div style={{ marginBottom: "3px", color: colors.text, fontSize: "0.9em" }}>
+        <div style={{ marginBottom: tokens.entryGapPx, color: colors.text, fontSize: "0.9em" }}>
           <strong>{c.name || c.names.join(", ")}</strong> {c.issuer ? `— ${c.issuer}` : ""} {c.issueDateText ? `(${c.issueDateText})` : ""} {c.expiryDateText ? `– ${c.expiryDateText}` : ""}
           {c.credentialId && <div style={{ color: colors.muted, fontSize: "0.85em" }}>Credential ID: {c.credentialId}</div>}
           {c.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </div>
       );
-      items.push({ id: `cred-${c.id}`, sectionKey: "credentials", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.credentials, colors)}{body}</section>) : body });
+      items.push({ id: `cred-${c.id}`, sectionKey: "credentials", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.credentials)}{body}</section>) : body });
     });
   }
 
@@ -139,12 +159,12 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.awards);
     normalized.awards.forEach((a, i) => {
       const body = (
-        <div style={{ marginBottom: "3px", color: colors.text, fontSize: "0.9em" }}>
+        <div style={{ marginBottom: tokens.entryGapPx, color: colors.text, fontSize: "0.9em" }}>
           <strong>{a.name || a.names.join(", ")}</strong> {a.issuer ? `— ${a.issuer}` : ""} {a.dateText ? `(${a.dateText})` : ""}
           {a.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </div>
       );
-      items.push({ id: `award-${a.id}`, sectionKey: "awards", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.awards, colors)}{body}</section>) : body });
+      items.push({ id: `award-${a.id}`, sectionKey: "awards", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.awards)}{body}</section>) : body });
     });
   }
 
@@ -152,13 +172,13 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.publications);
     normalized.publications.forEach((p, i) => {
       const body = (
-        <div style={{ marginBottom: "4px", color: colors.text, fontSize: "0.9em", wordBreak: "break-word" }}>
+        <div style={{ marginBottom: tokens.entryGapPx, color: colors.text, fontSize: "0.9em", wordBreak: "break-word" }}>
           <strong>{p.title || p.titles.join(", ")}</strong> {p.authors.length > 0 ? `— ${p.authors.join(", ")}` : ""} {p.publisherOrVenue ? `— ${p.publisherOrVenue}` : ""} {p.dateText ? `(${p.dateText})` : ""}
           {p.urlOrDoi && <div style={{ color: colors.accent, fontSize: "0.85em", wordBreak: "break-all" }}>{p.urlOrDoi}</div>}
           {p.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
         </div>
       );
-      items.push({ id: `pub-${p.id}`, sectionKey: "publications", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.publications, colors)}{body}</section>) : body });
+      items.push({ id: `pub-${p.id}`, sectionKey: "publications", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.publications)}{body}</section>) : body });
     });
   }
 
@@ -167,12 +187,12 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.custom);
     restCustom.forEach((section, i) => {
       const body = (
-        <div style={{ marginBottom: "6px" }}>
+        <div style={{ marginBottom: tokens.entryGapPx }}>
           <div style={{ fontWeight: 700, color: colors.heading }}>{section.heading}</div>
           <ContentItemsView items={section.items} textColor={colors.text} />
         </div>
       );
-      items.push({ id: `custom-${section.id}`, sectionKey: "custom", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.custom, colors)}{body}</section>) : body });
+      items.push({ id: `custom-${section.id}`, sectionKey: "custom", node: i === 0 ? (<section>{heading(CREATIVE_TIMELINE_LABELS.custom)}{body}</section>) : body });
     });
   }
 
@@ -266,7 +286,7 @@ export async function renderCreativeTimelineHtml(context: TemplateRenderContext)
   const mainWidthPx = dims.widthPx - sidebarPx - tokens.pagePaddingPx * 2;
   const sidebarInnerPx = sidebarPx - Math.round(tokens.pagePaddingPx * 0.7 * 2);
 
-  const { items: mainItems, headingsInOrder: mainHeadings } = buildMainItems(normalized, colors);
+  const { items: mainItems, headingsInOrder: mainHeadings } = buildMainItems(normalized, colors, tokens);
   const { items: sidebarItems, headingsInOrder: sidebarHeadings } = buildSidebarItems(normalized, colors);
 
   const styleText = pageStyles(colors, dims.widthPx, sidebarPx, tokens.pagePaddingPx);

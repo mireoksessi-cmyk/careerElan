@@ -6,6 +6,7 @@ import { renderHtmlToPdfBytes } from "../../pdf/renderHtmlToPdf";
 import { extractPdf } from "../../parity/pdfExtraction";
 import { normalizeResume } from "../../shared/contentAdapters";
 import { CREATIVE_TIMELINE_COLORS } from "../../shared/colorTokens";
+import { HTML_DENSITY_SPACING } from "../../shared/spacing";
 import { expectedFragmentsForResume } from "../../parity/textFragments";
 import { buildValidationReport } from "../../parity/validateOutput";
 import type { TemplatePdfResult, TemplateRenderContext } from "../../contracts/types";
@@ -16,7 +17,7 @@ export async function renderCreativeTimelinePdf(context: TemplateRenderContext):
   const extraction = await extractPdf(bytes);
 
   const normalized = normalizeResume(context.resume);
-  const { headingsInOrder: mainHeadings } = CREATIVE_TIMELINE_INTERNAL.buildMainItems(normalized, CREATIVE_TIMELINE_COLORS);
+  const { headingsInOrder: mainHeadings } = CREATIVE_TIMELINE_INTERNAL.buildMainItems(normalized, CREATIVE_TIMELINE_COLORS, HTML_DENSITY_SPACING[context.density]);
   const { headingsInOrder: sidebarHeadings } = CREATIVE_TIMELINE_INTERNAL.buildSidebarItems(normalized, CREATIVE_TIMELINE_COLORS);
   const expectedFragments = expectedFragmentsForResume(normalized);
 

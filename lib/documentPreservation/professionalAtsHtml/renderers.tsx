@@ -450,9 +450,9 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
-      {items.length > 0 && (
+      {items.some((v) => v.trim().length > 0) && (
         <ul style={{ margin: 0, marginTop: isContinuation ? 0 : spacing.bulletGapPx }}>
-          {items.map((text, i) => inRange(i, subRange) && <li key={i} data-sub-index={i} style={{ marginTop: gapMarginTop(i, spacing.bulletGapPx) }}>{text}</li>)}
+          {items.map((text, i) => inRange(i, subRange) && text.trim().length > 0 && <li key={i} data-sub-index={i} style={{ marginTop: gapMarginTop(i, spacing.bulletGapPx) }}>{text}</li>)}
         </ul>
       )}
     </div>
@@ -486,7 +486,7 @@ function CredentialView({ block, subRange, isContinuation, spacing = DEFAULT_SPA
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
-      {items.map((text, i) => inRange(i, subRange) && (
+      {items.map((text, i) => inRange(i, subRange) && text.trim().length > 0 && (
         <p key={i} data-sub-index={i} style={{ margin: 0, marginTop: isContinuation ? gapMarginTop(i, spacing.bulletGapPx) : spacing.bulletGapPx }}>
           {text}
         </p>
@@ -514,7 +514,7 @@ function AwardView({ block, subRange, isContinuation, spacing = DEFAULT_SPACING 
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
-      {items.map((text, i) => inRange(i, subRange) && (
+      {items.map((text, i) => inRange(i, subRange) && text.trim().length > 0 && (
         <p key={i} data-sub-index={i} style={{ margin: 0, marginTop: isContinuation ? gapMarginTop(i, spacing.bulletGapPx) : spacing.bulletGapPx }}>
           {text}
         </p>
@@ -546,7 +546,7 @@ function PublicationView({ block, subRange, isContinuation, spacing = DEFAULT_SP
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
         </div>
       )}
-      {items.map((text, i) => inRange(i, subRange) && (
+      {items.map((text, i) => inRange(i, subRange) && text.trim().length > 0 && (
         <p key={i} data-sub-index={i} style={{ margin: 0, marginTop: isContinuation ? gapMarginTop(i, spacing.bulletGapPx) : spacing.bulletGapPx }}>
           {text}
         </p>

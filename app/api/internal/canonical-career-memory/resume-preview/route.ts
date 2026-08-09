@@ -131,6 +131,24 @@ export function makeHandleResumePreview(request: Request) {
     */
     const explicitVersionId = url.searchParams.get("canonicalVersionId") ?? undefined;
 
+    /*
+      Phase 6I.6.17 - explicit Template Demonstration Mode opt-in. Only
+      Manual Career Memory Step 9's own two preview call sites
+      (career-memory/page.tsx's manualCanonicalVersionId-driven thumbnail
+      livePreviewUrl and main iframe src) pass allowPlaceholder=1 - every
+      other caller (Dashboard's per-resume pinned preview, which ALSO
+      passes canonicalVersionId but for a real, already-selected resume;
+      Paste Job's html/pdf/docx; JobDetail; uploaded-resume Career Memory
+      preview; the inline-import and template-gate pickers) omits it and
+      therefore always gets Real Resume Mode - a section with no real
+      data renders as fully absent, never a synthetic placeholder.
+      canonicalVersionId alone cannot distinguish these two cases (both
+      Step 9 and Dashboard's pinned preview use it, for different
+      reasons - see this route's own Phase 6I.6.9/6I.6.14 comments
+      above), so this is a separate, purpose-built flag.
+    */
+    const allowPlaceholder = url.searchParams.get("allowPlaceholder") === "1";
+
     const resolved = await resolveCanonicalResumeContext({ mode: "session", repos: ctx.repos, client: ctx.client, userId: ctx.userId, versionId: explicitVersionId });
     let runtime;
     if (resolved.status === "not-canonical" || resolved.status === "legacy-only") {
@@ -153,8 +171,21 @@ export function makeHandleResumePreview(request: Request) {
       PERSISTENCE_ERROR (this route's own pre-existing, unrelated
       persistence-error-code reuse - see PersistenceError's own header
       comment in domainErrors.ts) into the iframe as raw JSON.
+
+      Phase 6I.6.17 - now gated behind allowPlaceholder (see that flag's
+      own comment above). Before this phase this call was unconditional
+      for every caller, which meant a REAL resume's Dashboard preview,
+      Paste Job preview, and actual PDF/DOCX downloads could silently
+      receive synthetic "PROJECTS"/"PROFESSIONAL SUMMARY"/etc. content
+      for any section the user's real resume simply doesn't have -
+      confirmed via code trace, not hypothetical. Real Resume Mode
+      (allowPlaceholder unset, the default) now leaves `runtime`
+      untouched in all those cases; a section with no real data renders
+      as fully absent instead of gaining fabricated placeholder text.
     */
-    runtime = { ...runtime, resume: buildPreviewOnlyResume(runtime.resume) };
+    if (allowPlaceholder) {
+      runtime = { ...runtime, resume: buildPreviewOnlyResume(runtime.resume) };
+    }
 
     const renderOptions = { templateId, useTailored: false as const, paperSize: rawPaperSize, density: rawDensity, locale, generatedAt: new Date(0).toISOString() };
 

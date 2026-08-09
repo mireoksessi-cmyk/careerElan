@@ -2639,7 +2639,7 @@ return;
               selectedTemplateId={manualSelectedTemplateId as any}
               onSelect={(templateId) => selectManualTemplate(templateId)}
               disabled={manualTemplateStatus === "saving-template"}
-              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
+              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail&allowPlaceholder=1${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
             />
           </div>
         </div>
@@ -2648,7 +2648,7 @@ return;
             <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
               <iframe
                 key={manualSelectedTemplateId}
-                src={`/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
+                src={`/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html&allowPlaceholder=1${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
                 title="Canonical resume preview"
                 className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
               />

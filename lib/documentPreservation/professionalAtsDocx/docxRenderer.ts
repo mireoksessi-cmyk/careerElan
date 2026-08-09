@@ -171,6 +171,7 @@ function renderSkillGroup(block: AssemblyBlock, ctx: BuildContext, blockGapTwips
 
 function renderHeaderBearingSubItems(block: AssemblyBlock, ctx: BuildContext, items: string[], asBullets: boolean) {
   items.forEach((text) => {
+    if (!text.trim()) return;
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(text, ctx)], {
       spacingBeforeTwips: ctx.bulletGapTwips,
       keepLines: true,

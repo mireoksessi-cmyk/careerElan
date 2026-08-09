@@ -12,7 +12,7 @@ import { normalizeResume, type NormalizedExperienceEntry } from "../../shared/co
 import { computeSectionVisibility, type SectionKey } from "../../shared/sectionAdapters";
 import { EXECUTIVE_MINIMAL_COLORS } from "../../shared/colorTokens";
 import { EXECUTIVE_MINIMAL_FONTS, MIN_SAFE_FONT_SIZE_PT } from "../../shared/typography";
-import { HTML_DENSITY_SPACING } from "../../shared/spacing";
+import { HTML_DENSITY_SPACING, type HtmlSpacingTokens } from "../../shared/spacing";
 import { PAPER_DIMENSIONS } from "../../shared/paperSizes";
 import { ContentItemsView } from "../../shared/ContentItemsView";
 import { renderHtmlDocument } from "../../shared/documentShell";
@@ -26,9 +26,9 @@ import { extractVisibleTextFromHtml } from "../../shared/htmlText";
 
 type FlowItem = { id: string; sectionKey: SectionKey; node: React.ReactNode };
 
-function ExperienceEntryBlock({ entry, colors }: { entry: NormalizedExperienceEntry; colors: typeof EXECUTIVE_MINIMAL_COLORS }): React.ReactElement {
+function ExperienceEntryBlock({ entry, colors, entryGapPx }: { entry: NormalizedExperienceEntry; colors: typeof EXECUTIVE_MINIMAL_COLORS; entryGapPx: number }): React.ReactElement {
   return (
-    <div style={{ marginBottom: "10px" }}>
+    <div style={{ marginBottom: entryGapPx }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span style={{ fontWeight: 700, color: colors.heading }}>
           {entry.role}
@@ -43,16 +43,49 @@ function ExperienceEntryBlock({ entry, colors }: { entry: NormalizedExperienceEn
   );
 }
 
-function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible: SectionKey[], colors: typeof EXECUTIVE_MINIMAL_COLORS): { items: FlowItem[]; headingsInOrder: string[] } {
+/*
+  Phase 6I.6.17 - section-to-section separation was previously
+  indistinguishable from within-section item separation (every entry's
+  own small marginBottom, e.g. 4-10px, was the ONLY space between the
+  last item of one section and the next section's heading - no extra
+  gap was ever added before a heading). This is the reported "PROJECTS/
+  EDUCATION/CERTIFICATIONS look like one continuous block" bug.
+  tokens.sectionGapPx (materially larger than tokens.entryGapPx) is now
+  applied as the heading's own paddingTop (NOT marginTop) - skipped
+  for the first rendered section only, so the header block's own
+  spacing isn't doubled up. paddingTop is required here, not margin:
+  this h2 is always the first child of its <section>, which is always
+  the first (and only, for i===0 items) child of the flow-item's own
+  <div data-flow-id> wrapper - a block's own top margin on a first-in-
+  chain descendant collapses THROUGH every unpadded/unbordered
+  ancestor and escapes the wrapper div's own measured box entirely
+  (standard CSS margin-collapsing), so measureFlowLayout's
+  getBoundingClientRect() height query would silently miss that space.
+  Confirmed by direct reproduction: marginTop here under-measured
+  every subsequent page's content height, and the real Playwright PDF
+  render overflowed onto an extra page beyond what the pagination plan
+  predicted (executiveMinimal.test.ts's pdf.pageCount stayed 2 while
+  the actual rendered PDF produced 3). padding never collapses and is
+  always included in getBoundingClientRect(), so it can't reproduce
+  this bug. Since a hidden section never contributes an item to
+  `items` at all, a hidden section can never leave a "ghost" gap behind
+  - the next VISIBLE section's heading always sits exactly sectionGapPx
+  below whatever actually rendered before it.
+*/
+function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible: SectionKey[], colors: typeof EXECUTIVE_MINIMAL_COLORS, tokens: HtmlSpacingTokens): { items: FlowItem[]; headingsInOrder: string[] } {
   const items: FlowItem[] = [];
   const headingsInOrder: string[] = [];
+  let firstContentSectionSeen = false;
 
   const heading = (key: SectionKey) => {
     const label = key === "identity" ? "" : (EXECUTIVE_MINIMAL_SECTION_LABELS[key] ?? key);
     if (label) headingsInOrder.push(label);
-    return label ? (
-      <h2 style={{ fontFamily: EXECUTIVE_MINIMAL_FONTS.heading, fontSize: "1.05em", letterSpacing: "0.04em", color: colors.heading, borderBottom: `1px solid ${colors.border}`, paddingBottom: "3px", margin: "0 0 8px 0" }}>{label.toUpperCase()}</h2>
-    ) : null;
+    if (!label) return null;
+    const paddingTop = firstContentSectionSeen ? tokens.sectionGapPx : 0;
+    firstContentSectionSeen = true;
+    return (
+      <h2 style={{ fontFamily: EXECUTIVE_MINIMAL_FONTS.heading, fontSize: "1.05em", letterSpacing: "0.04em", color: colors.heading, borderBottom: `1px solid ${colors.border}`, paddingBottom: "3px", paddingTop, margin: `0 0 ${tokens.headingMarginBottomPx}px 0` }}>{label.toUpperCase()}</h2>
+    );
   };
 
   for (const key of visible) {
@@ -133,7 +166,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
         items.push({
           id: `${key}-${entry.id}`,
           sectionKey: key,
-          node: i === 0 ? (<section>{heading(key)}<ExperienceEntryBlock entry={entry} colors={colors} /></section>) : <ExperienceEntryBlock entry={entry} colors={colors} />,
+          node: i === 0 ? (<section>{heading(key)}<ExperienceEntryBlock entry={entry} colors={colors} entryGapPx={tokens.entryGapPx} /></section>) : <ExperienceEntryBlock entry={entry} colors={colors} entryGapPx={tokens.entryGapPx} />,
         });
       });
       continue;
@@ -143,7 +176,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
       if (normalized.projects.length === 0) continue;
       normalized.projects.forEach((p, i) => {
         const body = (
-          <div style={{ marginBottom: "10px" }}>
+          <div style={{ marginBottom: tokens.entryGapPx }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontWeight: 700, color: colors.heading }}>{p.name}</span>
               <span style={{ color: colors.muted, fontSize: "0.9em" }}>{p.dateRangeText}</span>
@@ -162,7 +195,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
       if (normalized.education.length === 0) continue;
       normalized.education.forEach((edu, i) => {
         const body = (
-          <div style={{ marginBottom: "8px" }}>
+          <div style={{ marginBottom: tokens.entryGapPx }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontWeight: 700, color: colors.heading }}>{edu.institution || edu.institutions.join(" / ")}</span>
               <span style={{ color: colors.muted, fontSize: "0.9em" }}>{edu.dateRangeText}</span>
@@ -183,7 +216,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
       if (normalized.credentials.length === 0) continue;
       normalized.credentials.forEach((c, i) => {
         const body = (
-          <div style={{ marginBottom: "4px", color: colors.text }}>
+          <div style={{ marginBottom: tokens.entryGapPx, color: colors.text }}>
             <span style={{ fontWeight: 600 }}>{c.name || c.names.join(", ")}</span>
             {c.issuer && <span style={{ color: colors.muted }}> — {c.issuer}</span>}
             {c.issueDateText && <span style={{ color: colors.muted }}> ({c.issueDateText})</span>}
@@ -201,7 +234,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
       if (normalized.awards.length === 0) continue;
       normalized.awards.forEach((a, i) => {
         const body = (
-          <div style={{ marginBottom: "4px", color: colors.text }}>
+          <div style={{ marginBottom: tokens.entryGapPx, color: colors.text }}>
             <span style={{ fontWeight: 600 }}>{a.name || a.names.join(", ")}</span>
             {a.issuer && <span style={{ color: colors.muted }}> — {a.issuer}</span>}
             {a.dateText && <span style={{ color: colors.muted }}> ({a.dateText})</span>}
@@ -217,7 +250,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
       if (normalized.publications.length === 0) continue;
       normalized.publications.forEach((p, i) => {
         const body = (
-          <div style={{ marginBottom: "4px", color: colors.text, wordBreak: "break-word" }}>
+          <div style={{ marginBottom: tokens.entryGapPx, color: colors.text, wordBreak: "break-word" }}>
             <span style={{ fontWeight: 600 }}>{p.title || p.titles.join(", ")}</span>
             {p.authors.length > 0 && <span style={{ color: colors.muted }}> — {p.authors.join(", ")}</span>}
             {p.publisherOrVenue && <span style={{ color: colors.muted }}> — {p.publisherOrVenue}</span>}
@@ -235,7 +268,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
       if (normalized.customSections.length === 0) continue;
       normalized.customSections.forEach((section, i) => {
         const body = (
-          <div style={{ marginBottom: "8px" }}>
+          <div style={{ marginBottom: tokens.entryGapPx }}>
             <div style={{ fontWeight: 700, color: colors.heading }}>{section.heading}</div>
             <ContentItemsView items={section.items} textColor={colors.text} />
           </div>
@@ -275,7 +308,7 @@ export async function renderExecutiveMinimalHtml(context: TemplateRenderContext)
   const visible = computeSectionVisibility(EXECUTIVE_MINIMAL_SECTION_ORDER, normalized, context.sectionVisibility)
     .filter((d) => d.visible)
     .map((d) => d.key);
-  const { items, headingsInOrder } = buildFlowItems(normalized, visible, colors);
+  const { items, headingsInOrder } = buildFlowItems(normalized, visible, colors, tokens);
 
   const styleText = pageStyles(colors, dims.widthPx, tokens.pagePaddingPx);
 
