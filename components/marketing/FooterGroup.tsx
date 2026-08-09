@@ -26,12 +26,11 @@ export const PRODUCT_FOOTER_LINKS: Record<string, string> = {
 };
 
 /*
-  Phase 6I.6.27 - same centralization for the Company group. Only "About
-  Us" gets a real href (/about) - Blog/Careers/Contact stay exactly as
-  they were (plain text, no placeholder "#"/"/coming-soon" hrefs) since
-  this phase explicitly does not build those pages.
+  Phase 6I.6.28 - Blog/Careers/Contact removed from the Company group's
+  own data (not hidden via CSS/disabled/placeholder href) since none of
+  those pages exist. "About Us" is the only real Company destination.
 */
-export const COMPANY_FOOTER_ITEMS = ["About Us", "Blog", "Careers", "Contact"];
+export const COMPANY_FOOTER_ITEMS = ["About Us"];
 
 export const COMPANY_FOOTER_LINKS: Record<string, string> = {
   "About Us": "/about",
