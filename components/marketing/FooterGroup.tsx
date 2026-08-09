@@ -9,6 +9,22 @@ import Link from "next/link";
   stay plain text, avoiding broken/placeholder hrefs for pages that don't
   exist yet.
 */
+
+/*
+  Phase 6I.6.26 - the Product group's own items/links, centralized so
+  every public marketing page (/, /features, /how-it-works, /pricing)
+  renders the identical list from one source instead of four copies that
+  could silently drift. "Examples" is deliberately absent - removed from
+  the data itself, not hidden/disabled, per this phase's own requirement.
+*/
+export const PRODUCT_FOOTER_ITEMS = ["Features", "How It Works", "Pricing"];
+
+export const PRODUCT_FOOTER_LINKS: Record<string, string> = {
+  Features: "/features",
+  "How It Works": "/how-it-works",
+  Pricing: "/pricing",
+};
+
 export default function FooterGroup({
   title,
   items,

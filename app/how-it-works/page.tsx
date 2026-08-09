@@ -12,7 +12,10 @@ import {
   ListChecks,
   ArrowRight,
 } from "lucide-react";
-import FooterGroup from "@/components/marketing/FooterGroup";
+import FooterGroup, {
+  PRODUCT_FOOTER_ITEMS,
+  PRODUCT_FOOTER_LINKS,
+} from "@/components/marketing/FooterGroup";
 
 export const metadata: Metadata = {
   title: "How It Works | Career Élan",
@@ -284,8 +287,8 @@ export default function HowItWorksPage() {
           </div>
           <FooterGroup
             title="Product"
-            items={["Features", "How It Works", "Examples", "Pricing"]}
-            links={{ Features: "/features", "How It Works": "/how-it-works" }}
+            items={PRODUCT_FOOTER_ITEMS}
+            links={PRODUCT_FOOTER_LINKS}
           />
           <FooterGroup title="Company" items={["About Us", "Blog", "Careers", "Contact"]} />
           <FooterGroup
