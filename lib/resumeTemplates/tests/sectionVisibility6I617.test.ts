@@ -99,7 +99,7 @@ function withEmptySections(): ResumeStructuredModel {
     education: [],
     projects: [{ id: "proj-blank", name: sv("   "), role: undefined, dateRangeText: undefined, technologies: [], bullets: [], descriptionParagraphs: [], content: [], rawHeaderText: "", source: trace("sec-proj-blank"), isUncertain: false, reasonCodes: [] }],
     credentials: [{ id: "cred-blank", name: sv(""), issuer: undefined, credentialId: undefined, issueDateText: undefined, expiryDateText: undefined, location: undefined, names: [], issuers: [], details: [sv(" ")], kind: "certification", rawHeaderText: "", source: trace("sec-cred-blank"), isUncertain: false, reasonCodes: [] }],
-    awards: [{ id: "award-blank", name: sv("\t"), issuer: undefined, dateText: undefined, names: [], details: [], rawHeaderText: "", source: trace("sec-award-blank"), isUncertain: false, reasonCodes: [] }],
+    awards: [{ id: "award-blank", name: sv("\t"), issuer: undefined, dateText: undefined, names: [], details: [], content: [], rawHeaderText: "", source: trace("sec-award-blank"), isUncertain: false, reasonCodes: [] }],
     publications: [],
     customSections: [],
   };

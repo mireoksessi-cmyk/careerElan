@@ -312,16 +312,55 @@ export async function renderExecutiveMinimalHtml(context: TemplateRenderContext)
 
   const styleText = pageStyles(colors, dims.widthPx, tokens.pagePaddingPx);
 
+  /*
+    Phase 6I.6.18 - flow-root is required on this wrapper (in BOTH the
+    flat measurement body below and the final paginatedBody's own
+    per-item wrapper further down), not a cosmetic choice: each entry
+    body div's own trailing marginBottom (tokens.entryGapPx) is the
+    LAST/ONLY child of this otherwise unpadded/unbordered div, so
+    without a new block-formatting-context boundary that margin
+    collapses THROUGH this wrapper and is invisible to
+    measureFlowLayout's getBoundingClientRect() height query - the
+    exact same collapse class 6I.6.17 already fixed for section
+    headings' own top padding, now on the bottom edge of every entry.
+    flow-root changes nothing about what actually renders (the
+    collapsed-and-remerged margin between two sibling wrapper divs and
+    the same margin contained within one flow-root wrapper produce an
+    IDENTICAL total visual gap - verified by direct reproduction, see
+    this phase's own root-cause report) - it only makes each wrapper's
+    reported height match its true rendered footprint.
+  */
   const flatBody = (
     <div className="flow-container">
       {items.map((item) => (
-        <div key={item.id} data-flow-id={item.id}>
+        <div key={item.id} data-flow-id={item.id} style={{ display: "flow-root" }}>
           {item.node}
         </div>
       ))}
     </div>
   );
-  const flatHtml = renderHtmlDocument({ lang: resolveHtmlLang(context.locale), title: "measurement", styleText: `body{margin:0;font-family:${EXECUTIVE_MINIMAL_FONTS.body};} .flow-container{width:${contentWidth}px;}`, bodyHtml: renderToStaticMarkup(flatBody) });
+  /*
+    Phase 6I.6.18 - font-size (and the CJK fallback family) were
+    previously OMITTED from this measurement-only stylesheet, so
+    Playwright measured every entry at the browser's default font size
+    (~16px/12pt) while the real page render below uses
+    MIN_SAFE_FONT_SIZE_PT+0.5=10.5pt - a real, empirically-confirmed
+    ~60% height over-measurement per entry (direct reproduction: a
+    representative 3-bullet entry measured 180px unstyled vs 112px at
+    10.5pt). This is THE root cause of the reported "excessive gap
+    between same-section entries": the pagination planner believed
+    entries were far taller than they truly render, so it pushed the
+    next entry to a fresh page well before the current page was
+    actually full - visible as a large blank region in a stacked
+    multi-page preview. Must always mirror pageStyles()'s own
+    font-size/font-family exactly, or this class of bug reappears.
+  */
+  const flatHtml = renderHtmlDocument({
+    lang: resolveHtmlLang(context.locale),
+    title: "measurement",
+    styleText: `body{margin:0;font-family:${EXECUTIVE_MINIMAL_FONTS.body},${EXECUTIVE_MINIMAL_FONTS.eastAsiaFallback};font-size:${MIN_SAFE_FONT_SIZE_PT + 0.5}pt;} .flow-container{width:${contentWidth}px;}`,
+    bodyHtml: renderToStaticMarkup(flatBody),
+  });
 
   const specs: FlowBlockSpec[] = items.map((item) => ({ id: item.id, sectionKey: item.sectionKey, keepTogether: "whole-block", isFirstBlockInSection: false }));
   const usableHeightPx = dims.heightPx - tokens.pagePaddingPx * 2;
@@ -334,7 +373,7 @@ export async function renderExecutiveMinimalHtml(context: TemplateRenderContext)
       {pages.map((pageIds, pageIndex) => (
         <div className="page" key={pageIndex}>
           {pageIds.map((id) => (
-            <div key={id}>{nodeById.get(id)}</div>
+            <div key={id} style={{ display: "flow-root" }}>{nodeById.get(id)}</div>
           ))}
         </div>
       ))}

@@ -283,10 +283,30 @@ export async function renderModernSidebarHtml(context: TemplateRenderContext): P
   const { items: sidebarItems, headingsInOrder: sidebarHeadings } = buildSidebarItems(normalized, colors);
 
   const styleText = pageStyles(colors, dims.widthPx, sidebarPx, tokens.pagePaddingPx);
-  const measureStyle = `body{margin:0;font-family:${MODERN_SIDEBAR_FONTS.body};}`;
+  /*
+    Phase 6I.6.18 - font-size (and the CJK fallback family) previously
+    omitted here, so Playwright measured every entry at the browser's
+    default font size (~16px/12pt) instead of pageStyles()'s real
+    ${MIN_SAFE_FONT_SIZE_PT + 0.5}pt - a confirmed ~60% height over-
+    measurement per entry, and THE root cause of the reported
+    "excessive gap between same-section entries" (see this phase's own
+    root-cause report). Must always mirror pageStyles() exactly.
+  */
+  const measureStyle = `body{margin:0;font-family:${MODERN_SIDEBAR_FONTS.body},${MODERN_SIDEBAR_FONTS.eastAsiaFallback};font-size:${MIN_SAFE_FONT_SIZE_PT + 0.5}pt;}`;
 
-  const flatMain = <div style={{ width: mainWidthPx }}>{mainItems.map((item) => <div key={item.id} data-flow-id={item.id}>{item.node}</div>)}</div>;
-  const flatSidebar = <div style={{ width: sidebarInnerPx }}>{sidebarItems.map((item) => <div key={item.id} data-flow-id={item.id}>{item.node}</div>)}</div>;
+  /*
+    Phase 6I.6.18 - display:flow-root on each flow-item wrapper (both
+    here in the flat measurement body and on the final paginatedBody's
+    own per-item wrapper below) contains that item's own trailing
+    marginBottom (tokens.entryGapPx) instead of letting it collapse
+    THROUGH this otherwise unpadded/unbordered div and escape
+    measureFlowLayout's getBoundingClientRect() height query - same
+    collapse class 6I.6.17 fixed for section headings' top padding,
+    now on the bottom edge of every entry. Changes nothing about what
+    actually renders (verified by direct reproduction).
+  */
+  const flatMain = <div style={{ width: mainWidthPx }}>{mainItems.map((item) => <div key={item.id} data-flow-id={item.id} style={{ display: "flow-root" }}>{item.node}</div>)}</div>;
+  const flatSidebar = <div style={{ width: sidebarInnerPx }}>{sidebarItems.map((item) => <div key={item.id} data-flow-id={item.id} style={{ display: "flow-root" }}>{item.node}</div>)}</div>;
 
   const usableHeightPx = dims.heightPx - tokens.pagePaddingPx * 2;
   const identityMastheadHeightEstimatePx = 190;
@@ -309,8 +329,8 @@ export async function renderModernSidebarHtml(context: TemplateRenderContext): P
       {Array.from({ length: pageCount }, (_, pageIndex) => (
         <div className="page" key={pageIndex}>
           <div className="identity-area">{pageIndex === 0 && <IdentityMasthead normalized={normalized} colors={colors} photoOption={context.photoOption} />}</div>
-          <div className="main-area">{mainByPage[pageIndex]?.map((id) => <div key={id}>{mainNodeById.get(id)}</div>)}</div>
-          <div className="sidebar-area">{sidebarByPage[pageIndex]?.map((id) => <div key={id}>{sidebarNodeById.get(id)}</div>)}</div>
+          <div className="main-area">{mainByPage[pageIndex]?.map((id) => <div key={id} style={{ display: "flow-root" }}>{mainNodeById.get(id)}</div>)}</div>
+          <div className="sidebar-area">{sidebarByPage[pageIndex]?.map((id) => <div key={id} style={{ display: "flow-root" }}>{sidebarNodeById.get(id)}</div>)}</div>
         </div>
       ))}
     </>
