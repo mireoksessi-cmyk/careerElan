@@ -65,9 +65,23 @@ import { CanonicalCareerMemoryService } from "./canonicalCareerMemoryService";
 import { CanonicalSourceDocumentService } from "./canonicalSourceDocumentService";
 import { ensureProfile } from "./profileAccess";
 import { classifyLosslessValidationFailure, classifyStructuredValidationFailure } from "./canonicalImportFailureClassifier";
+import { MAX_UPLOAD_BYTES, UploadValidationError, withParseTimeout } from "../../documentAnalysis/uploadValidation";
 
 const SUPPORTED_SOURCE_FORMATS: LayoutSourceFormat[] = ["pdf", "docx"];
 const RESUMES_STORAGE_BUCKET = "resumes";
+
+/*
+  Phase 6I.6.32 Part N/AT - this bridge re-parses an already-validated
+  upload through the full DPE layout analyzer, which (per this phase's
+  audit) has no page cap or timeout of its own, unlike
+  app/api/process-resume-design/route.ts's own 45s bound for the same
+  underlying analyzeDocument() call. This mirrors that existing bound
+  rather than inventing a new one. A true zip-bomb/decompression-ratio
+  resource limit is out of scope here - see uploadValidation.ts's
+  withParseTimeout docstring - this is the wall-clock mitigation, reported
+  as DOCX_ARCHIVE_RESOURCE_LIMIT_REQUIRES_FOLLOWUP, not a complete fix.
+*/
+const LAYOUT_ANALYSIS_TIMEOUT_MS = 45_000;
 
 export type ImportResumeResult = {
   status: "imported";
@@ -114,6 +128,13 @@ export class CanonicalResumeImportService {
       throw new ValidationError([`Could not download the original resume file for resume "${resumeId}": ${downloadError?.message ?? "no file returned"}.`]);
     }
     const buffer = Buffer.from(await fileBlob.arrayBuffer());
+
+    if (buffer.byteLength === 0 || buffer.byteLength > MAX_UPLOAD_BYTES) {
+      throw new ValidationError([
+        `Resume "${resumeId}" could not be imported: the stored file is empty or exceeds the maximum supported size.`,
+      ]);
+    }
+
     const contentHash = crypto.createHash("sha256").update(buffer).digest("hex");
 
     const memoryService = new CanonicalCareerMemoryService(this.repos);
@@ -146,7 +167,20 @@ export class CanonicalResumeImportService {
       }
     }
 
-    const layoutResult = await analyzeDocument("resume", sourceFormat, buffer);
+    let layoutResult;
+    try {
+      layoutResult = await withParseTimeout(
+        analyzeDocument("resume", sourceFormat, buffer),
+        LAYOUT_ANALYSIS_TIMEOUT_MS,
+        "IMPORT_ANALYSIS_TIMEOUT",
+        "This resume took too long to process for import. Please try again or upload a simpler file."
+      );
+    } catch (timeoutError) {
+      if (timeoutError instanceof UploadValidationError) {
+        throw new ValidationError([`${timeoutError.code}: ${timeoutError.message}`]);
+      }
+      throw timeoutError;
+    }
     const losslessDoc = buildLosslessResumeDocument(layoutResult, {
       fileName: resume.file_name ?? "resume",
       fileType: sourceFormat,

@@ -3,6 +3,21 @@ import { supabaseAdmin } from "../supabaseAdmin";
 import { logSafeError } from "../errors/publicError";
 import { RESUME_PARSE_DRAFT_MODEL, RESUME_PARSE_MODEL } from "../config/aiModels";
 import { classifyGenerationError } from "./shared";
+import {
+  RESUME_ALLOWED_EXTENSIONS,
+  UploadValidationError,
+  assertAllowedExtension,
+  assertDocxSignature,
+  assertPdfSignature,
+  assertWithinSizeLimit,
+  classifyPdfParseError,
+  hasMeaningfulText,
+  withParseTimeout,
+} from "./uploadValidation";
+
+// Part N mitigation - see uploadValidation.ts's withParseTimeout docstring for
+// why this is a wall-clock bound, not a full zip-bomb resource limit.
+const DOCX_PARSE_TIMEOUT_MS = 30_000;
 
 /*
   Resume analysis worker - the actual text extraction + 3 sequential
@@ -129,19 +144,18 @@ function normalizeProjects(data: any) {
   }));
 }
 
+/*
+  Unlike the pre-Phase-6I.6.32 version, parser exceptions are no longer
+  swallowed into an empty string - a corrupt/encrypted PDF must be
+  classified distinctly from a valid-but-sparse PDF (Parts I/J), which
+  requires the caller to see the real thrown error.
+*/
 async function extractPdfText(
   buffer: Buffer,
   pdf: (buffer: Buffer) => Promise<{ text?: string }>
 ) {
-  try {
-    const parsed = await pdf(buffer);
-
-    if (parsed.text && parsed.text.trim().length > 300) {
-      return parsed.text;
-    }
-  } catch {}
-
-  return "";
+  const parsed = await pdf(buffer);
+  return parsed.text || "";
 }
 
 class AnalysisFailure extends Error {
@@ -231,12 +245,36 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
 
     const buffer = Buffer.from(await fileBlob.arrayBuffer());
 
+    // Parts E/F/G - server-side authoritative checks, independent of
+    // whatever the client already claimed at upload time: real size/
+    // zero-byte enforcement, and the extension is only ever used to select
+    // which magic-byte signature to check next, never to skip that check.
+    let extension: string;
+
+    try {
+      assertWithinSizeLimit(buffer.length);
+      extension = assertAllowedExtension(fileName, RESUME_ALLOWED_EXTENSIONS);
+    } catch (validationError) {
+      if (validationError instanceof UploadValidationError) {
+        throw new AnalysisFailure(validationError.code, validationError.message);
+      }
+      throw validationError;
+    }
+
     await setStage(resumeId, userId, "extracting_text");
 
     let resumeText = "";
-    const lowerFileName = fileName.toLowerCase();
 
-    if (lowerFileName.endsWith(".pdf")) {
+    if (extension === "pdf") {
+      try {
+        assertPdfSignature(buffer);
+      } catch (validationError) {
+        if (validationError instanceof UploadValidationError) {
+          throw new AnalysisFailure(validationError.code, validationError.message);
+        }
+        throw validationError;
+      }
+
       let pdf: (buffer: Buffer) => Promise<{ text?: string }>;
 
       try {
@@ -249,15 +287,34 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
         );
       }
 
-      resumeText = await extractPdfText(buffer, pdf);
-
-      if (resumeText.trim().length < 300) {
+      try {
+        resumeText = await extractPdfText(buffer, pdf);
+      } catch (parseError) {
+        const code = classifyPdfParseError(parseError);
         throw new AnalysisFailure(
-          "LOW_TEXT_QUALITY",
-          "We couldn't accurately read this resume. For the best results, please upload the original digital version of your resume in PDF (text-based), DOCX, or TXT format."
+          code,
+          code === "ENCRYPTED_PDF"
+            ? "This PDF is password-protected. Please upload an unlocked copy."
+            : "We couldn't read this resume file. Please try exporting it again."
         );
       }
-    } else if (lowerFileName.endsWith(".docx")) {
+
+      if (!hasMeaningfulText(resumeText)) {
+        throw new AnalysisFailure(
+          "NO_READABLE_TEXT",
+          "We couldn't find readable text in this PDF. Please upload a text-based PDF or DOCX resume."
+        );
+      }
+    } else if (extension === "docx") {
+      try {
+        assertDocxSignature(buffer);
+      } catch (validationError) {
+        if (validationError instanceof UploadValidationError) {
+          throw new AnalysisFailure(validationError.code, validationError.message);
+        }
+        throw validationError;
+      }
+
       let mammoth: { extractRawText: (input: { buffer: Buffer }) => Promise<{ value: string }> };
 
       try {
@@ -270,12 +327,30 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
         );
       }
 
-      const doc = await mammoth.extractRawText({ buffer });
-      resumeText = doc.value;
-    } else if (lowerFileName.endsWith(".txt")) {
-      resumeText = buffer.toString("utf8");
-    } else {
-      throw new AnalysisFailure("UNSUPPORTED_FORMAT", "Unsupported file format.");
+      try {
+        const doc = await withParseTimeout(
+          mammoth.extractRawText({ buffer }),
+          DOCX_PARSE_TIMEOUT_MS,
+          "CORRUPT_DOCX",
+          "We couldn't read this resume file. Please try exporting it again."
+        );
+        resumeText = doc.value;
+      } catch (parseError) {
+        if (parseError instanceof UploadValidationError) {
+          throw new AnalysisFailure(parseError.code, parseError.message);
+        }
+        throw new AnalysisFailure(
+          "CORRUPT_DOCX",
+          "We couldn't read this resume file. Please try exporting it again."
+        );
+      }
+
+      if (!hasMeaningfulText(resumeText)) {
+        throw new AnalysisFailure(
+          "NO_READABLE_TEXT",
+          "We couldn't find readable text in this file. Please upload a text-based PDF or DOCX resume."
+        );
+      }
     }
 
     if (!resumeText.trim()) {

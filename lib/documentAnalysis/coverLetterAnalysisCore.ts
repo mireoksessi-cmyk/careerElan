@@ -6,6 +6,27 @@ import {
   COVER_LETTER_PARSE_MODEL,
 } from "../config/aiModels";
 import { classifyGenerationError } from "./shared";
+import {
+  COVER_LETTER_ALLOWED_EXTENSIONS,
+  UploadValidationError,
+  assertAllowedExtension,
+  assertDocxSignature,
+  assertPdfSignature,
+  assertWithinSizeLimit,
+  classifyPdfParseError,
+  hasMeaningfulText,
+  withParseTimeout,
+} from "./uploadValidation";
+
+const DOCX_PARSE_TIMEOUT_MS = 30_000;
+
+// Part K/AJ - the existing scanned-cover-letter Vision OCR fallback (below)
+// pre-dates this phase and is left in place, but was previously unbounded
+// (a `while(true)` page loop with no cap - one uncapped OpenAI Vision call
+// per rendered page of any uploaded PDF). This phase adds a page cap as a
+// safety hardening of that existing capability, not a new one - Part AU
+// forbids introducing new OCR/vision capabilities in this phase.
+const MAX_OCR_PAGES = 5;
 
 /*
   Cover Letter analysis worker - same as ./resumeAnalysisCore.ts, see that
@@ -43,15 +64,8 @@ async function extractPdfText(
   buffer: Buffer,
   pdf: (buffer: Buffer) => Promise<{ text?: string }>
 ) {
-  try {
-    const parsed = await pdf(buffer);
-
-    if (parsed.text && parsed.text.trim().length > 300) {
-      return parsed.text;
-    }
-  } catch {}
-
-  return "";
+  const parsed = await pdf(buffer);
+  return parsed.text || "";
 }
 
 async function pdfToImages(
@@ -68,7 +82,7 @@ async function pdfToImages(
   const images: string[] = [];
   let page = 1;
 
-  while (true) {
+  while (page <= MAX_OCR_PAGES) {
     try {
       const result = await convert(page, { responseType: "base64" });
 
@@ -188,12 +202,35 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
 
     const buffer = Buffer.from(await fileBlob.arrayBuffer());
 
+    // Parts E/F/G - real server-side checks; the cover-letter upload path
+    // previously had NO validation of any kind (client or server) before
+    // this phase.
+    let extension: string;
+
+    try {
+      assertWithinSizeLimit(buffer.length);
+      extension = assertAllowedExtension(fileName, COVER_LETTER_ALLOWED_EXTENSIONS);
+    } catch (validationError) {
+      if (validationError instanceof UploadValidationError) {
+        throw new AnalysisFailure(validationError.code, validationError.message);
+      }
+      throw validationError;
+    }
+
     await setStage(coverLetterId, userId, "extracting_text");
 
     let coverLetterText = "";
-    const lowerFileName = fileName.toLowerCase();
 
-    if (lowerFileName.endsWith(".pdf")) {
+    if (extension === "pdf") {
+      try {
+        assertPdfSignature(buffer);
+      } catch (validationError) {
+        if (validationError instanceof UploadValidationError) {
+          throw new AnalysisFailure(validationError.code, validationError.message);
+        }
+        throw validationError;
+      }
+
       let pdf: (buffer: Buffer) => Promise<{ text?: string }>;
 
       try {
@@ -206,9 +243,19 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
         );
       }
 
-      coverLetterText = await extractPdfText(buffer, pdf);
+      try {
+        coverLetterText = await extractPdfText(buffer, pdf);
+      } catch (parseError) {
+        const code = classifyPdfParseError(parseError);
+        throw new AnalysisFailure(
+          code,
+          code === "ENCRYPTED_PDF"
+            ? "This PDF is password-protected. Please upload an unlocked copy."
+            : "We couldn't read this cover letter file. Please try exporting it again."
+        );
+      }
 
-      if (coverLetterText.trim().length < 300) {
+      if (!hasMeaningfulText(coverLetterText)) {
         await setStage(coverLetterId, userId, "running_ocr");
 
         console.log("Cover Letter appears scanned. Running Vision OCR...");
@@ -229,8 +276,24 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
         coverLetterText = await visionOCR(images);
 
         console.log("Vision OCR complete.");
+
+        if (!hasMeaningfulText(coverLetterText)) {
+          throw new AnalysisFailure(
+            "NO_READABLE_TEXT",
+            "We couldn't find readable text in this file. Please upload a text-based PDF, DOCX, or TXT cover letter."
+          );
+        }
       }
-    } else if (lowerFileName.endsWith(".docx")) {
+    } else if (extension === "docx") {
+      try {
+        assertDocxSignature(buffer);
+      } catch (validationError) {
+        if (validationError instanceof UploadValidationError) {
+          throw new AnalysisFailure(validationError.code, validationError.message);
+        }
+        throw validationError;
+      }
+
       let mammoth: { extractRawText: (input: { buffer: Buffer }) => Promise<{ value: string }> };
 
       try {
@@ -243,16 +306,39 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
         );
       }
 
-      const doc = await mammoth.extractRawText({ buffer });
-      coverLetterText = doc.value;
-    } else if (lowerFileName.endsWith(".txt")) {
-      coverLetterText = buffer.toString("utf8");
-    } else {
-      throw new AnalysisFailure("UNSUPPORTED_FORMAT", "Unsupported file format.");
-    }
+      try {
+        const doc = await withParseTimeout(
+          mammoth.extractRawText({ buffer }),
+          DOCX_PARSE_TIMEOUT_MS,
+          "CORRUPT_DOCX",
+          "We couldn't read this cover letter file. Please try exporting it again."
+        );
+        coverLetterText = doc.value;
+      } catch (parseError) {
+        if (parseError instanceof UploadValidationError) {
+          throw new AnalysisFailure(parseError.code, parseError.message);
+        }
+        throw new AnalysisFailure(
+          "CORRUPT_DOCX",
+          "We couldn't read this cover letter file. Please try exporting it again."
+        );
+      }
 
-    if (!coverLetterText.trim()) {
-      throw new AnalysisFailure("NO_TEXT_FOUND", "No readable text found.");
+      if (!hasMeaningfulText(coverLetterText)) {
+        throw new AnalysisFailure(
+          "NO_READABLE_TEXT",
+          "We couldn't find readable text in this file. Please upload a text-based PDF, DOCX, or TXT cover letter."
+        );
+      }
+    } else {
+      coverLetterText = buffer.toString("utf8");
+
+      if (!hasMeaningfulText(coverLetterText)) {
+        throw new AnalysisFailure(
+          "NO_READABLE_TEXT",
+          "We couldn't find readable text in this file. Please upload a text-based PDF, DOCX, or TXT cover letter."
+        );
+      }
     }
 
     coverLetterText = normalizeParagraph(coverLetterText);

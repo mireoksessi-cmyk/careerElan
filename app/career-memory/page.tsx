@@ -9,6 +9,13 @@ import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
 import {
+  COVER_LETTER_ALLOWED_EXTENSIONS,
+  MAX_UPLOAD_BYTES,
+  RESUME_ALLOWED_EXTENSIONS,
+  getLowercaseExtension,
+  sanitizeStorageFileNameSegment,
+} from "@/lib/documentAnalysis/uploadValidation";
+import {
   MAX_UPLOADED_RESUMES,
   MAX_CREATED_RESUMES,
   MAX_COVER_LETTERS,
@@ -1033,19 +1040,11 @@ return data;
   const requiredCount = requiredCompletedCount();
   
   async function persistMemory() {
-  console.log("========== persistMemory START ==========");
-
-  
-
-  console.log("USER =", user);
-
   if (!user) {
     alert("User is null");
     return;
   }
 
-  console.log("MEMORY DATA =", memoryData);
-   console.log("========== Loading Career Memory ==========");
   const { data, error } = await supabase
   .from("career_memory")
   .upsert(
@@ -1108,10 +1107,8 @@ volunteer_experience:
   )
   .select();
 
-console.log("CAREER MEMORY DATA =", data);
-console.log("CAREER MEMORY ERROR =", error);
-
 if (error) {
+  console.error("CAREER MEMORY SAVE ERROR =", error);
   alert(error.message);
   return false;
 }
@@ -1413,17 +1410,27 @@ function continueUploadedDashboard() {
   async function processResumeFile(file: File) {
   setResumeUploadError("");
 
-  const allowedExtensions = ["pdf", "docx"];
-  const extension = file.name.split(".").pop()?.toLowerCase();
+  // Client-side check is UX-only (Part AD) - the same rules are
+  // authoritatively re-enforced server-side in resumeAnalysisCore.ts via
+  // this same shared module, including a real magic-byte signature check
+  // this client check cannot perform.
+  const extension = getLowercaseExtension(file.name);
 
-  if (!extension || !allowedExtensions.includes(extension)) {
+  if (!extension || !RESUME_ALLOWED_EXTENSIONS.includes(extension as any)) {
     setResumeUploadError(
       "Unsupported file type. Please upload a PDF or DOCX resume."
     );
     return;
   }
 
-  if (file.size > 10 * 1024 * 1024) {
+  if (file.size === 0) {
+    setResumeUploadError(
+      "This file is empty. Please upload a valid resume file."
+    );
+    return;
+  }
+
+  if (file.size > MAX_UPLOAD_BYTES) {
     setResumeUploadError(
       "This file is larger than 10MB. Please upload a smaller resume."
     );
@@ -1555,14 +1562,26 @@ return;
     setImportMessage("Uploading to secure storage");
     setUploadProgress(30);
 
-    storagePath =
-      `${user.id}/${Date.now()}-${file.name}`;
+    /*
+      Part O - the storage key never carries the raw, attacker-controlled
+      filename: sanitizeStorageFileNameSegment() strips path separators/
+      control characters and caps length. The friendly original filename is
+      still stored verbatim in the resumes.file_name column for display.
+      Part H - explicit contentType derived from the validated extension,
+      not the browser-supplied (spoofable) file.type, so files are served
+      back later with a type that matches what was actually validated.
+    */
+    storagePath = `${user.id}/${Date.now()}-${sanitizeStorageFileNameSegment(file.name, extension)}`;
 
     const { error: uploadError } =
       await supabase.storage
         .from("resumes")
         .upload(storagePath, file, {
           upsert: false,
+          contentType:
+            extension === "pdf"
+              ? "application/pdf"
+              : "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         });
 
     if (uploadError) {
@@ -1724,14 +1743,13 @@ return;
     let analyzeResult: any;
 
     try {
-      // [RESUME_TRACE] instrumentation-only.
-      const rawResponseTextForTrace = await analyzeResponse.clone().text();
-      console.log("[RESUME_TRACE] ANALYZE_RESUME_RAW_RESPONSE", {
-        rawBody: rawResponseTextForTrace,
-        bodyLength: rawResponseTextForTrace.length,
-        contentType: analyzeResponse.headers.get("content-type"),
-      });
-
+      /*
+        Part AI - this used to also log the full raw response body
+        ([RESUME_TRACE] ANALYZE_RESUME_RAW_RESPONSE) to the browser
+        console. On the idempotent-replay-succeeded branch that raw body
+        is the entire parsed resume (name/email/phone/work history/
+        education/skills) - removed; only non-content metadata is traced.
+      */
       analyzeResult = await analyzeResponse.json();
 
       console.log("[RESUME_TRACE] ANALYZE_RESUME_JSON_OK", {
@@ -2081,6 +2099,38 @@ async function handleCoverLetterDrop(
 async function processCoverLetterFile(file: File) {
 setCoverLetterUploadError("");
 
+  /*
+    Phase 6I.6.32 - this function previously had NO validation of any kind
+    (no extension check, no size check), unlike processResumeFile. Mirrors
+    the same UX-only client check used for resumes; server-side
+    coverLetterAnalysisCore.ts is authoritative.
+  */
+  const coverLetterExtension = getLowercaseExtension(file.name);
+
+  if (
+    !coverLetterExtension ||
+    !COVER_LETTER_ALLOWED_EXTENSIONS.includes(coverLetterExtension as any)
+  ) {
+    setCoverLetterUploadError(
+      "Unsupported file type. Please upload a PDF, DOCX, or TXT cover letter."
+    );
+    return;
+  }
+
+  if (file.size === 0) {
+    setCoverLetterUploadError(
+      "This file is empty. Please upload a valid cover letter file."
+    );
+    return;
+  }
+
+  if (file.size > MAX_UPLOAD_BYTES) {
+    setCoverLetterUploadError(
+      "This file is larger than 10MB. Please upload a smaller cover letter."
+    );
+    return;
+  }
+
   function resetCoverLetterImport() {
     setCoverLetterImportStage("idle");
     setCoverLetterImportMessage("");
@@ -2160,14 +2210,19 @@ return;
       return;
     }
 
-    storagePath =
-      `${user.id}/${Date.now()}-${file.name}`;
+    storagePath = `${user.id}/${Date.now()}-${sanitizeStorageFileNameSegment(file.name, coverLetterExtension)}`;
 
     const { error: uploadError } =
       await supabase.storage
         .from("cover-letters")
         .upload(storagePath, file, {
           upsert: false,
+          contentType:
+            coverLetterExtension === "pdf"
+              ? "application/pdf"
+              : coverLetterExtension === "docx"
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                : "text/plain",
         });
 
     if (uploadError) {
