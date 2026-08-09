@@ -1085,7 +1085,7 @@ async function handleUpdatePassword() {
           <FooterGroup
             title="Product"
             items={["Features", "How It Works", "Examples", "Pricing"]}
-            links={{ Features: "/features" }}
+            links={{ Features: "/features", "How It Works": "/how-it-works" }}
           />
           <FooterGroup title="Company" items={["About Us", "Blog", "Careers", "Contact"]} />
           <FooterGroup
