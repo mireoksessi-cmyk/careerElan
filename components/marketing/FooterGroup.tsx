@@ -25,6 +25,18 @@ export const PRODUCT_FOOTER_LINKS: Record<string, string> = {
   Pricing: "/pricing",
 };
 
+/*
+  Phase 6I.6.27 - same centralization for the Company group. Only "About
+  Us" gets a real href (/about) - Blog/Careers/Contact stay exactly as
+  they were (plain text, no placeholder "#"/"/coming-soon" hrefs) since
+  this phase explicitly does not build those pages.
+*/
+export const COMPANY_FOOTER_ITEMS = ["About Us", "Blog", "Careers", "Contact"];
+
+export const COMPANY_FOOTER_LINKS: Record<string, string> = {
+  "About Us": "/about",
+};
+
 export default function FooterGroup({
   title,
   items,

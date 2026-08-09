@@ -15,6 +15,8 @@ import {
 import FooterGroup, {
   PRODUCT_FOOTER_ITEMS,
   PRODUCT_FOOTER_LINKS,
+  COMPANY_FOOTER_ITEMS,
+  COMPANY_FOOTER_LINKS,
 } from "@/components/marketing/FooterGroup";
 
 export const metadata: Metadata = {
@@ -290,7 +292,11 @@ export default function HowItWorksPage() {
             items={PRODUCT_FOOTER_ITEMS}
             links={PRODUCT_FOOTER_LINKS}
           />
-          <FooterGroup title="Company" items={["About Us", "Blog", "Careers", "Contact"]} />
+          <FooterGroup
+            title="Company"
+            items={COMPANY_FOOTER_ITEMS}
+            links={COMPANY_FOOTER_LINKS}
+          />
           <FooterGroup
             title="Legal"
             items={["Privacy Policy", "Terms of Service", "Cookie Policy"]}
