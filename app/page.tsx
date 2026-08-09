@@ -2,15 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import FooterGroup, {
-  PRODUCT_FOOTER_ITEMS,
-  PRODUCT_FOOTER_LINKS,
-  COMPANY_FOOTER_ITEMS,
-  COMPANY_FOOTER_LINKS,
-} from "@/components/marketing/FooterGroup";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import PublicAuthActionsProvider, {
   useAuthActions,
 } from "@/components/marketing/PublicAuthActions";
+import { useLogin } from "@/lib/auth/LoginManager";
 
 /*
   Phase 6I.6.28 - the real Log in/Get Started/CTA behavior (the modal,
@@ -32,6 +28,17 @@ export default function HomePage() {
 
 function HomePageBody() {
   const { openAuth } = useAuthActions();
+  /*
+    Phase 6I.6.30 - session-aware Header. LoginManager (lib/auth/
+    LoginManager.tsx) already wraps the entire app (app/layout.tsx) and
+    tracks the real Supabase session via getSession()/onAuthStateChange()
+    - reused here rather than adding a second auth listener. Log in/Get
+    Started are only ever rendered while genuinely logged out; while the
+    initial session check is still resolving (`loading`), neither renders,
+    which avoids a flash of the CTAs for an already-authenticated user.
+  */
+  const { user, loading } = useLogin();
+  const showAuthCta = !loading && !user;
 
   return (
   <main className="min-h-screen w-screen overflow-x-hidden bg-white text-slate-950">
@@ -72,31 +79,35 @@ function HomePageBody() {
           </Link>
         </nav>
 
-        <div className="hidden items-center gap-4 md:flex">
-          <button
-            type="button"
-            onClick={() => openAuth("login")}
-            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
-          >
-            Log in
-          </button>
+        {showAuthCta && (
+          <div className="hidden items-center gap-4 md:flex">
+            <button
+              type="button"
+              onClick={() => openAuth("login")}
+              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              Log in
+            </button>
 
+            <button
+              type="button"
+              onClick={() => openAuth("signup")}
+              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
+            >
+              Get Started
+            </button>
+          </div>
+        )}
+
+        {showAuthCta && (
           <button
             type="button"
             onClick={() => openAuth("signup")}
-            className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
+            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-blue-200 md:hidden"
           >
-            Get Started
+            Start
           </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => openAuth("signup")}
-          className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-blue-200 md:hidden"
-        >
-          Start
-        </button>
+        )}
       </header>
 
       <div className="relative z-10 mx-auto w-full max-w-[1440px] px-5 pb-10 pt-3 sm:px-8 lg:px-10 xl:px-12">
@@ -480,39 +491,7 @@ function HomePageBody() {
         </div>
       </section>
 
-      <footer className="bg-slate-950 px-6 py-10 text-white sm:px-10 lg:px-16 xl:px-20">
-        <div className="mx-auto grid max-w-7xl gap-8 md:grid-cols-4">
-          <div>
-            <Image src="/logo.png" alt="Career Élan" width={190} height={74} className="h-auto w-[170px] rounded-md bg-white/95 p-1" />
-            <p className="mt-4 text-sm text-slate-400">AI-powered career operating system.</p>
-            <div className="mt-5 flex gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">in</span>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">𝕏</span>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">◎</span>
-            </div>
-          </div>
-          <FooterGroup
-            title="Product"
-            items={PRODUCT_FOOTER_ITEMS}
-            links={PRODUCT_FOOTER_LINKS}
-          />
-          <FooterGroup
-            title="Company"
-            items={COMPANY_FOOTER_ITEMS}
-            links={COMPANY_FOOTER_LINKS}
-          />
-          <FooterGroup
-            title="Legal"
-            items={["Privacy Policy", "Terms of Service", "Cookie Policy"]}
-            links={{
-              "Privacy Policy": "/privacy",
-              "Terms of Service": "/terms",
-              "Cookie Policy": "/cookies",
-            }}
-          />
-        </div>
-        <p className="mx-auto mt-8 max-w-7xl border-t border-white/10 pt-6 text-center text-sm text-slate-500">© 2026 Career Élan. All rights reserved.</p>
-      </footer>
+      <CareerElanFooter />
     </main>
   );
 }

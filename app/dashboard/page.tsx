@@ -10,6 +10,7 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
 import CoverLetterPreviewRenderer from "@/components/coverLetter/CoverLetterPreviewRenderer";
 import CareerMemoryTemplatePreview, {
@@ -2530,7 +2531,7 @@ if (!user) {
 
   return (
 
-    <main className="min-h-screen bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
      {previewAsset && (
   <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
     <div className="mx-auto flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-slate-100 shadow-2xl">
@@ -2677,7 +2678,7 @@ if (!user) {
         </div>
       )}
 
-      <div className="flex min-h-screen flex-col md:flex-row">
+      <div className="flex flex-1 flex-col md:flex-row">
         <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
@@ -3915,6 +3916,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
           </div>
         </section>
       </div>
+      <CareerElanFooter />
     </main>
   
   );

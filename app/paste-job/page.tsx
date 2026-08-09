@@ -6,6 +6,7 @@ import { exportPdfFromText, buildPdfBlob } from "@/lib/brand/render/pdfDocumentE
 import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
 import CanonicalTemplateSelector from "@/components/canonicalGeneratePackage/CanonicalTemplateSelector";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 /*
   D안 Phase 1 (Original Visual Tree) - buildOriginalLayoutPdfBlob is a
   pure client-safe jsPDF builder (same runtime shape as buildPdfBlob
@@ -3244,8 +3245,8 @@ async function downloadDocx() {
       )}
 
       
-    <main className="min-h-screen bg-[#f6fbff] text-gray-900">
-      <div className="flex min-h-screen">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+      <div className="flex flex-1">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
@@ -4503,6 +4504,7 @@ async function downloadDocx() {
         </div>
         </section>
       </div>
+      <CareerElanFooter />
     </main>
     </>
   

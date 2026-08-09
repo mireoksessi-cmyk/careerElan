@@ -5,6 +5,7 @@ import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
 import {
@@ -3296,7 +3297,7 @@ return;
   }
 
   return (
-    <main className="min-h-screen bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
        {coverLetterPreview && (
   <div className="fixed inset-0 z-50 overflow-auto bg-white p-10">
 
@@ -3315,7 +3316,7 @@ return;
 
   </div>
 )}
-      <div className="flex min-h-screen flex-col md:flex-row">
+      <div className="flex flex-1 flex-col md:flex-row">
   <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
   <div className="flex items-center justify-between">
     <a href="/dashboard">
@@ -3893,6 +3894,7 @@ return;
           )}
         </section>
       </div>
+      <CareerElanFooter />
     </main>
   );
 }

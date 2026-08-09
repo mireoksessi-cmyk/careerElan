@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
 import { useLogin } from "@/lib/auth/LoginManager";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 
 /*
   Career Elan only operates in Canada, so Country is fixed - not a free-form
@@ -267,8 +268,8 @@ async function deleteAccount() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6fbff]">
-      <div className="flex min-h-screen">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff]">
+      <div className="flex flex-1">
 
         <Sidebar active="Settings" />
 
@@ -610,6 +611,8 @@ async function deleteAccount() {
         </section>
 
       </div>
+
+      <CareerElanFooter />
 
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

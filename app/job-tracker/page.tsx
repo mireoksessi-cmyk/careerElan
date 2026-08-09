@@ -7,6 +7,7 @@ import JobList from "@/components/job-layout/JobList";
 import StatsCards from "@/components/job-layout/StatsCards";
 import Header from "@/components/job-layout/Header";
 import Sidebar from "@/components/job-layout/Sidebar";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
@@ -493,9 +494,9 @@ async function downloadPackage(type: "docx" | "pdf") {
 }
 
 return (
-  <main className="min-h-screen bg-[#f6fbff]">
+  <main className="flex min-h-screen flex-col bg-[#f6fbff]">
 
-    <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="flex flex-1 flex-col md:flex-row">
 
       <Sidebar active="Job Tracker" />
 
@@ -583,6 +584,8 @@ return (
       </section>
 
     </div>
+
+    <CareerElanFooter />
 
     {showDeleteAllModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

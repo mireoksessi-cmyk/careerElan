@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useLogin } from "@/lib/auth/LoginManager";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 
 import AnalyticsStats from "@/components/analytics/AnalyticsStats";
 import StatusChart from "@/components/analytics/StatusChart";
@@ -243,8 +244,8 @@ export default function AnalyticsPage() {
 
   return (
    
-      <main className="min-h-screen bg-[#f6fbff] text-gray-900">
-        <div className="flex min-h-screen flex-col md:flex-row">
+      <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+        <div className="flex flex-1 flex-col md:flex-row">
           <Sidebar active="Analytics" />
 
           <section className="min-w-0 flex-1 p-8">
@@ -309,6 +310,7 @@ export default function AnalyticsPage() {
             </div>
           </section>
         </div>
+        <CareerElanFooter />
       </main>
     
   );

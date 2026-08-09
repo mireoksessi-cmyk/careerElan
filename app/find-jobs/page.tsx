@@ -1,5 +1,6 @@
 "use client";
 import { useLogin } from "@/lib/auth/LoginManager";
+import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -363,8 +364,8 @@ setCategory(state.category || "All");
 
   return (
   
-    <main className="min-h-screen bg-[#f6fbff] text-gray-900">
-      <div className="flex min-h-screen">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+      <div className="flex flex-1">
         <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
@@ -757,6 +758,7 @@ setCategory(state.category || "All");
           </section>
         </section>
      </div>
+    <CareerElanFooter />
     </main>
   
   );
