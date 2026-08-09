@@ -1008,25 +1008,41 @@ export default function PasteJobPage() {
     (matches resolveApplicationTemplateId's own "legacy"/
     "selection-required" results, both of which fall through to null
     here rather than block this pre-existing preview).
+
+    Phase 6I.6.19 - root cause of Paste Job showing the wrong template
+    for the Dashboard-selected resume: this call used to hit
+    resolve-template with NEITHER resumeId NOR applicationId, which
+    (per that route's own contract - see resolve-template/route.ts and
+    applicationTemplateResolver.ts) falls straight to
+    career_profiles.default_template_id - the PROFILE default,
+    completely ignoring which specific resume career_memory.
+    selected_resume_id actually points at and that resume's own
+    resumes.selected_template. Paste Job is a read-only consumer of the
+    Dashboard selection (product policy - see this phase's own spec),
+    so it must resolve the template for the SAME resumeId the content
+    preview already uses, via the resumeId branch of resolve-template
+    (-> resolveResumeTemplate(), which already correctly implements
+    resume-explicit -> profile-default fallback per Phase 6I.6.14/15 -
+    unchanged by this fix). savedApplicationMaterial.resume.id is that
+    exact identity: /api/resumes/selected -> resolveSelectedResume() is
+    the SAME authoritative resolution app/api/generate-package/route.ts
+    uses for the application's content, so gating this effect on
+    resumeSelectionStatus === "ready" and keying it off that resolved
+    identity (never an independent lookup) guarantees preview and
+    Generate Package can never resolve two different templates for the
+    same resume. A career_memory/Manual selection has no resumes row
+    (resumeId stays null), so it correctly keeps going through the
+    no-resumeId branch (-> profile-default), unchanged from before -
+    that fallback was already correct for Manual, only the uploaded-
+    resume case was broken. Re-resolves fresh on every mount (this
+    effect has no persisted/cached template value of its own beyond
+    this render's React state), so returning to Paste Job after
+    changing a resume's template on Dashboard, or after switching which
+    resume is selected, always reflects the CURRENT Dashboard state -
+    never a stale value from an earlier visit or from Dashboard's own
+    separate preview state.
   */
   const [canonicalPreviewTemplateId, setCanonicalPreviewTemplateId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    fetch("/api/internal/canonical-career-memory/resolve-template")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (cancelled) return;
-        setCanonicalPreviewTemplateId(data?.kind === "canonical" ? data.templateId : null);
-      })
-      .catch(() => {
-        if (!cancelled) setCanonicalPreviewTemplateId(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
 
   /*
     Resume tab only: "preview" shows the new DocumentIR-based, template-
@@ -1089,11 +1105,40 @@ export default function PasteJobPage() {
     setResumeSelectionStatus,
   ] = useState<ResumeSelectionStatus>("loading");
 
-const [
-  savedPreviewType,
-  setSavedPreviewType,
-] =
-  useState<SavedPreviewType>(null);
+  /*
+    Phase 6I.6.19 - resolves canonicalPreviewTemplateId for the SAME
+    resumeId savedApplicationMaterial already resolved for the
+    application's content (see that state's own Phase 6I.6.19 comment
+    above for the full root-cause trace). Gated on resumeSelectionStatus
+    === "ready" so this never races ahead of loadSelectedApplicationMaterials()
+    with a stale/default identity.
+  */
+  useEffect(() => {
+    if (!user) return;
+    if (resumeSelectionStatus !== "ready") return;
+    let cancelled = false;
+    const selectedResumeId = savedApplicationMaterial?.resume.sourceType === "uploaded" ? savedApplicationMaterial.resume.id : null;
+    const url = selectedResumeId
+      ? `/api/internal/canonical-career-memory/resolve-template?resumeId=${encodeURIComponent(selectedResumeId)}`
+      : "/api/internal/canonical-career-memory/resolve-template";
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        setCanonicalPreviewTemplateId(data?.kind === "canonical" ? data.templateId : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCanonicalPreviewTemplateId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, resumeSelectionStatus, savedApplicationMaterial?.resume.sourceType, savedApplicationMaterial?.resume.id]);
+
+  const [
+    savedPreviewType,
+    setSavedPreviewType,
+  ] = useState<SavedPreviewType>(null);
 
   const [analyzed, setAnalyzed] = useState(false);
   const [generated, setGenerated] = useState(false);
