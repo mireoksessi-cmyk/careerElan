@@ -29,7 +29,7 @@ import { resolveSelectedResume, ResumeResolutionError } from "../../resume-servi
 import { supabaseAdmin } from "../../supabaseAdmin";
 import { logSafeError } from "../../errors/publicError";
 import { buildCareerMemoryDraftText } from "../../resume-builder";
-import { GENERATE_PACKAGE_LIFETIME_LIMIT, isNetlifyProductionRuntime } from "../../config/packageQuota";
+import { GENERATE_PACKAGE_MONTHLY_LIMIT, isNetlifyProductionRuntime } from "../../config/packageQuota";
 import { resolveBackgroundFunctionSecret, resolveNamedBackgroundFunctionUrl } from "../../generatePackage/backgroundTarget";
 import { getFirstText, fallbackPackage, safeResumeResolutionMessage } from "../../generatePackage/shared";
 import { classifyCanadaJobScope, isCanadaScopeGenerationAllowed, CANADA_SCOPE_UNSUPPORTED_MESSAGE } from "../../jobPosting/canadaScopeClassifier";
@@ -119,12 +119,12 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
 
   let quotaReserved = false;
 
-  // ==================== Quota reservation (Part C) - SAME ledger, SAME RPCs, SAME idempotency key as legacy. A user's plan grants a single monthly generation budget regardless of which engine ultimately serves the request - this is what "no double charging" means at the product level, not just at the per-request level. ====================
+  // ==================== Quota reservation (Part C, Phase 6I.6.23: monthly/calendar-month) - SAME ledger, SAME RPCs, SAME idempotency key as legacy. A user's plan grants a single monthly generation budget regardless of which engine ultimately serves the request - this is what "no double charging" means at the product level, not just at the per-request level. The RPC ignores p_limit and resolves the real, per-user limit itself server-side. ====================
   if (isNetlifyProductionRuntime()) {
     const { data: quotaRows, error: quotaError } = await supabaseAdmin.rpc("reserve_generate_package_usage", {
       p_user_id: userId,
       p_request_id: generationRequestId,
-      p_limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
+      p_limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
     });
 
     if (quotaError) {
@@ -134,7 +134,17 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
 
     const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
     if (!quota?.reserved) {
-      return NextResponse.json({ error: "Generate Package limit reached.", code: "GENERATE_PACKAGE_LIMIT_REACHED", limit: GENERATE_PACKAGE_LIFETIME_LIMIT, used: quota?.used ?? GENERATE_PACKAGE_LIFETIME_LIMIT, remaining: 0 }, { status: 429 });
+      const used = quota?.used ?? GENERATE_PACKAGE_MONTHLY_LIMIT;
+      return NextResponse.json({
+        error: "You've reached your monthly Generate Package limit. You can generate up to " + GENERATE_PACKAGE_MONTHLY_LIMIT + " packages per month.",
+        code: "GENERATE_PACKAGE_LIMIT_REACHED",
+        // used + remaining reflects the RPC's own server-resolved limit for
+        // this user (see packageQuota.ts's doc comment), not this file's
+        // display constant.
+        limit: used + (quota?.remaining ?? 0),
+        used,
+        remaining: 0,
+      }, { status: 429 });
     }
     quotaReserved = true;
   }

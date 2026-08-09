@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
-  GENERATE_PACKAGE_LIFETIME_LIMIT,
+  GENERATE_PACKAGE_MONTHLY_LIMIT,
   isNetlifyProductionRuntime,
 } from "@/lib/config/packageQuota";
 
 /*
-  Read-only status for the "N generations remaining" UI hint - never
-  reserves anything and never calls OpenAI. Real enforcement always
+  Read-only status for the "N generations remaining this month" UI hint -
+  never reserves anything and never calls OpenAI. Real enforcement always
   happens server-side in POST /api/generate-package at generation time;
   this is display-only, and the client must never treat its response as
   authoritative.
@@ -31,7 +31,7 @@ export async function GET() {
   if (!isNetlifyProductionRuntime()) {
     return NextResponse.json({
       enforced: false,
-      limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
+      limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
       used: null,
       remaining: null,
     });
@@ -40,7 +40,7 @@ export async function GET() {
   const { data: usageRows, error: usageError } =
     await supabaseAdmin.rpc("get_generate_package_usage", {
       p_user_id: user.id,
-      p_limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
+      p_limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
     });
 
   if (usageError) {
@@ -54,11 +54,16 @@ export async function GET() {
     ? usageRows[0]
     : usageRows;
 
+  const used = usage?.used ?? 0;
+  const remaining = usage?.remaining ?? GENERATE_PACKAGE_MONTHLY_LIMIT;
+
   return NextResponse.json({
     enforced: true,
-    limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
-    used: usage?.used ?? 0,
-    remaining:
-      usage?.remaining ?? GENERATE_PACKAGE_LIFETIME_LIMIT,
+    // used + remaining reflects the RPC's own server-resolved, per-user
+    // limit (resolve_generate_package_quota_limit()) rather than this
+    // file's display constant - see packageQuota.ts's doc comment.
+    limit: used + remaining,
+    used,
+    remaining,
   });
 }

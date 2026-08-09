@@ -9,7 +9,7 @@ import { logSafeError } from "@/lib/errors/publicError";
 import { buildCareerMemoryDraftText } from "@/lib/resume-builder";
 import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
 import {
-  GENERATE_PACKAGE_LIFETIME_LIMIT,
+  GENERATE_PACKAGE_MONTHLY_LIMIT,
   isNetlifyProductionRuntime,
 } from "@/lib/config/packageQuota";
 import {
@@ -412,22 +412,28 @@ export async function POST(req: Request) {
     }
 
     /*
-      Lifetime Generate Package quota - Production only (see
-      isNetlifyProductionRuntime()'s doc comment). Reserves against the
-      same generationRequestId already used for the applications-table
-      idempotent claim below, so a retry/double-click/recovery-poll with
-      the same id can never be double-charged - reserve_generate_package_
-      usage() is itself idempotent per (user_id, request_id). Runs before
-      the applications claim and before enqueueing the worker, so a caller
-      at their limit never reaches either. Unchanged from the pre-Phase-1
-      synchronous route.
+      Phase 6I.6.23 - MONTHLY (calendar-month, UTC) Generate Package quota
+      - Production only (see isNetlifyProductionRuntime()'s doc comment).
+      Reserves against the same generationRequestId already used for the
+      applications-table idempotent claim below, so a retry/double-click/
+      recovery-poll with the same id can never be double-charged -
+      reserve_generate_package_usage() is itself idempotent per (user_id,
+      request_id). Runs before the applications claim and before
+      enqueueing the worker, so a caller at their limit never reaches
+      either - and, since this is the only call site that ever invokes an
+      AI-bound worker for the legacy engine, a blocked caller here also
+      guarantees 0 OpenAI invocations. Unchanged from the pre-Phase-1
+      synchronous route. The RPC ignores p_limit and resolves the real
+      limit itself server-side (per-user, via resolve_generate_package_
+      quota_limit()) - GENERATE_PACKAGE_MONTHLY_LIMIT below is only the
+      required-but-unused parameter value and a display fallback.
     */
     if (isNetlifyProductionRuntime()) {
       const { data: quotaRows, error: quotaError } =
         await supabaseAdmin.rpc("reserve_generate_package_usage", {
           p_user_id: user.id,
           p_request_id: generationRequestId,
-          p_limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
+          p_limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
         });
 
       if (quotaError) {
@@ -450,12 +456,21 @@ export async function POST(req: Request) {
       const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
 
       if (!quota?.reserved) {
+        const used = quota?.used ?? GENERATE_PACKAGE_MONTHLY_LIMIT;
         return NextResponse.json(
           {
-            error: "Generate Package limit reached.",
+            error:
+              "You've reached your monthly Generate Package limit. You can generate up to " +
+              GENERATE_PACKAGE_MONTHLY_LIMIT +
+              " packages per month.",
             code: "GENERATE_PACKAGE_LIMIT_REACHED",
-            limit: GENERATE_PACKAGE_LIFETIME_LIMIT,
-            used: quota?.used ?? GENERATE_PACKAGE_LIFETIME_LIMIT,
+            // used + remaining (remaining is always 0 in this branch) reflects
+            // the RPC's own server-resolved limit for THIS user, rather than
+            // this file's own display constant - correct today (both equal 3)
+            // and correct without any change if a future Pro entitlement ever
+            // resolves to a different per-user limit server-side.
+            limit: used + (quota?.remaining ?? 0),
+            used,
             remaining: 0,
           },
           { status: 429 }

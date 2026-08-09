@@ -1200,9 +1200,10 @@ const [
 ] = useState<UpcomingInterview | null>(null);
   /*
     Server-authoritative Generate Package quota (same read-only endpoint
-    already used by app/paste-job/page.tsx) - GENERATE_PACKAGE_LIFETIME_LIMIT
-    is a lifetime, Production-only cap tracked in its own
-    generate_package_usage ledger, completely separate from
+    already used by app/paste-job/page.tsx) - Phase 6I.6.23: MONTHLY
+    (calendar-month, UTC), Production-only, tracked via
+    generate_package_quota_periods/generate_package_quota_reservations and
+    resolved per-user server-side, completely separate from
     stats.packagesThisMonth below (a client-computed count of ALL
     applications rows created this calendar month, including failed/pending
     generation attempts, never enforced by the server). The AI Usage card
@@ -1295,7 +1296,7 @@ const [
      application count - that count includes failed/timed-out generation
      attempts the real quota already excludes (see the state comment
      above), which is exactly what previously let this card show a used
-     count higher than the real lifetime limit while the account was
+     count higher than the real monthly limit while the account was
      nowhere near actually exhausted. Outside Production (enforced:false,
      used/remaining null), nothing is actually capped server-side, so the
      existing monthly-count display is kept as a soft, informal stat.
@@ -3761,9 +3762,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       </h2>
 
       <p className="mt-2 text-sm text-gray-500">
-        {generatePackageQuota?.enforced
-          ? "Lifetime package generation usage."
-          : "Monthly package generation usage."}
+        Monthly package generation usage.
       </p>
     </div>
 
@@ -3806,9 +3805,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 
     <div className="mt-3 flex items-center justify-between gap-3">
       <p className="text-xs font-semibold text-gray-400">
-        {generatePackageQuota?.enforced
-          ? "One-time limit per account"
-          : "Resets at the beginning of each month"}
+        Resets at the beginning of each month
       </p>
 
       <p className="whitespace-nowrap text-xs font-bold text-gray-500">
@@ -3820,9 +3817,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
   {aiUsageUsed >= aiUsageLimit && (
     <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
       <p className="text-xs font-bold text-red-600">
-        {generatePackageQuota?.enforced
-          ? "You have reached your account's package generation limit."
-          : "You have reached your monthly package limit."}
+        You have reached your monthly package limit.
       </p>
     </div>
   )}

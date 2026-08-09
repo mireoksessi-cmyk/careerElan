@@ -10,6 +10,7 @@
   app/api/applications/[id]/status/route.ts (GET) exactly - see those
   files for the authoritative contract.
 */
+import { GENERATE_PACKAGE_MONTHLY_LIMIT } from "../config/packageQuota";
 
 /* =========================================================
    Duplicate-submit guard
@@ -194,7 +195,7 @@ export function parseGenerateResponse(
   if (httpStatus === 429 && data.code === "GENERATE_PACKAGE_LIMIT_REACHED") {
     return {
       kind: "quota_reached",
-      limit: typeof data.limit === "number" ? data.limit : 5,
+      limit: typeof data.limit === "number" ? data.limit : GENERATE_PACKAGE_MONTHLY_LIMIT,
       used: typeof data.used === "number" ? data.used : null,
     };
   }

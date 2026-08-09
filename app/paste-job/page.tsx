@@ -1229,10 +1229,11 @@ export default function PasteJobPage() {
   }, [isDirty]);
 
   /*
-    Display-only hint for the lifetime Generate Package quota (Production
-    only - enforced is false everywhere else, including local dev). Never
-    used to decide whether to allow a click; the server always re-checks
-    at generation time. Loaded once via a plain GET, no OpenAI call.
+    Display-only hint for the monthly (calendar-month) Generate Package
+    quota (Production only - enforced is false everywhere else, including
+    local dev). Never used to decide whether to allow a click; the server
+    always re-checks at generation time. Loaded once via a plain GET, no
+    OpenAI call.
   */
   const [generatePackageQuota, setGeneratePackageQuota] = useState<{
     enforced: boolean;
@@ -2639,7 +2640,7 @@ async function loadSelectedApplicationMaterials() {
       });
 
       const limitError: Error & { code?: string } = new Error(
-        "You have used all 3 Generate Package generations available for your account."
+        "You've reached your monthly Generate Package limit. You can generate up to 3 packages per month."
       );
       limitError.code = "GENERATE_PACKAGE_LIMIT_REACHED";
       throw limitError;
@@ -2671,7 +2672,7 @@ async function loadSelectedApplicationMaterials() {
       error?.code === "GENERATE_PACKAGE_LIMIT_REACHED"
     ) {
       alert(
-        "Generate Package limit reached\n\nYou have used all 3 Generate Package generations available for your account."
+        "Generate Package limit reached\n\nYou've reached your monthly Generate Package limit. You can generate up to 3 packages per month."
       );
     } else if (
       error?.name === "TimeoutError" ||
