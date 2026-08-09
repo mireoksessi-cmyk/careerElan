@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import FooterGroup, {
   PRODUCT_FOOTER_ITEMS,
   PRODUCT_FOOTER_LINKS,
@@ -63,26 +64,12 @@ function HomePageBody() {
             How it Works
           </a>
 
-          <a
-            href="#examples"
-            className="transition hover:text-blue-600"
-          >
-            Examples
-          </a>
-
-          <a
-            href="#pricing"
+          <Link
+            href="/pricing"
             className="transition hover:text-blue-600"
           >
             Pricing
-          </a>
-
-          <a
-            href="#faq"
-            className="transition hover:text-blue-600"
-          >
-            Resources⌄
-          </a>
+          </Link>
         </nav>
 
         <div className="hidden items-center gap-4 md:flex">

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Mail } from "lucide-react";
 import FooterGroup, {
   PRODUCT_FOOTER_ITEMS,
   PRODUCT_FOOTER_LINKS,
@@ -14,55 +14,25 @@ import PublicAuthActionsProvider, {
 } from "@/components/marketing/PublicAuthActions";
 
 /*
-  Phase 6I.6.29 - shared shell for the three public legal pages
-  (/privacy, /terms, /cookies). Previously this rendered a separate,
-  narrow, text-only "old website" shell (small header, "Back to home",
-  no marketing nav, no auth CTAs) that visually broke from Features/
-  How It Works/Pricing/About. It now uses the SAME marketing Header/
-  Footer/auth architecture as those pages (PublicAuthActionsProvider +
-  useAuthActions, identical nav/CTA markup) so a legal page no longer
-  looks like it belongs to a different site.
-
-  IMPORTANT - this file only changes the SHELL. The three page.tsx files
-  (app/privacy, app/terms, app/cookies) that pass their legal body as
-  `children` are completely unchanged by this phase - their substantive
-  text, headings, and Last Updated dates are untouched, verbatim. The
-  `.legal-content` class (styled in app/globals.css) is preserved as-is
-  on the document `<article>` below specifically so that existing
-  prose styling (headings, lists, tables, hr) keeps applying unmodified.
-
-  Kept as a client component (rather than the previous plain server
-  component) only because real auth CTAs require it - the document body
-  itself (`children`) is still ordinary server-rendered JSX passed in
-  from each page.tsx, so no legal content becomes client-rendered.
+  Phase 6I.6.29 - new public marketing page for the Company Footer's
+  "Contact" destination. Same Header/Footer/auth architecture as
+  Features/How It Works/Pricing/About (PublicAuthActionsProvider +
+  useAuthActions) - no separate contact form, no server action, no DB
+  write. The only contact method is a real mailto link to
+  careerelanhq@gmail.com (Part K/L of this phase's spec explicitly
+  forbids building a form or making unsupported support-time promises).
 */
-export default function LegalLayout({
-  title,
-  lastUpdated,
-  children,
-}: {
-  title: string;
-  lastUpdated: string;
-  children: ReactNode;
-}) {
+export default function ContactPageClient() {
   return (
     <PublicAuthActionsProvider>
-      <LegalLayoutBody title={title} lastUpdated={lastUpdated}>
-        {children}
-      </LegalLayoutBody>
+      <ContactPageBody />
     </PublicAuthActionsProvider>
   );
 }
 
-function LegalLayoutBody({
-  title,
-  lastUpdated,
-  children,
-}: {
-  title: string;
-  lastUpdated: string;
-  children: ReactNode;
-}) {
+const CONTACT_EMAIL = "careerelanhq@gmail.com";
+
+function ContactPageBody() {
   const { openAuth } = useAuthActions();
 
   return (
@@ -118,27 +88,43 @@ function LegalLayoutBody({
         </button>
       </header>
 
-      {/* Legal Hero - brand shell matches Features/About/Pricing */}
       <section className="w-full bg-gradient-to-br from-white via-blue-50 to-slate-50 px-5 py-14 sm:px-8 lg:px-10 xl:px-12">
         <div className="mx-auto max-w-[760px] text-center">
           <p className="text-xs font-black uppercase tracking-[0.15em] text-blue-600">
-            LEGAL
+            CONTACT
           </p>
           <h1 className="mt-4 text-3xl font-black tracking-[-0.03em] text-slate-950 sm:text-4xl">
-            {title}
+            Get in Touch
           </h1>
-          <p className="mt-3 text-sm font-semibold text-slate-500">
-            Last Updated: {lastUpdated}
+          <p className="mx-auto mt-5 max-w-[560px] text-base font-semibold leading-7 text-slate-600 sm:text-lg">
+            Have a question about Career Élan? We&rsquo;d be happy to hear
+            from you.
           </p>
         </div>
       </section>
 
-      {/* Document body - readable max-width preserved (Part D: content
-          stays document-friendly even though the shell is now marketing) */}
       <section className="w-full bg-white px-5 py-14 sm:px-8 lg:px-10 xl:px-12">
-        <article className="legal-content mx-auto max-w-3xl text-[15px] leading-7 text-slate-700">
-          {children}
-        </article>
+        <div className="mx-auto max-w-[640px] rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-10">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+            <Mail className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
+          </div>
+
+          <h2 className="mt-5 text-2xl font-black text-slate-950">
+            Contact Career Élan
+          </h2>
+
+          <p className="mx-auto mt-3 max-w-[480px] text-sm font-semibold leading-6 text-slate-600 sm:text-base">
+            For general questions, product feedback, or support inquiries,
+            contact us at:
+          </p>
+
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            className="mt-6 inline-block break-all rounded-xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700 sm:text-base"
+          >
+            {CONTACT_EMAIL}
+          </a>
+        </div>
       </section>
 
       <footer className="bg-slate-950 px-6 py-10 text-white sm:px-10 lg:px-16 xl:px-20">

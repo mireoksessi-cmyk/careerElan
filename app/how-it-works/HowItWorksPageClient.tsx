@@ -149,16 +149,13 @@ function HowItWorksPageBody() {
         </Link>
 
         <nav className="hidden items-center gap-8 text-[13px] font-bold text-slate-800 md:flex">
-          <Link href="/#features" className="transition hover:text-blue-600">
+          <Link href="/features" className="transition hover:text-blue-600">
             Features
           </Link>
-          <Link href="/#how-it-works" className="transition hover:text-blue-600">
+          <Link href="/how-it-works" className="transition hover:text-blue-600">
             How it Works
           </Link>
-          <Link href="/#examples" className="transition hover:text-blue-600">
-            Examples
-          </Link>
-          <Link href="/#pricing" className="transition hover:text-blue-600">
+          <Link href="/pricing" className="transition hover:text-blue-600">
             Pricing
           </Link>
         </nav>
