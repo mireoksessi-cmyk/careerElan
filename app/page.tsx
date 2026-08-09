@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import FooterGroup from "@/components/marketing/FooterGroup";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -1081,7 +1082,11 @@ async function handleUpdatePassword() {
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-black">◎</span>
             </div>
           </div>
-          <FooterGroup title="Product" items={["Features", "How It Works", "Examples", "Pricing"]} />
+          <FooterGroup
+            title="Product"
+            items={["Features", "How It Works", "Examples", "Pricing"]}
+            links={{ Features: "/features" }}
+          />
           <FooterGroup title="Company" items={["About Us", "Blog", "Careers", "Contact"]} />
           <FooterGroup
             title="Legal"
@@ -1669,42 +1674,6 @@ function SmallFeature({ icon, title, body }: { icon: string; title: string; body
 
 function StepCard({ number, title, body, icon }: { number: string; title: string; body: string; icon: string }) {
   return <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center gap-4"><div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-3xl text-blue-600">{icon}</div><p className="text-sm font-black text-blue-600">{number}</p><p className="font-black text-slate-950">{title}</p></div><p className="mt-3 text-sm leading-6 text-slate-600">{body}</p></div>;
-}
-
-function FooterGroup({
-  title,
-  items,
-  links,
-}: {
-  title: string;
-  items: string[];
-  /*
-    Only items with a matching href here render as a real link - the rest
-    (Product/Company groups) stay plain text since those target pages
-    don't exist yet, avoiding broken footer links.
-  */
-  links?: Record<string, string>;
-}) {
-  return (
-    <div>
-      <p className="font-black">{title}</p>
-      <div className="mt-4 space-y-3 text-sm text-slate-400">
-        {items.map((item) =>
-          links?.[item] ? (
-            <Link
-              key={item}
-              href={links[item]}
-              className="block transition hover:text-white"
-            >
-              {item}
-            </Link>
-          ) : (
-            <p key={item}>{item}</p>
-          )
-        )}
-      </div>
-    </div>
-  );
 }
 
 function ComparisonRow({
