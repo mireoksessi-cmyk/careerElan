@@ -3,6 +3,7 @@ import {
   APIConnectionTimeoutError,
   RateLimitError,
 } from "openai";
+import { classifyCanadaJobScope, isCanadaScopeGenerationAllowed } from "../jobPosting/canadaScopeClassifier";
 
 /*
   Pure, side-effect-free types/helpers/manifest-builders/validators shared
@@ -3186,23 +3187,28 @@ export function normalizePackageAnalysis(
    BUSINESS LOGIC VALIDATION
 ========================================================= */
 
+/*
+  Phase 6I.6.22 - this function's own scope narrowed to ONLY the
+  federal-government-sector exclusion (a separate, pre-existing business
+  rule this phase was not asked to touch - Part A's own policy text is
+  silent on sector, only on Canada-wide geography). Geographic Canada-
+  scope validation (country/location/employer eligibility) moved OUT of
+  this function entirely, into assertCanadaJobScopeAllowed() below - a
+  deterministic check over the raw job text that both engines can run
+  BEFORE their own AI call (Part H/L: zero OpenAI invocations for an
+  UNSUPPORTED job), not after it like this function's Call1-dependent
+  sector field. `sector` still comes from Call1's own AI response (no
+  deterministic equivalent exists for it, and this phase's scope is
+  Canada geography, not sector classification), so this function is
+  still called post-Call1, unchanged in position - only the country/
+  supportedByCareerElan checks that used to live here were removed.
+*/
 export function validateCanadianScope(
   verification:
     PackageVerification
 ) {
   const context =
     verification.jobContext;
-
-  if (
-    context.country !==
-    "Canada"
-  ) {
-    throw new GenerationValidationError(
-      "CANADIAN_SCOPE_FAILED",
-      "validateCanadianScope",
-      "Career Élan currently supports Canadian job postings only."
-    );
-  }
 
   if (
     context.sector ===
@@ -3214,31 +3220,37 @@ export function validateCanadianScope(
       "Canadian federal government applications are not currently supported."
     );
   }
+}
 
-  if (
-    ![
-      "private",
-      "provincial",
-      "municipal",
-    ].includes(
-      context.sector
-    )
-  ) {
+/*
+  Phase 6I.6.22 - the ONE authoritative Canada geographic-scope gate,
+  called by BOTH the legacy worker (generateCore.ts, on manifest/
+  job_description text) and the canonical dispatch path
+  (canonicalGenerateDispatchService.ts, on its own jobText parameter) -
+  never two separately-maintained copies (this phase's own Part G
+  requirement). Runs classifyCanadaJobScope() (lib/jobPosting/
+  canadaScopeClassifier.ts) fresh from the raw job text every time -
+  never trusts a client-supplied jobContext/supportedByCareerElan/
+  country flag (Part J), and never trusts the OTHER engine's own AI
+  response shape (avoids the exact divergence that let a non-Canada job
+  reach canonical AI generation while being correctly blocked in
+  legacy - this phase's own confirmed root cause). SUPPORTED and
+  UNKNOWN both allow generation (isCanadaScopeGenerationAllowed() -
+  Part H: false rejection of a genuinely-Canadian-but-ambiguous posting
+  is worse than the rare case an UNSUPPORTED posting slips through
+  UNKNOWN, which the product accepts per Part B's own explicit
+  instruction). Deliberately callable BEFORE either engine's own AI
+  call - unlike validateCanadianScope() above, which stays fully
+  dependent on Call1's response and unchanged in position.
+*/
+export function assertCanadaJobScopeAllowed(jobText: string) {
+  const classification = classifyCanadaJobScope(jobText);
+
+  if (!isCanadaScopeGenerationAllowed(classification.status)) {
     throw new GenerationValidationError(
       "CANADIAN_SCOPE_FAILED",
-      "validateCanadianScope",
-      "The job posting could not be classified as a supported Canadian private, provincial, or municipal posting."
-    );
-  }
-
-  if (
-    context.supportedByCareerElan !==
-    true
-  ) {
-    throw new GenerationValidationError(
-      "CANADIAN_SCOPE_FAILED",
-      "validateCanadianScope",
-      "This job posting is outside Career Élan's supported scope."
+      "assertCanadaJobScopeAllowed",
+      `Canada scope classification: ${classification.status} - ${classification.reason}`
     );
   }
 }

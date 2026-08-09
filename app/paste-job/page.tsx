@@ -136,6 +136,9 @@ type JobAnalysis = {
   province: string;
   municipality: string;
 
+  canadaScope: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+  canadaScopeReason: string;
+
   supportedByCareerElan: boolean;
   classificationReason: string;
 };
@@ -422,6 +425,9 @@ const emptyAnalysis: JobAnalysis = {
     sector: "unknown",
     province: "",
     municipality: "",
+    canadaScope: "UNKNOWN",
+    canadaScopeReason:
+      "The job posting has not been analyzed yet.",
     supportedByCareerElan: false,
     classificationReason:
       "The job posting has not been analyzed yet.",
@@ -1109,9 +1115,16 @@ export default function PasteJobPage() {
   */
   const [applicationId, setApplicationId] = useState<string | null>(null);
   const [generationRequestId, setGenerationRequestId] = useState<string | null>(null);
+ /*
+   Phase 6I.6.22 - allows SUPPORTED and UNKNOWN, blocks only a confirmed
+   UNSUPPORTED classification (Part H/B: UNKNOWN must never behave like
+   UNSUPPORTED). Reads jobContext.canadaScope directly rather than the
+   legacy supportedByCareerElan boolean, which can no longer represent
+   "unknown but allowed" on its own.
+ */
  const isSupportedJob =
   analysis?.jobContext
-    ?.supportedByCareerElan === true;
+    ?.canadaScope !== "UNSUPPORTED";
   const [
   savedApplicationMaterial,
   setSavedApplicationMaterial,
@@ -2239,6 +2252,25 @@ packageAnalysis: null,
         ?.municipality === "string"
         ? data.jobContext
             .municipality
+        : "",
+
+    /*
+      Phase 6I.6.22 - the authoritative 3-state value the server
+      computed deterministically (lib/jobPosting/canadaScopeClassifier.ts).
+      Falls back to "UNKNOWN" (never "UNSUPPORTED") for any unrecognized
+      server value, matching Part H's own "when in doubt, allow" policy.
+    */
+    canadaScope:
+      ["SUPPORTED", "UNSUPPORTED", "UNKNOWN"].includes(
+        data.jobContext?.canadaScope
+      )
+        ? data.jobContext.canadaScope
+        : "UNKNOWN",
+
+    canadaScopeReason:
+      typeof data.jobContext
+        ?.canadaScopeReason === "string"
+        ? data.jobContext.canadaScopeReason
         : "",
 
     supportedByCareerElan:
@@ -3604,8 +3636,8 @@ async function downloadDocx() {
 
   {analyzed &&
   analysis.jobContext
-    .supportedByCareerElan ===
-    false &&
+    .canadaScope ===
+    "UNSUPPORTED" &&
   analysis.jobContext.sector !==
     "federal" && (
     <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">

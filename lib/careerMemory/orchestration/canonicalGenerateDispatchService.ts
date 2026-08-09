@@ -32,6 +32,7 @@ import { buildCareerMemoryDraftText } from "../../resume-builder";
 import { GENERATE_PACKAGE_LIFETIME_LIMIT, isNetlifyProductionRuntime } from "../../config/packageQuota";
 import { resolveBackgroundFunctionSecret, resolveNamedBackgroundFunctionUrl } from "../../generatePackage/backgroundTarget";
 import { getFirstText, fallbackPackage, safeResumeResolutionMessage } from "../../generatePackage/shared";
+import { classifyCanadaJobScope, isCanadaScopeGenerationAllowed, CANADA_SCOPE_UNSUPPORTED_MESSAGE } from "../../jobPosting/canadaScopeClassifier";
 import { createCanonicalRepositories } from "../repositories/createRepositories";
 import { resolveGenerationTemplateId } from "../services/resolveResumeTemplate";
 import { resolveCanonicalResumeContext } from "../services/resolveCanonicalResumeContext";
@@ -91,6 +92,30 @@ export type CanonicalDispatchParams = {
 
 export async function dispatchCanonicalGeneration(params: CanonicalDispatchParams): Promise<NextResponse> {
   const { supabase, userId, memory, generationRequestId, jobText, title, company, applicantName, analysis, jobUrl, body, requestOrigin, routingReason, canaryStage } = params;
+
+  /*
+    Phase 6I.6.22 - the exact bug this phase closes: canonical never
+    called legacy's own Canadian-scope validator at all (see
+    canonicalGeneratePackageService.ts's own comment on why its AI
+    response has no jobContext field to validate), so an explicitly
+    non-Canada job could reach real AI generation through this routing
+    choice while being correctly blocked through the legacy one. Uses
+    the SAME classifyCanadaJobScope() legacy's own generateCore.ts now
+    also calls (lib/jobPosting/canadaScopeClassifier.ts) - one
+    authoritative policy, not a second copy - run on this dispatch's own
+    `jobText` (never a client-supplied jobContext/supportedByCareerElan
+    flag from `analysis`/`body` - Part J), and BEFORE quota reservation
+    so an UNSUPPORTED job never consumes the user's generation quota
+    either. SUPPORTED and UNKNOWN both proceed (Part H/B) - only a
+    confirmed non-Canada posting is rejected here.
+  */
+  const canadaScope = classifyCanadaJobScope(jobText);
+  if (!isCanadaScopeGenerationAllowed(canadaScope.status)) {
+    return NextResponse.json(
+      { error: CANADA_SCOPE_UNSUPPORTED_MESSAGE, code: "CANADIAN_SCOPE_FAILED", ...fallbackPackage(title, company, applicantName) },
+      { status: 422 }
+    );
+  }
 
   let quotaReserved = false;
 

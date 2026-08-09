@@ -277,12 +277,19 @@ const baseVerification: PackageAnalysis["verification"] = {
   },
 };
 
+/*
+  Phase 6I.6.22 - validateCanadianScope()'s own scope narrowed to ONLY
+  the federal-sector exclusion; geographic Canada-scope validation moved
+  to assertCanadaJobScopeAllowed() (see canadaScopeClassifier6I622.test.ts
+  for that function's own dedicated test matrix, A-T). This assertion
+  updated to match: country is no longer this function's concern at all.
+*/
 expectCode(
-  "validateCanadianScope -> CANADIAN_SCOPE_FAILED",
+  "validateCanadianScope -> CANADIAN_SCOPE_FAILED (federal sector)",
   () =>
     validateCanadianScope({
       ...baseVerification,
-      jobContext: { ...baseVerification.jobContext, country: "Unknown" },
+      jobContext: { ...baseVerification.jobContext, sector: "federal" },
     }),
   "CANADIAN_SCOPE_FAILED"
 );

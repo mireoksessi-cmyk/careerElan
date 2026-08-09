@@ -5,6 +5,7 @@ import { JOB_ANALYSIS_MODEL } from "@/lib/config/aiModels";
 import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimiter";
 import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
+import { classifyCanadaJobScope } from "@/lib/jobPosting/canadaScopeClassifier";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -35,6 +36,24 @@ type CanadianJobContext = {
   province: string;
   municipality: string;
 
+  /*
+    Phase 6I.6.22 - the authoritative 3-state classification (lib/
+    jobPosting/canadaScopeClassifier.ts), computed deterministically
+    from jobText below - never asked of the AI, never collapsed into
+    just `supportedByCareerElan`. UNKNOWN is a real, distinct outcome
+    (Part B) - the client must not treat it the same as UNSUPPORTED.
+  */
+  canadaScope: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+  canadaScopeReason: string;
+
+  /*
+    Kept for existing-client compatibility, but now DERIVED from
+    canadaScope (true only when canadaScope === "SUPPORTED") rather
+    than independently AI-decided - a boolean cannot represent UNKNOWN,
+    so this field alone must never be used to decide whether generation
+    is allowed (see paste-job/page.tsx's isSupportedJob, which now reads
+    canadaScope directly instead).
+  */
   supportedByCareerElan: boolean;
   classificationReason: string;
 };
@@ -185,10 +204,21 @@ ${jobText}
     response.output_text
   ) as JobAnalysisResponse;
 
+/*
+  Phase 6I.6.22 - country/canadaScope is now the deterministic
+  classifyCanadaJobScope(jobText) result (lib/jobPosting/
+  canadaScopeClassifier.ts), the SAME function legacy's
+  generateCore.ts and canonical's canonicalGenerateDispatchService.ts
+  call on this exact request's job text - never the AI's own guess at
+  country (Part I: same evidence must produce the same classification
+  everywhere). `sector` stays AI-derived (province/municipality/sector
+  classification is a separate concern this phase doesn't change).
+*/
+const canadaScope = classifyCanadaJobScope(jobText);
+
 json.jobContext = {
   country:
-    json.jobContext?.country ===
-      "Canada"
+    canadaScope.status === "SUPPORTED"
       ? "Canada"
       : "Unknown",
 
@@ -218,46 +248,22 @@ json.jobContext = {
           .trim()
       : "",
 
+  canadaScope: canadaScope.status,
+  canadaScopeReason: canadaScope.reason,
+
   supportedByCareerElan:
-    json.jobContext
-      ?.supportedByCareerElan === true,
+    canadaScope.status === "SUPPORTED",
 
   classificationReason:
     typeof json.jobContext
       ?.classificationReason ===
-      "string"
+      "string" &&
+    json.jobContext.classificationReason.trim()
       ? json.jobContext
           .classificationReason
           .trim()
-      : "",
+      : canadaScope.reason,
 };
-
-if (
-  json.jobContext.country !==
-    "Canada" ||
-  json.jobContext.sector ===
-    "federal" ||
-  json.jobContext.sector ===
-    "unknown"
-) {
-  json.jobContext
-    .supportedByCareerElan = false;
-}
-
-if (
-  json.jobContext.country ===
-    "Canada" &&
-  [
-    "private",
-    "provincial",
-    "municipal",
-  ].includes(
-    json.jobContext.sector
-  )
-) {
-  json.jobContext
-    .supportedByCareerElan = true;
-}
 
 json.requirements = Array.isArray(
   json.requirements

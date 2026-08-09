@@ -17,6 +17,7 @@ import {
   validateSourceIntegrity,
   validateProtectedClaims,
   validateCanadianScope,
+  assertCanadaJobScopeAllowed,
   validateRequirementEvidence,
   validateAnalysisLogic,
   warnCardDifferences,
@@ -425,6 +426,17 @@ export async function runPackageGeneration(
         "The generation input snapshot is missing required resume or job description text."
       );
     }
+
+    /*
+      Phase 6I.6.22 - deterministic Canada-scope gate, run BEFORE any AI
+      call (Call1 below) so an explicitly non-Canada job never reaches
+      OpenAI at all (Part H/L). See assertCanadaJobScopeAllowed()'s own
+      comment (shared.ts) for why this no longer waits for Call1's own
+      jobContext response the way validateCanadianScope() (still called
+      after Call1, below, for the separate federal-sector exclusion)
+      does.
+    */
+    assertCanadaJobScopeAllowed(jobText);
 
     const resumeSource: "career_memory" | "upload" =
       row.resume_source === "uploaded" ? "upload" : "career_memory";
