@@ -208,10 +208,21 @@ export async function generateCanonicalPackage(client_: SupabaseClient, input: C
     (SELECTED_RESUME_UNAVAILABLE) is never silently substituted - it
     propagates as a thrown error, same as every other domain error in
     this function.
+
+    Phase 6I.6.16 - passes applicationId so the application-binding
+    branch (Branch A) wins permanently once the dispatcher has already
+    frozen canonical_profile_id/canonical_resume_version_id onto this
+    row at claim time - the worker must never re-read the user's
+    CURRENT selected_resume_id once an application has been bound (see
+    resolveCanonicalResumeContext.ts's own ServiceRoleModeInput.
+    applicationId header comment for the full race this closes).
+    Applications created before this phase (no binding yet) fall
+    through to the exact same selected-resume/profile-latest resolution
+    unchanged - no backfill, no rebinding of historical rows.
   */
   let resolved;
   try {
-    resolved = await resolveCanonicalResumeContext({ mode: "service-role", client: client_, userId: input.userId });
+    resolved = await resolveCanonicalResumeContext({ mode: "service-role", client: client_, userId: input.userId, applicationId: input.applicationId });
   } catch (error) {
     throw new CanonicalDeserializationError(error instanceof Error ? error.message.slice(0, 200) : "unknown deserialization failure");
   }

@@ -153,6 +153,23 @@ type ServiceRoleModeInput = {
      matching every other service-role function in this codebase. */
   client: SupabaseClient;
   userId: string;
+  /*
+    Phase 6I.6.16 - when supplied AND the application already has a
+    recorded canonical_resume_version_id, that binding wins permanently
+    over whatever resume is currently selected - the service-role
+    mirror of session mode's own Branch A above. This closes the race
+    where the background worker (always service-role) re-read
+    career_memory.selected_resume_id fresh at generation time: if the
+    user switched their selected resume between Generate Package click
+    and worker execution, generation could silently use the NEW
+    selection instead of the one the application was claimed for. The
+    dispatcher (canonicalGenerateDispatchService.ts) now resolves and
+    freezes canonical_profile_id/canonical_resume_version_id onto the
+    application row at claim time, from the SAME resolvedResume used
+    for the content/resume_id snapshot - never two independently
+    resolved identities that could disagree.
+  */
+  applicationId?: string;
 };
 
 export type ResolveCanonicalResumeContextInput = SessionModeInput | ServiceRoleModeInput;
@@ -258,6 +275,39 @@ async function loadSelectedUploadedResumeId(client: SupabaseClient, userId: stri
 
 async function resolveServiceRoleMode(input: ServiceRoleModeInput): Promise<ResolveCanonicalResumeContextResult> {
   const { client, userId } = input;
+
+  // Branch A - application-scoped binding, if it already exists, wins
+  // permanently (see ServiceRoleModeInput.applicationId's own header
+  // comment). service_role has an ordinary table grant on
+  // `applications` (unlike career_memory/resumes/career_source_
+  // documents/career_resume_versions) - no RPC needed for this read.
+  if (input.applicationId) {
+    const { data: application, error } = await client
+      .from("applications")
+      .select("canonical_profile_id, canonical_resume_version_id")
+      .eq("id", input.applicationId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw new ValidationError([`Could not read application "${input.applicationId}": ${error.message}.`]);
+    if (application?.canonical_resume_version_id && application?.canonical_profile_id) {
+      const { data: versionData, error: versionError } = await client.rpc("system_resolve_resume_version_by_id", {
+        p_user_id: userId,
+        p_version_id: application.canonical_resume_version_id,
+      });
+      if (versionError) throw new ValidationError([`Could not resolve application-bound resume version: ${versionError.message}.`]);
+      const versionLookup = versionData as { profileId: string | null; sourceDocumentId: string | null; versionId: string | null; version: CareerResumeVersionRow | null };
+      if (versionLookup.versionId && versionLookup.version) {
+        const { resume, version, metadata } = careerResumeVersionRowToRuntime(versionLookup.version);
+        const runtime = createCanonicalRuntime({ resume, version, metadata });
+        return { status: "resolved", source: "application-binding", profileId: application.canonical_profile_id, versionId: application.canonical_resume_version_id, sourceDocumentId: versionLookup.sourceDocumentId, runtime };
+      }
+      // The bound version id no longer resolves (deleted row, or somehow
+      // not owned) - fall through to the current-selection resolution
+      // below rather than silently failing generation outright. This
+      // mirrors session mode's own behavior: Branch A there only short-
+      // circuits when BOTH columns AND the lookup succeed.
+    }
+  }
 
   const { data: selectionData, error: selectionError } = await client.rpc("system_resolve_selected_resume", { p_user_id: userId });
   if (selectionError) throw new ValidationError([`Could not resolve selected resume: ${selectionError.message}.`]);

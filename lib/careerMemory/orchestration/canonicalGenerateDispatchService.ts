@@ -34,6 +34,8 @@ import { resolveBackgroundFunctionSecret, resolveNamedBackgroundFunctionUrl } fr
 import { getFirstText, fallbackPackage, safeResumeResolutionMessage } from "../../generatePackage/shared";
 import { createCanonicalRepositories } from "../repositories/createRepositories";
 import { resolveGenerationTemplateId } from "../services/resolveResumeTemplate";
+import { resolveCanonicalResumeContext } from "../services/resolveCanonicalResumeContext";
+import { SelectedResumeUnavailableError } from "../errors/domainErrors";
 import type { createClient } from "../../supabase-server";
 
 const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
@@ -142,6 +144,8 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
     inputCoverLetterText = getFirstText(memory?.cover_letter) || null;
   }
 
+  const canonicalRepos = createCanonicalRepositories(supabase);
+
   /*
     Phase 6I.6.15 - bound to the SAME resolvedResume identity (source +
     resumeId) already resolved above for CONTENT, not an independent
@@ -151,12 +155,61 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
     Manual/career_memory selections, which own no resumes row).
   */
   const resolvedTemplateId = await resolveGenerationTemplateId(
-    createCanonicalRepositories(supabase),
+    canonicalRepos,
     supabase,
     userId,
     { source: resolvedResume.source, resumeId: resolvedResume.resumeId },
     typeof body.templateId === "string" ? body.templateId : undefined
   );
+
+  /*
+    Phase 6I.6.16 - freezes the canonical profile/version tuple onto
+    the claimed row, from the SAME resolvedResume identity used for
+    both content and template above - never a later, independently
+    re-resolved lookup. This is what lets the worker's service-role
+    resolveCanonicalResumeContext() call (see canonicalGeneratePackageService.ts)
+    prefer the application-binding branch over re-reading whatever
+    resume is CURRENTLY selected, closing the race where a user
+    switches their selected resume between Generate Package click and
+    worker execution. Left null (not an error) when resolution genuinely
+    fails - resolveCanonicalResumeContext() throws SELECTED_RESUME_
+    UNAVAILABLE for a real problem, which the existing catch below
+    already surfaces identically to how content resolution's own
+    failure is surfaced; "not-canonical"/"legacy-only" (no canonical
+    identity exists yet to freeze) simply leave both columns null,
+    exactly matching every application created before this phase - the
+    worker's existing fresh-resolve fallback still applies for those.
+  */
+  let canonicalProfileId: string | null = null;
+  let canonicalResumeVersionId: string | null = null;
+  if (resolvedResume.source === "uploaded" && resolvedResume.resumeId) {
+    try {
+      const ctx = await resolveCanonicalResumeContext({ mode: "session", repos: canonicalRepos, client: supabase, userId, resumeId: resolvedResume.resumeId });
+      if (ctx.status === "resolved") {
+        canonicalProfileId = ctx.profileId;
+        canonicalResumeVersionId = ctx.versionId;
+      }
+    } catch (error) {
+      if (!(error instanceof SelectedResumeUnavailableError)) throw error;
+      // not-yet-importable/resume-deleted/resume-not-owned - no canonical
+      // identity exists to freeze; leave both null, matching pre-fix
+      // behavior for this one narrow edge case (nothing to bind yet).
+    }
+  } else if (resolvedResume.source === "career_memory") {
+    // Manual Career Memory owns no resumes row - freeze the profile's
+    // current latest version (the same fallback resolution the worker
+    // itself already uses for "not-canonical"/"legacy-only" today - see
+    // canonicalGeneratePackageService.ts's own header comment), so Manual
+    // obeys the identical click-time snapshot rule as uploaded resumes.
+    const profile = await canonicalRepos.profiles.getByUserId(userId);
+    if (profile) {
+      const latest = await canonicalRepos.resumeVersions.getLatestByProfileId(profile.id);
+      if (latest) {
+        canonicalProfileId = profile.id;
+        canonicalResumeVersionId = latest.id;
+      }
+    }
+  }
 
   const canonicalInputManifest = {
     jobDescriptionText: jobText,
@@ -191,6 +244,8 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
       job_type: getFirstText((analysis as { type?: unknown }).type) || null,
       resume_source: resolvedResume.source,
       resume_id: resolvedResume.source === "uploaded" ? resolvedResume.resumeId : null,
+      canonical_profile_id: canonicalProfileId,
+      canonical_resume_version_id: canonicalResumeVersionId,
       generation_input_resume_text: inputResumeText,
       generation_input_resume_name: resolvedResume.selectedName,
       generation_input_manifest_source: resolvedResume.previewData,
