@@ -362,6 +362,26 @@ function formatElapsed(totalSeconds: number): string {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
+/*
+  Phase 6I.6.21 - the exact same "have unsaved changes?" decision the
+  guarded router.back()/router.push() call sites below make, pulled out
+  as a pure function so it's directly unit-testable without a DOM/router
+  harness. Sidebar navigation (plain <a href> tags, see the nav markup
+  further down) intentionally does NOT call this - a real anchor click is
+  a genuine document unload, which the existing beforeunload handler
+  (Phase 6I.6.20) already protects with the browser's own native Stay/
+  Leave dialog. This helper exists only for the two places that navigate
+  via the Next.js client-side router (soft navigation, no document
+  unload, so beforeunload never fires): the "Back to Results" button and
+  the "materials incomplete, go to Career Memory?" redirect inside
+  handleApplyNow(). confirmFn is injected (not a direct window.confirm()
+  call) purely so the decision logic is testable without a real browser.
+*/
+export function shouldProceedWithNavigation(isDirty: boolean, confirmFn: () => boolean): boolean {
+  if (!isDirty) return true;
+  return confirmFn();
+}
+
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
   { label: "Career Memory", href: "/career-memory", icon: "🧠" },
@@ -2750,7 +2770,12 @@ async function loadSelectedApplicationMaterials() {
         "Your saved resume or cover letter is missing or incomplete. Go to Career Memory to complete it now?"
       );
 
-      if (shouldGoToCareerMemory) {
+      if (
+        shouldGoToCareerMemory &&
+        shouldProceedWithNavigation(isDirty, () =>
+          window.confirm("You have unsaved changes. Leave without saving?")
+        )
+      ) {
         router.push("/career-memory");
       } else {
         setMessage(
@@ -3244,7 +3269,16 @@ async function downloadDocx() {
             </div>
 
             <button
-              onClick={() => router.back()}
+              onClick={() => {
+                if (
+                  !shouldProceedWithNavigation(isDirty, () =>
+                    window.confirm("You have unsaved changes. Leave without saving?")
+                  )
+                ) {
+                  return;
+                }
+                router.back();
+              }}
               className="rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm font-bold text-gray-600 shadow-sm hover:bg-blue-50"
             >
               ← Back to Results
