@@ -43,6 +43,22 @@ function normalize(text: string): string {
 
 const SAFE_LEFTOVER_TOKENS = [...new Set(Object.values(PROFESSIONAL_ATS_SECTION_LABELS).filter((l): l is string => l !== null))];
 
+/*
+  Phase 6I.6.33 - this file's own header comment (line ~24) already
+  documents "GPA: " as one of the renderer's small fixed set of safe
+  formatting tokens (see renderers.tsx's EducationView, which prefixes
+  a GPA value with the literal label "GPA: "), but the implementation
+  below only ever stripped generic connector PUNCTUATION (line ~120),
+  never the literal word "GPA" itself - so after the colon is stripped
+  as punctuation, the bare word "GPA" survived as leftover and was
+  misreported as invented text for any education entry with a `gpa`
+  value. Real, narrow bug: the existing Jordan Ellis fixture (the sole
+  fixture exercising this validator across ~530 prior assertions) has
+  no `gpa` field, so this path was never previously exercised. Fixing
+  by finally implementing what the header comment already promised.
+*/
+const KNOWN_SAFE_FORMATTING_LABELS = ["GPA"];
+
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -104,6 +120,7 @@ export function validateBlockTextPreservation(block: AssemblyBlock, renderedBloc
   }
 
   for (const safe of SAFE_LEFTOVER_TOKENS) leftover = leftover.split(safe).join(" ");
+  for (const safe of KNOWN_SAFE_FORMATTING_LABELS) leftover = leftover.replace(boundaryPattern(safe), " ");
   /* Phase 5D.6E TASK A - "/" added to the known-safe structural-join
      punctuation set. renderers.tsx/docxRenderer.ts already legitimately
      join multi-value education fields (institutions, and now

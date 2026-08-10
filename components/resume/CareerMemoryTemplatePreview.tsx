@@ -701,6 +701,275 @@ export default function CareerMemoryTemplatePreview({
     );
   }
 
+  if (template === "Modern") {
+    const ModernSection = ({
+      title,
+      children,
+    }: {
+      title: string;
+      children: ReactNode;
+    }) => (
+      <section className="mt-7 text-sm leading-6 text-slate-700">
+        <h2 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
+          <span
+            className="h-2 w-2 rounded-sm"
+            style={{ backgroundColor: accent }}
+          />
+          {title}
+        </h2>
+        {children}
+      </section>
+    );
+
+    return (
+      <div
+        className="mx-auto min-h-[960px] w-full max-w-[760px] bg-white shadow-xl"
+        style={{
+          fontFamily: data.font,
+          zoom: resumeScale,
+        }}
+      >
+        <div
+          className="px-8 py-9 text-white sm:px-10"
+          style={{ backgroundColor: accent }}
+        >
+          <h1 className="break-words text-3xl font-bold tracking-tight sm:text-4xl">
+            {data.firstName || "First"} {data.lastName || "Last"}
+          </h1>
+
+          {data.headline && (
+            <p className="mt-2 break-words text-base font-medium text-white/90">
+              {data.headline}
+            </p>
+          )}
+
+          <p className="mt-3 break-words text-sm text-white/80">
+            {data.location || "Location"} ·{" "}
+            {data.email || "email@example.com"} · {data.phone || "Phone"} ·{" "}
+            {data.linkedin || "LinkedIn "}
+          </p>
+        </div>
+
+        <div className="px-8 py-8 sm:px-10">
+          <ModernSection title="Professional Summary">
+            <p>
+              {data.summary || "Your professional summary will appear here."}
+            </p>
+          </ModernSection>
+
+          <ModernSection title="Skills">
+            <div className="mt-3 flex flex-wrap gap-2">
+              {splitSkills(data.skills).map((skill, index) => (
+                <span
+                  key={index}
+                  className="rounded-md border px-3 py-1 text-sm font-medium"
+                  style={{ borderColor: accent, color: accent }}
+                >
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </ModernSection>
+
+          <ModernSection title="Experience">
+            {data.workExperience
+              .filter(
+                (item) => item.company || item.jobTitle || item.description
+              )
+              .map((item, index) => (
+                <div key={`work-${index}`} className="mb-5">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                    <p className="font-bold text-slate-950">
+                      {item.jobTitle || "Role Title"}
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {formatExperienceDates(item) || "Dates"}
+                    </p>
+                  </div>
+
+                  <p className="font-semibold" style={{ color: accent }}>
+                    {item.company || "Company Name"}
+                    {item.location ? ` · ${item.location}` : ""}
+                  </p>
+
+                  <ul className="mt-2 list-disc space-y-2 pl-6">
+                    {(
+                      item.description || "Experience details will appear here."
+                    )
+                      .split(/\r?\n|•/)
+                      .filter((line) => line.trim())
+                      .map((line, lineIndex) => (
+                        <li key={lineIndex}>{line.trim()}</li>
+                      ))}
+                  </ul>
+                </div>
+              ))}
+
+            {data.volunteerExperience
+              .filter(
+                (item) => item.organization || item.role || item.description
+              )
+              .map((item, index) => (
+                <div key={`vol-${index}`} className="mb-5">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                    <p className="font-bold text-slate-950">
+                      {item.role || "Volunteer / Internship "}
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {formatExperienceDates(item) || "Dates"}
+                    </p>
+                  </div>
+
+                  <p className="font-semibold" style={{ color: accent }}>
+                    {item.organization || "Organization"}
+                  </p>
+
+                  <ul className="mt-2 list-disc space-y-2 pl-6">
+                    {(
+                      item.description || "Experience details will appear here."
+                    )
+                      .split(/\r?\n|•/)
+                      .filter((line) => line.trim())
+                      .map((line, lineIndex) => (
+                        <li key={lineIndex}>{line.trim()}</li>
+                      ))}
+                  </ul>
+                </div>
+              ))}
+          </ModernSection>
+
+          {data.projects.some((item) => item.name?.trim()) && (
+            <ModernSection title="Projects">
+              {data.projects
+                .filter((item) => item.name)
+                .map((item, index) => (
+                  <div key={index} className="mb-5">
+                    <div className="flex justify-between">
+                      <h3 className="font-bold">{item.name}</h3>
+
+                      <span>{item.dates}</span>
+                    </div>
+
+                    <p className="text-slate-500">{item.role}</p>
+
+                    <p className="mt-2">{item.description}</p>
+                  </div>
+                ))}
+            </ModernSection>
+          )}
+
+          {data.education.some((item) => item.school || item.program) && (
+            <ModernSection title="Education">
+              {data.education
+                .filter((item) => item.school || item.program)
+                .map((item, index) => (
+                  <div key={index} className="mb-3">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                      <p className="font-bold text-slate-950">
+                        {item.program}
+                      </p>
+
+                      <p className="text-sm text-slate-500">
+                        {formatEducationDates(item) || "Dates"}
+                      </p>
+                    </div>
+
+                    <p className="font-semibold" style={{ color: accent }}>
+                      {item.school}
+                    </p>
+
+                    {item.gpa && (
+                      <p className="mt-1 text-sm text-slate-600">
+                        GPA / Honours: {item.gpa}
+                      </p>
+                    )}
+
+                    {item.coursework && (
+                      <p className="mt-1 text-slate-600">{item.coursework}</p>
+                    )}
+                  </div>
+                ))}
+            </ModernSection>
+          )}
+
+          {data.languages.some((item) => item.language?.trim()) && (
+            <ModernSection title="Languages">
+              {data.languages
+                .filter((item) => item.language)
+                .map((item, index) => (
+                  <div key={index} className="mb-2 flex justify-between">
+                    <span className="font-medium">{item.language}</span>
+
+                    <span className="text-slate-500">{item.level}</span>
+                  </div>
+                ))}
+            </ModernSection>
+          )}
+
+          {data.certifications.some((item) => item.name?.trim()) && (
+            <ModernSection title="Certifications">
+              {data.certifications
+                .filter((item) => item.name)
+                .map((item, index) => (
+                  <div key={index} className="mb-4">
+                    <div className="flex justify-between">
+                      <h3 className="font-bold">{item.name}</h3>
+
+                      <span>{item.date}</span>
+                    </div>
+
+                    <p className="text-slate-500">{item.issuer}</p>
+
+                    {item.description && (
+                      <p className="mt-2">{item.description}</p>
+                    )}
+                  </div>
+                ))}
+            </ModernSection>
+          )}
+
+          {(data.targetRoles ||
+            data.targetIndustry ||
+            data.targetLocation ||
+            data.salaryExpectation ||
+            data.careerGoalSummary) && (
+            <ModernSection title="Career Objective">
+              {data.targetRoles && (
+                <p className="mb-2">
+                  <strong>Target Role:</strong> {data.targetRoles}
+                </p>
+              )}
+
+              {data.targetIndustry && (
+                <p className="mb-2">
+                  <strong>Industry:</strong> {data.targetIndustry}
+                </p>
+              )}
+
+              {data.targetLocation && (
+                <p className="mb-2">
+                  <strong>Preferred Location:</strong> {data.targetLocation}
+                </p>
+              )}
+
+              {data.salaryExpectation && (
+                <p className="mb-2">
+                  <strong>Salary:</strong> {data.salaryExpectation}
+                </p>
+              )}
+
+              {data.careerGoalSummary && (
+                <p className="mt-3">{data.careerGoalSummary}</p>
+              )}
+            </ModernSection>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="mx-auto min-h-[960px] w-full max-w-[760px] bg-white p-8 shadow-xl sm:p-10"
