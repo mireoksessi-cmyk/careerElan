@@ -45,3 +45,7 @@ next-env.d.ts
 /test-results/
 /blob-report/
 /e2e/.e2e-state.json
+
+# Release-gate runtime artifacts (Phase 6I.6.35B)
+/e2e/openai-network-watch.log
+/.release-gate-logs/

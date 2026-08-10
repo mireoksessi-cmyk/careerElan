@@ -102,6 +102,13 @@ export default async function globalSetup() {
     PORT: String(E2E_PORT),
     CAREER_ELAN_E2E: "1",
     CANONICAL_CANARY_ALLOWLIST_USER_IDS: mergedAllowlist,
+    // Phase 6I.6.35B - lets aiRoutesDirect.spec.ts point
+    // analyze-job-url at THIS same dedicated E2E server's own public
+    // page instead of a real third-party URL. lib/security/ssrfGuard.ts
+    // only ever honors this flag when NODE_ENV !== "production"
+    // (re-checked at call time, never cached) - a production deploy
+    // can never read this as true no matter what value reaches it here.
+    ALLOW_LOCAL_JOB_URLS: "true",
   };
 
   const server: ChildProcess = spawn("npx", ["next", "dev", "-p", String(E2E_PORT)], {
