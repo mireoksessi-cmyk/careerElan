@@ -38,6 +38,7 @@ import type { ResumeStructuredModel } from "../../documentPreservation/resumeStr
 import { normalizePackageAnalysis, includesLoose, shouldRetryOpenAiError, type PackageAnalysis } from "../../generatePackage/shared";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../../testing/e2eAiIsolation";
 import { buildE2eCanonicalTailoringResponseText } from "../../testing/e2eFakeResponses";
+import { logOperationalEvent, elapsedMs } from "../../observability/logger";
 
 const client = wrapOpenAiClientForE2eSafety(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
 const OPENAI_CALL_TIMEOUT_MS = 60_000;
@@ -201,12 +202,22 @@ async function callTailoringOpenAi(promptText: string): Promise<string> {
   if (isE2eAiModeActive()) {
     return buildE2eCanonicalTailoringResponseText();
   }
+  const model = process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL;
+  const route = "canonical-generate-package#tailoring";
   for (let attempt = 1; attempt <= MAX_TAILORING_ATTEMPTS; attempt++) {
+    const startedAt = Date.now();
+    logOperationalEvent({ domain: "openai", event: "call_started", route, model, attempt });
     try {
-      const response = await client.responses.create({ model: process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL, input: promptText }, { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 });
+      const response = await client.responses.create({ model, input: promptText }, { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 });
+      logOperationalEvent({ domain: "openai", event: "call_succeeded", route, model, attempt, latencyMs: elapsedMs(startedAt) });
       return response.output_text;
     } catch (error) {
-      if (shouldRetryOpenAiError(error, attempt, MAX_TAILORING_ATTEMPTS)) continue;
+      const reason = error instanceof Error ? error.constructor.name : "unknown";
+      if (shouldRetryOpenAiError(error, attempt, MAX_TAILORING_ATTEMPTS)) {
+        logOperationalEvent({ domain: "openai", event: "call_retried", route, model, attempt, reason });
+        continue;
+      }
+      logOperationalEvent({ domain: "openai", event: "call_failed", route, model, attempt, latencyMs: elapsedMs(startedAt), reason });
       throw error;
     }
   }

@@ -5,6 +5,7 @@ import { RESUME_PARSE_DRAFT_MODEL, RESUME_PARSE_MODEL } from "../config/aiModels
 import { classifyGenerationError } from "./shared";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../testing/e2eAiIsolation";
 import { buildE2eResumeAnalysisFields } from "../testing/e2eFakeResponses";
+import { logOperationalEvent, elapsedMs } from "../observability/logger";
 import {
   RESUME_ALLOWED_EXTENSIONS,
   UploadValidationError,
@@ -228,6 +229,7 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
   const userId: string = row.user_id;
   const fileName: string = row.file_name || "";
   const storagePath: string = row.storage_path;
+  const startedAt = Date.now();
 
   try {
     await setStage(resumeId, userId, "downloading_file");
@@ -238,7 +240,7 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
 
     if (downloadError || !fileBlob) {
       if (downloadError) {
-        console.error("RESUME WORKER DOWNLOAD ERROR =", downloadError);
+        logSafeError(downloadError, { requestId: resumeId, route: "documentAnalysis/resumeAnalysisCore#download", userId });
       }
 
       throw new AnalysisFailure(
@@ -284,7 +286,7 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
       try {
         pdf = (await import("pdf-parse-new")).default;
       } catch (importError) {
-        console.error("RESUME PDF-PARSE-NEW LOAD ERROR =", importError);
+        logSafeError(importError, { requestId: resumeId, route: "documentAnalysis/resumeAnalysisCore#pdf-parse-load", userId });
         throw new AnalysisFailure(
           "MODULE_LOAD_FAILED",
           "We couldn't process this resume. Please try again."
@@ -324,7 +326,7 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
       try {
         mammoth = await import("mammoth");
       } catch (importError) {
-        console.error("RESUME MAMMOTH LOAD ERROR =", importError);
+        logSafeError(importError, { requestId: resumeId, route: "documentAnalysis/resumeAnalysisCore#mammoth-load", userId });
         throw new AnalysisFailure(
           "MODULE_LOAD_FAILED",
           "We couldn't process this resume. Please try again."
@@ -713,6 +715,8 @@ Return ONLY valid JSON.
         userId,
       });
     }
+
+    logOperationalEvent({ domain: "upload", event: "resume_analysis_succeeded", userId, resumeId, latencyMs: elapsedMs(startedAt) });
   } catch (error) {
     const { code, summary } =
       error instanceof AnalysisFailure
@@ -724,6 +728,8 @@ Return ONLY valid JSON.
       route: "documentAnalysis/resumeAnalysisCore",
       userId,
     });
+
+    logOperationalEvent({ domain: "upload", event: "resume_analysis_failed", userId, resumeId, errorCode: code, latencyMs: elapsedMs(startedAt) });
 
     const { error: failError } = await supabaseAdmin.rpc("fail_resume_analysis", {
       p_resume_id: resumeId,

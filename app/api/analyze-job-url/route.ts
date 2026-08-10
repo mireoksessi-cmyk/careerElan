@@ -8,6 +8,7 @@ import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimite
 import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eJobAnalysisUrlResponseText } from "@/lib/testing/e2eFakeResponses";
+import { logOperationalEvent, elapsedMs } from "@/lib/observability/logger";
 
 const client = wrapOpenAiClientForE2eSafety(
   new OpenAI({
@@ -345,6 +346,7 @@ export async function POST(req: Request) {
   console.time("total analyze-job-url");
 
   const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
 
   try {
     /*
@@ -1152,9 +1154,11 @@ json.requirementsMatched = 0;
       );
     }
 
+    logOperationalEvent({ domain: "analyze_job", event: "succeeded", route: "analyze-job-url", latencyMs: elapsedMs(startedAt) });
     return NextResponse.json({ ...json, success: true });
   } catch (error) {
     console.timeEnd("total analyze-job-url");
+    logOperationalEvent({ domain: "analyze_job", event: "failed", route: "analyze-job-url", errorCode: error instanceof Error ? error.constructor.name : "unknown", latencyMs: elapsedMs(startedAt) });
 
     return toSafeResponse(error, {
       requestId,

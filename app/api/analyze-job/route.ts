@@ -8,6 +8,7 @@ import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
 import { classifyCanadaJobScope } from "@/lib/jobPosting/canadaScopeClassifier";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eJobAnalysisResponseText } from "@/lib/testing/e2eFakeResponses";
+import { logOperationalEvent, elapsedMs } from "@/lib/observability/logger";
 
 /*
   Phase 6I.6.34 - this was the one OpenAI call site in the codebase
@@ -130,6 +131,7 @@ function extractJson(text: string) {
 
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
 
   try {
     /*
@@ -365,8 +367,10 @@ if (!postingValidation.valid) {
   );
 }
 
+logOperationalEvent({ domain: "analyze_job", event: "succeeded", route: "analyze-job", latencyMs: elapsedMs(startedAt) });
 return NextResponse.json({ ...json, success: true });
   } catch (error) {
+    logOperationalEvent({ domain: "analyze_job", event: "failed", route: "analyze-job", errorCode: error instanceof Error ? error.constructor.name : "unknown", latencyMs: elapsedMs(startedAt) });
     return toSafeResponse(error, {
       requestId,
       route: "/api/analyze-job",

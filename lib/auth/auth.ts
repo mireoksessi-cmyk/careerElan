@@ -78,10 +78,11 @@ export async function signIn(
       .maybeSingle();
 
   if (memoryError) {
-    console.error(
-      "CAREER MEMORY CHECK ERROR =",
-      memoryError
-    );
+    // Client-side, safe-by-construction: only ever the Supabase error's
+    // own .message (never .details/.hint, which can echo back internal
+    // schema/constraint text) - see lib/errors/publicError.ts's
+    // extractSafeMessage() for the same convention server-side.
+    console.error("CAREER MEMORY CHECK ERROR =", memoryError.message);
 
     /*
       로그인 자체는 성공했으므로 오류가 발생해도

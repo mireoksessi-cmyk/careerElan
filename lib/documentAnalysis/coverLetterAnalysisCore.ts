@@ -6,6 +6,7 @@ import {
   COVER_LETTER_PARSE_MODEL,
 } from "../config/aiModels";
 import { classifyGenerationError } from "./shared";
+import { logOperationalEvent, elapsedMs } from "../observability/logger";
 import {
   COVER_LETTER_ALLOWED_EXTENSIONS,
   UploadValidationError,
@@ -181,6 +182,7 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
   const userId: string = row.user_id;
   const fileName: string = row.file_name || "";
   const storagePath: string = row.storage_path;
+  const startedAt = Date.now();
 
   try {
     await setStage(coverLetterId, userId, "downloading_file");
@@ -191,7 +193,7 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
 
     if (downloadError || !fileBlob) {
       if (downloadError) {
-        console.error("COVER LETTER WORKER DOWNLOAD ERROR =", downloadError);
+        logSafeError(downloadError, { requestId: coverLetterId, route: "documentAnalysis/coverLetterAnalysisCore#download", userId });
       }
 
       throw new AnalysisFailure(
@@ -236,7 +238,7 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
       try {
         pdf = (await import("pdf-parse-new")).default;
       } catch (importError) {
-        console.error("COVER LETTER PDF-PARSE-NEW LOAD ERROR =", importError);
+        logSafeError(importError, { requestId: coverLetterId, route: "documentAnalysis/coverLetterAnalysisCore#pdf-parse-load", userId });
         throw new AnalysisFailure(
           "MODULE_LOAD_FAILED",
           "We couldn't process this cover letter. Please try again."
@@ -265,7 +267,7 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
         try {
           fromBuffer = (await import("pdf2pic")).fromBuffer;
         } catch (importError) {
-          console.error("COVER LETTER PDF2PIC LOAD ERROR =", importError);
+          logSafeError(importError, { requestId: coverLetterId, route: "documentAnalysis/coverLetterAnalysisCore#pdf2pic-load", userId });
           throw new AnalysisFailure(
             "MODULE_LOAD_FAILED",
             "We couldn't process this cover letter. Please try again."
@@ -299,7 +301,7 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
       try {
         mammoth = await import("mammoth");
       } catch (importError) {
-        console.error("COVER LETTER MAMMOTH LOAD ERROR =", importError);
+        logSafeError(importError, { requestId: coverLetterId, route: "documentAnalysis/coverLetterAnalysisCore#mammoth-load", userId });
         throw new AnalysisFailure(
           "MODULE_LOAD_FAILED",
           "We couldn't process this cover letter. Please try again."
@@ -526,6 +528,8 @@ Return ONLY valid JSON.
         userId,
       });
     }
+
+    logOperationalEvent({ domain: "upload", event: "cover_letter_analysis_succeeded", userId, coverLetterId, latencyMs: elapsedMs(startedAt) });
   } catch (error) {
     const { code, summary } =
       error instanceof AnalysisFailure
@@ -537,6 +541,8 @@ Return ONLY valid JSON.
       route: "documentAnalysis/coverLetterAnalysisCore",
       userId,
     });
+
+    logOperationalEvent({ domain: "upload", event: "cover_letter_analysis_failed", userId, coverLetterId, errorCode: code, latencyMs: elapsedMs(startedAt) });
 
     const { error: failError } = await supabaseAdmin.rpc("fail_cover_letter_analysis", {
       p_cover_letter_id: coverLetterId,

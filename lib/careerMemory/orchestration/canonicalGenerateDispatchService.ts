@@ -28,6 +28,7 @@ import { NextResponse } from "next/server";
 import { resolveSelectedResume, ResumeResolutionError } from "../../resume-service";
 import { supabaseAdmin } from "../../supabaseAdmin";
 import { logSafeError } from "../../errors/publicError";
+import { logOperationalEvent } from "../../observability/logger";
 import { buildCareerMemoryDraftText } from "../../resume-builder";
 import { GENERATE_PACKAGE_MONTHLY_LIMIT, isNetlifyProductionRuntime } from "../../config/packageQuota";
 import { resolveBackgroundFunctionSecret, resolveNamedBackgroundFunctionUrl } from "../../generatePackage/backgroundTarget";
@@ -135,18 +136,21 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
     const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
     if (!quota?.reserved) {
       const used = quota?.used ?? GENERATE_PACKAGE_MONTHLY_LIMIT;
+      const limit = used + (quota?.remaining ?? 0);
+      logOperationalEvent({ domain: "generate_package", event: "quota_denied", userId, generationRequestId, used, limit, engine: "canonical" });
       return NextResponse.json({
         error: "You've reached your monthly Generate Package limit. You can generate up to " + GENERATE_PACKAGE_MONTHLY_LIMIT + " packages per month.",
         code: "GENERATE_PACKAGE_LIMIT_REACHED",
         // used + remaining reflects the RPC's own server-resolved limit for
         // this user (see packageQuota.ts's doc comment), not this file's
         // display constant.
-        limit: used + (quota?.remaining ?? 0),
+        limit,
         used,
         remaining: 0,
       }, { status: 429 });
     }
     quotaReserved = true;
+    logOperationalEvent({ domain: "generate_package", event: "quota_reserved", userId, generationRequestId, engine: "canonical" });
   }
 
   // ==================== Legacy-equivalent input snapshot - resolved unconditionally so a later fallback never needs a user session (see this file's own header comment). ====================
@@ -363,6 +367,14 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
       having fallen back or failed before it has even run again.
     */
     applicationId = existing.id;
+    logOperationalEvent({
+      domain: "generate_package",
+      event: "stale_pending_reclaimed",
+      applicationId,
+      generationRequestId,
+      pendingAgeMs: existing.generation_started_at ? Date.now() - new Date(existing.generation_started_at).getTime() : 0,
+      engine: "canonical",
+    });
     await supabase
       .from("applications")
       .update({
@@ -387,8 +399,10 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
   // ==================== Enqueue (Part D) ====================
   try {
     await enqueueCanonicalWorker({ requestOrigin, applicationId, generationRequestId });
+    logOperationalEvent({ domain: "background_worker", event: "enqueued", applicationId, generationRequestId, engine: "canonical" });
   } catch (enqueueError) {
     logSafeError(enqueueError, { requestId: "canonical-dispatch", route: "/api/generate-package#canonical-enqueue", userId, generationRequestId });
+    logOperationalEvent({ domain: "background_worker", event: "enqueue_failed", applicationId, generationRequestId, engine: "canonical" });
     await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
     await supabase.from("applications").update({ generation_status: "failed", generation_error_code: "BACKGROUND_ENQUEUE_FAILED", generation_error_summary: "Could not start AI generation. Please try again.", generation_completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", applicationId).eq("user_id", userId);
     return NextResponse.json({ error: "Could not start AI generation. Please try again.", code: "BACKGROUND_ENQUEUE_FAILED", applicationId, ...fallbackPackage(title, company, applicantName) }, { status: 500 });

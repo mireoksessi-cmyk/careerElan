@@ -9,6 +9,8 @@ import {
   CONSENT_INTENT_COOKIE_NAME,
   verifyConsentIntentCookieValue,
 } from "@/lib/auth/consentIntent";
+import { logSafeError } from "@/lib/errors/publicError";
+import { logOperationalEvent } from "@/lib/observability/logger";
 
 /*
   Hardcoded, not read from any request - legal document versions are a
@@ -161,11 +163,6 @@ export async function GET(request: Request) {
     exchangeError ||
     !sessionData.user
   ) {
-    console.error(
-      "OAUTH EXCHANGE ERROR =",
-      exchangeError
-    );
-
     console.log(
       JSON.stringify({
         event: "oauth_callback_exchange_failed",
@@ -174,6 +171,7 @@ export async function GET(request: Request) {
         errorMessage: safeAuthErrorMessage(exchangeError),
       })
     );
+    logOperationalEvent({ domain: "auth", event: "login_failed", provider: "unknown", reason: "oauth_exchange_failed" });
 
     response.cookies.set({
       name: CONSENT_INTENT_COOKIE_NAME,
@@ -217,6 +215,7 @@ export async function GET(request: Request) {
             : null,
       })
     );
+    logOperationalEvent({ domain: "auth", event: "login_succeeded", userId: user.id, provider: typeof user.app_metadata?.provider === "string" ? user.app_metadata.provider : "unknown" });
 
     response.headers.set(
       "Location",
@@ -261,10 +260,8 @@ export async function GET(request: Request) {
       프로필 저장 실패만으로 로그인을 막지는 않는다.
       RLS 설정 때문에 발생할 수도 있으므로 기록만 한다.
     */
-    console.error(
-      "OAUTH PROFILE UPSERT ERROR =",
-      profileError
-    );
+    logSafeError(profileError, { requestId: user.id, route: "auth/callback#profile-upsert", userId: user.id });
+    logOperationalEvent({ domain: "auth", event: "profile_upsert_failed", userId: user.id });
   }
 
   /*
@@ -313,10 +310,8 @@ export async function GET(request: Request) {
         .is("legal_terms_accepted_at", null);
 
       if (consentError) {
-        console.error(
-          "OAUTH CONSENT RECORD ERROR =",
-          consentError
-        );
+        logSafeError(consentError, { requestId: user.id, route: "auth/callback#consent-record", userId: user.id });
+        logOperationalEvent({ domain: "auth", event: "consent_record_failed", userId: user.id });
       }
     }
 
@@ -329,10 +324,8 @@ export async function GET(request: Request) {
       });
     }
   } catch (consentWriteError) {
-    console.error(
-      "OAUTH CONSENT RECORD EXCEPTION =",
-      consentWriteError
-    );
+    logSafeError(consentWriteError, { requestId: user.id, route: "auth/callback#consent-record-exception", userId: user.id });
+    logOperationalEvent({ domain: "auth", event: "consent_record_failed", userId: user.id });
   }
 
   /*
@@ -348,10 +341,7 @@ export async function GET(request: Request) {
     .maybeSingle();
 
   if (memoryError) {
-    console.error(
-      "CAREER MEMORY CHECK ERROR =",
-      memoryError
-    );
+    logSafeError(memoryError, { requestId: user.id, route: "auth/callback#career-memory-check", userId: user.id });
   }
 
   const redirectPath =
@@ -373,6 +363,7 @@ export async function GET(request: Request) {
           : null,
     })
   );
+  logOperationalEvent({ domain: "auth", event: "login_succeeded", userId: user.id, provider: typeof user.app_metadata?.provider === "string" ? user.app_metadata.provider : "unknown" });
 
   response.headers.set(
     "Location",

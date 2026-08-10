@@ -21,6 +21,7 @@ import type { PaperSize } from "../../documentPreservation/professionalAtsHtml/t
 import { uploadGeneratedDocument } from "./canonicalDocumentStorageService";
 import { TemplateResolutionError, GeneratedDocumentError, TemplateRenderingError } from "../errors/domainErrors";
 import { isE2eAiModeActive } from "../../testing/e2eAiIsolation";
+import { logOperationalEvent } from "../../observability/logger";
 
 /*
   Phase 6I.6.35 Part AC/AD/AE - test-only renderer fault injection,
@@ -138,6 +139,12 @@ export async function renderCanonicalPackage(client: SupabaseClient, input: Rend
   } else {
     documentStorage = { persisted: false, reason: "no_tailored_resume" };
   }
+
+  logOperationalEvent(
+    documentStorage.persisted
+      ? { domain: "storage", event: "document_persisted", applicationId: input.applicationId, pdfDocumentId: documentStorage.pdfDocumentId, docxDocumentId: documentStorage.docxDocumentId }
+      : { domain: "storage", event: "document_persist_skipped", applicationId: input.applicationId, reason: documentStorage.reason }
+  );
 
   return {
     html: htmlResult.html,
