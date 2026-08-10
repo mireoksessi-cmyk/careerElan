@@ -8,15 +8,21 @@ import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
 import CanonicalTemplateSelector from "@/components/canonicalGeneratePackage/CanonicalTemplateSelector";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 /*
-  D안 Phase 1 (Original Visual Tree) - buildOriginalLayoutPdfBlob is a
-  pure client-safe jsPDF builder (same runtime shape as buildPdfBlob
-  above), used only when packageData.packageAnalysis.dpeOriginalLayout
-  is present (see ensureResumePdf() below). DpeOriginalLayoutPayload is
-  a type-only import (erased at build time, zero bundle impact) shared
-  with lib/generatePackage/shared.ts/generateCore.ts so the client and
-  server agree on this payload's shape without redeclaring it.
+  Phase 6I.6.33B - preserved-original-layout DPE output (D안 Phase 1)
+  is no longer a supported user-facing rendering mode (see product
+  decision in that phase's spec: the only supported outputs are the 4
+  canonical Career Élan templates). buildOriginalLayoutPdfBlob is no
+  longer called from this file - ensureResumePdf() below always
+  resolves through the canonical/legacy template renderer now, so PDF
+  and DOCX are guaranteed to use the SAME template for the same
+  application (this closes the historical PDF-preserves-layout/DOCX-
+  falls-back-to-generic mismatch that 6I.6.33's QA pass found).
+  DpeOriginalLayoutPayload stays as a type-only import: existing rows'
+  ai_insight may still legally contain a dpeOriginalLayout-shaped
+  value (legacy data, see PackageAnalysis.dpeOriginalLayout below) and
+  this file must keep typing it correctly even though it no longer
+  reads it for any rendering decision.
 */
-import { buildOriginalLayoutPdfBlob } from "@/lib/brand/render/originalLayoutRenderer";
 import type { DpeOriginalLayoutPayload } from "@/lib/generatePackage/shared";
 
 import { useLogin } from "@/lib/auth/LoginManager";
@@ -296,13 +302,18 @@ type PackageAnalysis = {
   };
 
   /*
-    D안 Phase 1 (Original Visual Tree) - optional, additive, undefined
-    for every career_memory generation and every upload generation the
-    tree path didn't apply to. Mirrors lib/generatePackage/shared.ts's
-    own PackageAnalysis.dpeOriginalLayout field exactly (see that
-    file's comment) - this file keeps its own local PackageAnalysis
-    type rather than importing the server one, so this field is added
-    here too, type-only.
+    Phase 6I.6.33B - preserved-original-layout output is retired (see
+    resumePdfKey()/ensureResumePdf() below, which no longer read this
+    field). Kept type-only, still optional/additive: legacy application
+    rows generated before this phase may still carry a
+    dpeOriginalLayout-shaped value in their stored ai_insight, and this
+    file must keep typing that shape correctly rather than erroring on
+    it - the field is simply never consulted for any rendering decision
+    anymore. Mirrors lib/generatePackage/shared.ts's own
+    PackageAnalysis.dpeOriginalLayout field exactly (see that file's
+    comment) - this file keeps its own local PackageAnalysis type
+    rather than importing the server one, so this field is added here
+    too, type-only.
   */
   dpeOriginalLayout?: DpeOriginalLayoutPayload;
 };
@@ -1269,9 +1280,15 @@ export default function PasteJobPage() {
   const resumePdfUrlRef = useRef<string | null>(null);
 
   /*
-    D안 Phase 1 (Original Visual Tree) - when the server produced a
-    usable dpeOriginalLayout payload (upload source, feature flag on),
-    the Original Layout Renderer draws the Preview/Download PDF from
+    Phase 6I.6.33B - preserved-original-layout DPE rendering (D안
+    Phase 1, "Original Visual Tree") has been retired as a user-facing
+    output mode: resumePdfKey()/ensureResumePdf() below always resolve
+    through the canonical/legacy Career Élan template renderer now,
+    regardless of whether packageData.packageAnalysis.dpeOriginalLayout
+    is present. Historical note, kept for context only (this path no
+    longer runs): when the server had produced a usable
+    dpeOriginalLayout payload (upload source, feature flag on), the
+    original-layout renderer used to draw the Preview/Download PDF from
     that payload's own real geometry instead of the flat resume text
     through CareerElan's 4 fixed templates. Falls back to the existing
     buildPdfBlob() path (unchanged) whenever the payload is absent -
@@ -1283,10 +1300,6 @@ export default function PasteJobPage() {
   function resumePdfKey() {
     if (canonicalPreviewTemplateId) {
       return `canonical::${canonicalPreviewTemplateId}`;
-    }
-    const layout = packageData.packageAnalysis?.dpeOriginalLayout;
-    if (layout) {
-      return `tree::${resumeTemplateId}::${JSON.stringify(layout.nodeTexts)}`;
     }
     return `${resumeTemplateId}::${packageData.resume}`;
   }
@@ -1303,10 +1316,17 @@ export default function PasteJobPage() {
       if (!res.ok) throw new Error("canonical resume preview failed");
       blob = await res.blob();
     } else {
-      const layout = packageData.packageAnalysis?.dpeOriginalLayout;
-      blob = layout
-        ? await buildOriginalLayoutPdfBlob({ tree: layout.tree, designTokens: layout.designTokens, nodeTexts: layout.nodeTexts })
-        : await buildPdfBlob(packageData.resume, resumeTemplateId);
+      /*
+        Phase 6I.6.33B - always the canonical/legacy Career Élan
+        template renderer here, even when packageData.packageAnalysis
+        .dpeOriginalLayout is present (legacy rows may still carry it -
+        see PackageAnalysis.dpeOriginalLayout's own comment below).
+        This guarantees PDF and DOCX resolve through the identical
+        template for the same application, matching downloadDocx()
+        below exactly - preserved-original-layout output is no longer
+        a supported product mode.
+      */
+      blob = await buildPdfBlob(packageData.resume, resumeTemplateId);
     }
     const url = URL.createObjectURL(blob);
 

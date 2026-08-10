@@ -13,14 +13,22 @@ import type { ContentBoxConfidence } from "../contentBox/types";
 import type { SectionKey } from "@/lib/brand/types";
 
 /*
-  Reads the flag at call time (not module load time) so a test can set
-  process.env before invoking the pipeline without needing a fresh
-  module registry. Any value other than the literal string "true" is
-  OFF - fails closed, matching this codebase's own DEFAULT-nullable/
-  no-DEFAULT convention elsewhere (see DPE migration comments).
+  Phase 6I.6.33B - preserved-original-layout output is retired as a
+  product decision (not just left at its prior default-OFF flag
+  value): Career Élan's only supported resume outputs are the 4
+  canonical templates (professional-ats/modern-sidebar/executive-
+  minimal/creative-timeline). This always returns false now,
+  regardless of DPE_VISUAL_TREE_ENABLED, so generateCore.ts's tree-
+  build block can never run for a NEW generation - no new
+  dpeOriginalLayout artifact is ever written. The env var and this
+  function are kept (not deleted) because the downstream tree-build/
+  measurement/retry code they gate is still real, compiled code that
+  a future product decision could re-enable by reverting this one
+  line - see Phase 6I.6.33B's own audit for the full call-site
+  inventory of what stays dormant behind this gate.
 */
 export function isVisualTreeEnabled(): boolean {
-  return process.env.DPE_VISUAL_TREE_ENABLED === "true";
+  return false;
 }
 
 export type NodeRole =

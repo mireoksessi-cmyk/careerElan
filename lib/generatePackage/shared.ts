@@ -157,17 +157,24 @@ export type PackageAnalysis = {
     PackageVerification;
 
   /*
-    D안 Phase 1 (Original Visual Tree) - optional, additive. Set only
-    when the upload-source pipeline built a usable tree/rendered a
-    usable node-text map (generateCore.ts) - undefined for every
-    career_memory generation and every upload generation where the
-    tree path didn't apply. Rides inside the EXISTING ai_insight jsonb
-    column (no new column/migration) and flows to the client verbatim
-    via app/api/applications/[id]/status/route.ts's own
-    `packageAnalysis: row.ai_insight` passthrough - paste-job/page.tsx
-    reads this same field to decide whether to render the Preview/
-    Download PDF via originalLayoutRenderer.ts instead of the existing
-    CareerElan pdfDocumentExport.ts path.
+    Phase 6I.6.33B - preserved-original-layout DPE output (D안 Phase 1,
+    "Original Visual Tree") is retired as a user-facing rendering mode:
+    isVisualTreeEnabled() (lib/documentPreservation/visualTree/types.ts)
+    now unconditionally returns false, so generateCore.ts never builds
+    this payload for a NEW generation and this field is never newly
+    populated. Kept optional/additive, type-only where still referenced
+    (paste-job/page.tsx no longer reads it for any rendering decision),
+    purely so existing rows generated before this phase - whose stored
+    ai_insight jsonb may still legally contain a dpeOriginalLayout-
+    shaped value - keep parsing/typing correctly rather than erroring.
+    Historical note (this path no longer runs): this used to ride
+    inside the EXISTING ai_insight jsonb column (no new column/
+    migration) and flow to the client verbatim via
+    app/api/applications/[id]/status/route.ts's own
+    `packageAnalysis: row.ai_insight` passthrough, and paste-job/
+    page.tsx used to read this field to decide whether to render the
+    Preview/Download PDF via originalLayoutRenderer.ts instead of the
+    canonical/legacy CareerElan pdfDocumentExport.ts path.
   */
   dpeOriginalLayout?: DpeOriginalLayoutPayload;
 };
