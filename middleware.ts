@@ -19,6 +19,16 @@ const PROTECTED_PATHS = [
   "/job-tracker",
   "/analytics",
   "/settings",
+  // Phase 6I.6.37 - authentication-only gate. This is NOT the admin
+  // authorization check (a logged-in non-staff user still reaches
+  // /admin's server code past this point) - the real role/permission
+  // enforcement lives in lib/admin/auth.ts's requireAdminPermission(),
+  // called by every admin page and API route individually. See that
+  // module's own header comment for why role-awareness doesn't belong
+  // in Edge middleware here (a DB round-trip per request, and the
+  // per-tab permission differs per route - one boolean here can't
+  // express that).
+  "/admin",
 ];
 
 function isProtectedPath(pathname: string) {

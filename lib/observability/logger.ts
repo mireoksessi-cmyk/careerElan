@@ -132,6 +132,18 @@ export type StorageEvent =
 
 export type ApiLatencyEvent = { domain: "api_latency"; route: string; status: number; latencyMs: number; outcome: "success" | "error" };
 
+/*
+  Phase 6I.6.37 - admin console events. actorUserId is always a UUID,
+  never an email - matches this module's own PII-safety convention
+  (see PII_DENYLIST_KEYS above) of only ever logging safe identifiers.
+*/
+export type AdminEvent =
+  | { domain: "admin"; event: "access_denied"; userId: string; permission: string }
+  | { domain: "admin"; event: "role_updated"; actorUserId: string; targetUserId: string; newRole: string }
+  | { domain: "admin"; event: "staff_disabled"; actorUserId: string; targetUserId: string }
+  | { domain: "admin"; event: "staff_enabled"; actorUserId: string; targetUserId: string }
+  | { domain: "admin"; event: "alert_acknowledged"; actorUserId: string; alertKey: string };
+
 export type OperationalEvent =
   | AuthEvent
   | UploadEvent
@@ -141,7 +153,8 @@ export type OperationalEvent =
   | BackgroundWorkerEvent
   | RenderEvent
   | StorageEvent
-  | ApiLatencyEvent;
+  | ApiLatencyEvent
+  | AdminEvent;
 
 export function logOperationalEvent(event: OperationalEvent & { metadata?: Record<string, unknown> }): void {
   const { metadata, ...rest } = event;
