@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimiter";
 import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
 import { classifyCanadaJobScope } from "@/lib/jobPosting/canadaScopeClassifier";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
+import { buildE2eJobAnalysisResponseText } from "@/lib/testing/e2eFakeResponses";
 
 /*
   Phase 6I.6.34 - this was the one OpenAI call site in the codebase
@@ -29,10 +31,12 @@ const JOB_ANALYSIS_TIMEOUT_MS = 55_000;
 
 export const maxDuration = 60;
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  maxRetries: 0,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    maxRetries: 0,
+  })
+);
 
 type RequirementCategory =
   | "mandatory"
@@ -168,7 +172,18 @@ export async function POST(req: Request) {
       );
     }
 
-    const response = await client.responses.create({
+    /*
+      Phase 6I.6.35 - E2E AI isolation: when isE2eAiModeActive(), return
+      a deterministic synthetic response text instead of ever
+      constructing the real prompt / calling client.responses.create().
+      classifyCanadaJobScope(jobText) below is real, deterministic
+      code (not AI) and still runs unchanged against whatever jobText
+      the E2E test actually pasted, exactly as it does in production.
+    */
+    const responseOutputText = isE2eAiModeActive()
+      ? buildE2eJobAnalysisResponseText()
+      : (
+          await client.responses.create({
       model: JOB_ANALYSIS_MODEL,
       input: `
 Analyze this job posting and return ONLY valid JSON.
@@ -220,11 +235,12 @@ Rules:
 Job posting:
 ${jobText}
       `,
-    }, { timeout: JOB_ANALYSIS_TIMEOUT_MS, maxRetries: 0 });
+          }, { timeout: JOB_ANALYSIS_TIMEOUT_MS, maxRetries: 0 })
+        ).output_text;
 
     const json =
   extractJson(
-    response.output_text
+    responseOutputText
   ) as JobAnalysisResponse;
 
 /*

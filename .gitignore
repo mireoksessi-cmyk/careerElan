@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Playwright E2E (Phase 6I.6.35)
+/playwright-report/
+/test-results/
+/blob-report/
+/e2e/.e2e-state.json

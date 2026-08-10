@@ -36,8 +36,10 @@ import type { PaperSize } from "../../documentPreservation/professionalAtsHtml/t
 import type { TemplateDensity } from "../../resumeTemplates/contracts/types";
 import type { ResumeStructuredModel } from "../../documentPreservation/resumeStructured/types";
 import { normalizePackageAnalysis, includesLoose, shouldRetryOpenAiError, type PackageAnalysis } from "../../generatePackage/shared";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../../testing/e2eAiIsolation";
+import { buildE2eCanonicalTailoringResponseText } from "../../testing/e2eFakeResponses";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = wrapOpenAiClientForE2eSafety(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
 const OPENAI_CALL_TIMEOUT_MS = 60_000;
 const MAX_TAILORING_ATTEMPTS = 2; // 1 original + 1 schema-repair retry, per round spec §7
 
@@ -189,6 +191,16 @@ export function toPackageAnalysisInput(raw: CanonicalAnalysisRaw, groundedKeyCha
   reason documented on shouldRetryOpenAiError() itself.
 */
 async function callTailoringOpenAi(promptText: string): Promise<string> {
+  /*
+    Phase 6I.6.35 - E2E AI isolation: return a deterministic synthetic
+    tailoring response instead of ever calling client.responses.create()
+    when isE2eAiModeActive(). promptText itself is still built from the
+    real seeded resume/job data by the caller unchanged - only the
+    network call to OpenAI is replaced.
+  */
+  if (isE2eAiModeActive()) {
+    return buildE2eCanonicalTailoringResponseText();
+  }
   for (let attempt = 1; attempt <= MAX_TAILORING_ATTEMPTS; attempt++) {
     try {
       const response = await client.responses.create({ model: process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL, input: promptText }, { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 });

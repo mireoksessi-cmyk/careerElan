@@ -6,10 +6,14 @@ import {
   hashContent,
   normalizeText,
 } from "@/lib/cache/contentHash";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
+import { buildE2eRecommendedJobsFakeResult } from "@/lib/testing/e2eFakeResponses";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+);
 
 type SelectedResumeSource =
   | "career_memory"
@@ -367,6 +371,19 @@ export async function POST(req: Request) {
       );
     }
 
+    let json;
+
+    if (isE2eAiModeActive()) {
+      /*
+        Phase 6I.6.35 - E2E AI isolation: skip the real OpenAI call
+        entirely and use a deterministic synthetic result. This route
+        had no isE2eAiModeActive() gate before this fix - a real gap
+        found via openaiNetworkWatch.cjs network-boundary instrumentation
+        (see e2eFakeResponses.ts's own header comment for the evidence).
+      */
+      json = buildE2eRecommendedJobsFakeResult();
+    } else {
+
     let response;
 
     try {
@@ -545,8 +562,6 @@ ${JSON.stringify(careerMemory)}
       );
     }
 
-    let json;
-
     try {
       json = extractJson(
         response.output_text
@@ -578,6 +593,8 @@ ${JSON.stringify(careerMemory)}
           status: 500,
         }
       );
+    }
+
     }
 
     const jobs = (

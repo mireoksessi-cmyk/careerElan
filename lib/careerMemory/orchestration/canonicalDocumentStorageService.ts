@@ -16,6 +16,25 @@
 */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCanonicalDocumentStorageEnabled } from "./featureFlags";
+import { isE2eAiModeActive } from "../../testing/e2eAiIsolation";
+
+/*
+  Phase 6I.6.35 Part AB/AE - test-only Storage-write fault injection,
+  double-gated: isE2eAiModeActive() itself fails closed (never active in
+  a Netlify runtime or against a non-local Supabase target - see that
+  function's own header comment), AND this reads only a server-process
+  environment variable (E2E_FAULT_INJECT_STORAGE_WRITE), never any
+  client-supplied input (no query param, header, cookie, or request
+  body is consulted here or anywhere in this call chain) - satisfying
+  Part AE's "unacceptable: query param/client-controlled flag/public
+  API toggle" constraint by construction. Value is "pdf" | "docx" |
+  "both" to let tests target one artifact type independently.
+*/
+function isStorageWriteFaultInjected(fileType: "pdf" | "docx"): boolean {
+  if (!isE2eAiModeActive()) return false;
+  const target = process.env.E2E_FAULT_INJECT_STORAGE_WRITE;
+  return target === fileType || target === "both";
+}
 
 export const GENERATED_DOCUMENTS_BUCKET = "generated-documents";
 
@@ -47,6 +66,10 @@ export function buildGeneratedDocumentStoragePath(userId: string, applicationId:
 export async function uploadGeneratedDocument(client: SupabaseClient, input: UploadGeneratedDocumentInput): Promise<UploadGeneratedDocumentResult> {
   if (!isCanonicalDocumentStorageEnabled()) {
     return { uploaded: false, reason: "storage_disabled" };
+  }
+
+  if (isStorageWriteFaultInjected(input.fileType)) {
+    return { uploaded: false, reason: "upload_failed", detail: "E2E fault injection (Phase 6I.6.35, E2E_FAULT_INJECT_STORAGE_WRITE) - real Storage was never called." };
   }
 
   const storagePath = buildGeneratedDocumentStoragePath(input.userId, input.applicationId, input.fileType);

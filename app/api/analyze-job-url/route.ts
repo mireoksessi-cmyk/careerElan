@@ -6,10 +6,14 @@ import { JOB_ANALYSIS_MODEL } from "@/lib/config/aiModels";
 import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimiter";
 import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
+import { buildE2eJobAnalysisUrlResponseText } from "@/lib/testing/e2eFakeResponses";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+);
 
 const MAX_REDIRECTS = 5;
 const TOTAL_FETCH_DEADLINE_MS = 20000;
@@ -439,7 +443,16 @@ export async function POST(req: Request) {
     }
 
     console.time("4 openai analyze");
-    const aiResponse = await client.responses.create({
+    /*
+      Phase 6I.6.35 - E2E AI isolation: skip the real OpenAI call
+      entirely and use a deterministic synthetic response. This route
+      had no isE2eAiModeActive() gate before this fix - a real gap
+      found via openaiNetworkWatch.cjs network-boundary instrumentation
+      (see lib/testing/e2eFakeResponses.ts's own header comment).
+    */
+    const aiOutputText = isE2eAiModeActive()
+      ? buildE2eJobAnalysisUrlResponseText()
+      : (await client.responses.create({
       model: JOB_ANALYSIS_MODEL,
       input: `
 Analyze this job posting page text and return ONLY valid JSON.
@@ -749,13 +762,13 @@ ${jobText}
 
 Remember: Return ONLY valid JSON.
       `,
-    });
+    })).output_text;
     console.timeEnd("4 openai analyze");
 
     console.time("5 parse json");
     const json =
   extractJson(
-    aiResponse.output_text
+    aiOutputText
   ) as JobAnalysisResponse;
 
     json.jobDetails = {

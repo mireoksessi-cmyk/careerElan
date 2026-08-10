@@ -2,10 +2,14 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit } from "@/lib/security/rateLimiter";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
+import { buildE2eCareerInsightFakeResult } from "@/lib/testing/e2eFakeResponses";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+);
 
 type CareerInsight = {
   mismatch: {
@@ -275,6 +279,19 @@ export async function POST(req: Request) {
         {
           status: 400,
         }
+      );
+    }
+
+    /*
+      Phase 6I.6.35 - E2E AI isolation: skip the real OpenAI call
+      entirely and use a deterministic synthetic result. This route
+      had no isE2eAiModeActive() gate before this fix - a real gap
+      found via openaiNetworkWatch.cjs network-boundary instrumentation
+      (see lib/testing/e2eFakeResponses.ts's own header comment).
+    */
+    if (isE2eAiModeActive()) {
+      return NextResponse.json(
+        normalizeInsight(buildE2eCareerInsightFakeResult())
       );
     }
 

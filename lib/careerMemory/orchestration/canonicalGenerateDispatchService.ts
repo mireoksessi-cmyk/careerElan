@@ -338,9 +338,48 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
       }
     }
 
-    // failed, or stale-pending-unclaimed: reclaim and re-enqueue. Snapshot columns already correct from the original claim (never re-derived - same principle as legacy's own reclaim path).
+    /*
+      failed, or stale-pending-unclaimed: reclaim and re-enqueue. Snapshot
+      columns already correct from the original claim (never re-derived -
+      same principle as legacy's own reclaim path).
+
+      Bug fix (found while writing e2e/specs/render-failure.spec.ts's own
+      Part L retry test): a row whose PRIOR attempt fell back to legacy
+      (Part B - canonicalGenerationWorker.ts's mark_canonical_fallback)
+      is left with generation_engine='legacy' on this table. Without
+      resetting it back to 'canonical' here, claim_canonical_generate_worker
+      (supabase/migrations/20260808000000_canonical_background_execution_and_fallback.sql)
+      - which strictly requires generation_engine='canonical' in its own
+      WHERE clause - can never claim this reclaimed row again: the
+      background worker's fetch to enqueueCanonicalWorker() below still
+      returns 202 (the enqueue itself "succeeds"), but the worker's own
+      claim RPC then silently matches 0 rows (its own documented,
+      legitimate no-op for "not a canonical row"), leaving the row stuck
+      at generation_status='pending'/generation_worker_claimed_at=null
+      forever - confirmed via a real stuck DB row during E2E testing.
+      Also clearing the stale fallback_used/fallback_reason/
+      generation_error_code/generation_error_summary from the PRIOR
+      attempt so a fresh attempt is not misleadingly reported as already
+      having fallen back or failed before it has even run again.
+    */
     applicationId = existing.id;
-    await supabase.from("applications").update({ generation_status: "pending", generation_stage: "queued", generation_stage_updated_at: new Date().toISOString(), generation_started_at: new Date().toISOString(), generation_worker_claimed_at: null, updated_at: new Date().toISOString() }).eq("id", applicationId).eq("user_id", userId);
+    await supabase
+      .from("applications")
+      .update({
+        generation_status: "pending",
+        generation_stage: "queued",
+        generation_stage_updated_at: new Date().toISOString(),
+        generation_started_at: new Date().toISOString(),
+        generation_worker_claimed_at: null,
+        generation_engine: "canonical",
+        fallback_used: null,
+        fallback_reason: null,
+        generation_error_code: null,
+        generation_error_summary: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", applicationId)
+      .eq("user_id", userId);
   } else {
     applicationId = claimedRow.id;
   }

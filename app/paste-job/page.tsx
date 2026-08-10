@@ -2967,22 +2967,21 @@ async function downloadDocx() {
 
     job_analysis: analysis,
 
-    ai_insight:
-      packageData.packageAnalysis
-        ? {
-            mismatch:
-              packageData.packageAnalysis
-                .mismatch,
-
-            matches:
-              packageData.packageAnalysis
-                .matches,
-
-            recommendation:
-              packageData.packageAnalysis
-                .recommendation,
-          }
-        : null,
+    /*
+      Phase 6I.6.35 - pass packageData.packageAnalysis through unchanged
+      instead of rebuilding a narrowed {mismatch, matches, recommendation}
+      object. That reconstruction predates the canonical engine's own
+      normalizePackageAnalysis() shape (overallMatch/matchLevel/
+      strengths/gaps/keyChanges, see lib/generatePackage/shared.ts) and
+      silently dropped every one of those fields on save, corrupting
+      ai_insight for any canonical package the moment the user clicked
+      Save Package - the next load's PackageAnalysisPanel then crashed
+      on `analysis.matchLevel.replaceAll(...)` with matchLevel now
+      undefined. Save is a text-edit operation (resume/cover letter/
+      email); it has no reason to touch or re-derive the analysis object
+      at all.
+    */
+    ai_insight: packageData.packageAnalysis || null,
 
     updated_at:
       new Date().toISOString(),

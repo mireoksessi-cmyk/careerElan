@@ -3,6 +3,8 @@ import { supabaseAdmin } from "../supabaseAdmin";
 import { logSafeError } from "../errors/publicError";
 import { RESUME_PARSE_DRAFT_MODEL, RESUME_PARSE_MODEL } from "../config/aiModels";
 import { classifyGenerationError } from "./shared";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../testing/e2eAiIsolation";
+import { buildE2eResumeAnalysisFields } from "../testing/e2eFakeResponses";
 import {
   RESUME_ALLOWED_EXTENSIONS,
   UploadValidationError,
@@ -36,10 +38,12 @@ const DOCX_PARSE_TIMEOUT_MS = 30_000;
   app/api/process-resume-design/route.ts's own documented convention.
 */
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  maxRetries: 0,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    maxRetries: 0,
+  })
+);
 
 // Same reasoning as lib/generatePackage/generateCore.ts's own
 // OPENAI_CALL_TIMEOUT_MS: this now runs inside a Background Function (up to
@@ -362,6 +366,31 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
       .replace(/[ \t]+/g, " ")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+
+    /*
+      Phase 6I.6.35 - E2E AI isolation: real text extraction/validation
+      above (Storage download, PDF/DOCX parsing, empty-text check) still
+      runs unchanged - only the 3 sequential OpenAI calls below (OCR
+      cleanup, field extraction, verification) are replaced with one
+      deterministic synthetic result when isE2eAiModeActive(), then the
+      SAME complete_resume_analysis RPC persistence path runs as a real
+      analysis would use.
+    */
+    if (isE2eAiModeActive()) {
+      const parsed = buildE2eResumeAnalysisFields();
+      await setStage(resumeId, userId, "verifying");
+      const finalData = { ...parsed, originalText: resumeText };
+      const { error: e2eCompleteError } = await supabaseAdmin.rpc("complete_resume_analysis", {
+        p_resume_id: resumeId,
+        p_user_id: userId,
+        p_parsed_data: finalData,
+        p_original_text: resumeText,
+      });
+      if (e2eCompleteError) {
+        logSafeError(e2eCompleteError, { requestId: resumeId, route: "documentAnalysis/resumeAnalysisCore#e2e-complete", userId });
+      }
+      return;
+    }
 
     await setStage(resumeId, userId, "reconstructing_text");
 

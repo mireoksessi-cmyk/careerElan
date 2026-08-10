@@ -62,6 +62,16 @@ import { buildLayoutPlan } from "../documentPreservation/visualTree/buildLayoutP
 import { isVisualTreeEnabled } from "../documentPreservation/visualTree/types";
 import { resolveNodeTexts, validateTree } from "../documentPreservation/treeExecution/treeValidation";
 import { retryOverflowingLeaves } from "../documentPreservation/treeExecution/treeRetry";
+/*
+  Phase 6I.6.35 - wrapped for E2E safety only (no deterministic fake
+  branch added here - a fresh synthetic E2E test user does not route to
+  this legacy engine at all under this repo's current canary allowlist
+  config, see canonicalTrafficRouter.ts). If some other code path ever
+  did reach it while E2E mode is active, wrapOpenAiClientForE2eSafety
+  makes it throw REAL_OPENAI_CALL_BLOCKED_IN_E2E instead of silently
+  calling real OpenAI - a safe, loud failure, not a gap.
+*/
+import { wrapOpenAiClientForE2eSafety } from "../testing/e2eAiIsolation";
 
 /*
   Deliberately relative imports throughout this file (and everything it
@@ -76,10 +86,12 @@ import { retryOverflowingLeaves } from "../documentPreservation/treeExecution/tr
   hoping the alias happens to work.
 */
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  maxRetries: 0,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    maxRetries: 0,
+  })
+);
 
 /*
   This call now runs inside a Background Function (Netlify: up to 15

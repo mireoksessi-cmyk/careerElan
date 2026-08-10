@@ -20,6 +20,21 @@ import type { TemplateId, TemplateDensity, TemplateValidationReport } from "../.
 import type { PaperSize } from "../../documentPreservation/professionalAtsHtml/types";
 import { uploadGeneratedDocument } from "./canonicalDocumentStorageService";
 import { TemplateResolutionError, GeneratedDocumentError, TemplateRenderingError } from "../errors/domainErrors";
+import { isE2eAiModeActive } from "../../testing/e2eAiIsolation";
+
+/*
+  Phase 6I.6.35 Part AC/AD/AE - test-only renderer fault injection,
+  same double-gate as canonicalDocumentStorageService.ts's storage-write
+  injection (isE2eAiModeActive() fail-closed + server-env-var only,
+  never client input). Fires BEFORE the real renderTemplateFromRuntime()
+  call for the targeted format, so no bytes are ever produced for that
+  format - never a zero-byte/corrupt artifact silently written.
+*/
+function isRenderFaultInjected(format: "pdf" | "docx"): boolean {
+  if (!isE2eAiModeActive()) return false;
+  const target = process.env.E2E_FAULT_INJECT_RENDER;
+  return target === format || target === "both";
+}
 
 export type RenderCanonicalPackageInput = {
   userId: string;
@@ -73,7 +88,13 @@ export async function renderCanonicalPackage(client: SupabaseClient, input: Rend
   let htmlResult, pdfResult, docxResult;
   try {
     htmlResult = await renderTemplateFromRuntime(input.runtime, { templateId, useTailored: input.useTailored, paperSize: input.paperSize, density: input.density, locale: input.locale, generatedAt: input.generatedAt }, "html");
+    if (isRenderFaultInjected("pdf")) {
+      throw new Error("E2E fault injection (Phase 6I.6.35, E2E_FAULT_INJECT_RENDER) - real PDF renderer was never called.");
+    }
     pdfResult = await renderTemplateFromRuntime(input.runtime, { templateId, useTailored: input.useTailored, paperSize: input.paperSize, density: input.density, locale: input.locale, generatedAt: input.generatedAt }, "pdf");
+    if (isRenderFaultInjected("docx")) {
+      throw new Error("E2E fault injection (Phase 6I.6.35, E2E_FAULT_INJECT_RENDER) - real DOCX renderer was never called.");
+    }
     docxResult = await renderTemplateFromRuntime(input.runtime, { templateId, useTailored: input.useTailored, paperSize: input.paperSize, density: input.density, locale: input.locale, generatedAt: input.generatedAt }, "docx");
   } catch (error) {
     throw new TemplateRenderingError(error instanceof Error ? error.message.slice(0, 200) : "unknown rendering failure");
