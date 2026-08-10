@@ -10,8 +10,16 @@
   Deliberately does NOT attempt to mock generateCore.ts's module-level
   OpenAI client to test the retry loop end-to-end - that would require
   restructuring generateCore.ts for dependency injection, which is out of
-  this phase's scope. Instead this tests shouldRetryOpenAiTimeout(), the
-  exact pure predicate generateCore.ts's retry loop calls, directly.
+  this phase's scope. Instead this tests shouldRetryOpenAiError(), the
+  exact pure predicate generateCore.ts's (and
+  canonicalGeneratePackageService.ts's) retry loop calls, directly.
+
+  Phase 6I.6.34 - shouldRetryOpenAiTimeout() was renamed to
+  shouldRetryOpenAiError() and its policy extended: RateLimitError
+  (429) is now retried (bounded, same maxAttempts as a timeout) rather
+  than never retried - see that function's own updated comment in
+  shared.ts for why this is safe (quota is reserved once per logical
+  request, not per OpenAI attempt).
 */
 import { APIConnectionTimeoutError, RateLimitError, APIError } from "openai";
 import {
@@ -24,7 +32,7 @@ import {
   validateAnalysisLogic,
   validateDocumentQuality,
   classifyGenerationError,
-  shouldRetryOpenAiTimeout,
+  shouldRetryOpenAiError,
   GenerationValidationError,
   type SourceManifest,
   type PackageAnalysis,
@@ -509,32 +517,37 @@ const genericApiError = Object.create(APIError.prototype);
 
 check(
   "retry: 1st timeout with maxAttempts=2 -> retry",
-  shouldRetryOpenAiTimeout(timeoutError, 1, 2),
+  shouldRetryOpenAiError(timeoutError, 1, 2),
   true
 );
 check(
   "retry: timeout already at maxAttempts -> no retry",
-  shouldRetryOpenAiTimeout(timeoutError, 2, 2),
+  shouldRetryOpenAiError(timeoutError, 2, 2),
   false
 );
 check(
-  "retry: RateLimitError (429) -> never retried",
-  shouldRetryOpenAiTimeout(rateLimitError, 1, 2),
+  "retry: RateLimitError (429), 1st attempt with maxAttempts=2 -> retried (Phase 6I.6.34: transient, safe to retry within the same bounded loop - quota is reserved once per logical request, not per OpenAI attempt)",
+  shouldRetryOpenAiError(rateLimitError, 1, 2),
+  true
+);
+check(
+  "retry: RateLimitError (429) already at maxAttempts -> no retry (still bounded, same as timeout)",
+  shouldRetryOpenAiError(rateLimitError, 2, 2),
   false
 );
 check(
   "retry: generic APIError -> never retried",
-  shouldRetryOpenAiTimeout(genericApiError, 1, 2),
+  shouldRetryOpenAiError(genericApiError, 1, 2),
   false
 );
 check(
   "retry: SyntaxError (malformed JSON) -> never retried",
-  shouldRetryOpenAiTimeout(new SyntaxError("bad json"), 1, 2),
+  shouldRetryOpenAiError(new SyntaxError("bad json"), 1, 2),
   false
 );
 check(
   "retry: GenerationValidationError -> never retried",
-  shouldRetryOpenAiTimeout(
+  shouldRetryOpenAiError(
     new GenerationValidationError("SOURCE_INTEGRITY_FAILED", "validateSourceIntegrity", "x"),
     1,
     2

@@ -7,8 +7,31 @@ import { checkRateLimit, resolveOptionalUserId } from "@/lib/security/rateLimite
 import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
 import { classifyCanadaJobScope } from "@/lib/jobPosting/canadaScopeClassifier";
 
+/*
+  Phase 6I.6.34 - this was the one OpenAI call site in the codebase
+  with no explicit maxRetries/timeout/maxDuration at all, so it
+  silently inherited the openai SDK's own defaults (maxRetries=2,
+  timeout=600_000ms) instead of this codebase's deliberate, narrow
+  "maxRetries:0 + typed, bounded retry only where a wrapper decides
+  to" policy used everywhere else (generateCore.ts,
+  resumeAnalysisCore.ts, canonicalGeneratePackageService.ts). A bad
+  request here (malformed job posting reliably producing a non-JSON
+  response, or a persistent OpenAI 5xx) would silently retry twice
+  using the SDK's own opaque backoff, and the whole route had no
+  execution-time ceiling of its own. maxRetries:0 + an explicit
+  per-call timeout below, plus `maxDuration` (matching
+  analyze-cover-letter/route.ts's own precedent), closes that gap -
+  no retry loop is added here since Analyze Job has never had one and
+  a single deterministic-failure job posting must not be retried
+  (Part AI/AK of that phase).
+*/
+const JOB_ANALYSIS_TIMEOUT_MS = 55_000;
+
+export const maxDuration = 60;
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  maxRetries: 0,
 });
 
 type RequirementCategory =
@@ -197,7 +220,7 @@ Rules:
 Job posting:
 ${jobText}
       `,
-    });
+    }, { timeout: JOB_ANALYSIS_TIMEOUT_MS, maxRetries: 0 });
 
     const json =
   extractJson(

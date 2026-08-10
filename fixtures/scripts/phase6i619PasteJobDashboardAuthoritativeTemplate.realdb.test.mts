@@ -136,13 +136,20 @@ async function dispatchAndGetManifestTemplateId(
       analysis: { summary: "test job analysis" },
       jobUrl: null,
       body: {},
-      requestOrigin: "http://localhost:3001",
+      // 127.0.0.1:1 (reserved, never-bound port) - see phase6i634's own
+      // comment for why the real dev origin is unsafe here: a live
+      // Next.js dev server on localhost:3001 would silently accept this
+      // enqueue and run a real OpenAI generation, contradicting this
+      // section's own "template resolution/switching never calls
+      // OpenAI" claim (confirmed as a real gap during Phase 6I.6.34
+      // verification).
+      requestOrigin: "http://127.0.0.1:1",
       routingReason: "phase6i619-test",
       canaryStage: 0,
     });
   } catch {
-    // Expected: no background worker listens in this standalone script.
-    // The claim-insert (with canonical_input_manifest) already happened.
+    // Expected: enqueue always fails against the unreachable port. The
+    // claim-insert (with canonical_input_manifest) already happened.
   }
   const { data: appRow, error } = await admin.from("applications").select("id, canonical_input_manifest").eq("user_id", user.userId).eq("generation_request_id", generationRequestId).single();
   if (error || !appRow) throw new Error("dispatch did not create an applications row");

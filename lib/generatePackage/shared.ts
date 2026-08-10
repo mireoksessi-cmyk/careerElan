@@ -3601,24 +3601,41 @@ export type GenerationErrorCode =
   | ValidatorErrorCode;
 
 /*
-  Phase5 Beta stabilization - the single-retry decision for generateCore.ts's
-  OpenAI call, factored out as a pure predicate purely so it can be unit
-  tested directly (generateCore.ts's own OpenAI client is a module-level
-  singleton, not easily mocked) without duplicating the policy in a test
-  file. Retries ONLY on a genuine `APIConnectionTimeoutError` (never
-  RateLimitError/429, never any other APIError, never a JSON parse
-  failure), and only while `attempt` is still below `maxAttempts` - see
-  generateCore.ts's own MAX_OPENAI_ATTEMPTS/OPENAI_TIMEOUT_RETRY_DELAY_MS
-  comment for why this is a single fixed-delay retry, not a backoff
-  system.
+  Phase5 Beta stabilization, extended Phase 6I.6.34 - the single-retry
+  decision shared by generateCore.ts (legacy engine) and
+  canonicalGeneratePackageService.ts (canonical engine)'s OpenAI calls,
+  factored out as a pure predicate purely so it can be unit tested
+  directly (both engines' OpenAI clients are module-level singletons,
+  not easily mocked) without duplicating the policy in a test file.
+
+  Retries on `APIConnectionTimeoutError` (a genuine network/timeout
+  failure) OR `RateLimitError` (HTTP 429) - both are classic transient
+  conditions where the identical request is very likely to succeed on
+  an immediate retry, and retrying is SAFE here specifically because
+  Generate Package quota is reserved once per logical generation
+  request BEFORE any OpenAI call and only completed/released once
+  after the whole attempt resolves (see reserve_generate_package_usage/
+  complete_generate_package_usage) - an extra OpenAI attempt inside
+  this same bounded loop never reserves or consumes quota a second
+  time. Never retries any other APIError (e.g. 400 validation, 401/403
+  auth misconfiguration - those are non-retryable per this phase's own
+  taxonomy) and never retries a JSON parse/schema failure (a
+  deterministic response defect, not a transient one). Only while
+  `attempt` is still below `maxAttempts` - see generateCore.ts's own
+  MAX_OPENAI_ATTEMPTS/OPENAI_TIMEOUT_RETRY_DELAY_MS comment (and
+  canonicalGeneratePackageService.ts's MAX_TAILORING_ATTEMPTS) for why
+  this is a single fixed-delay retry per logical call, not a backoff
+  system - so the real worst case is still a small, fixed, calculable
+  number of OpenAI attempts per user action (see this phase's own
+  final report for the exact figure), never unbounded.
 */
-export function shouldRetryOpenAiTimeout(
+export function shouldRetryOpenAiError(
   error: unknown,
   attempt: number,
   maxAttempts: number
 ): boolean {
   return (
-    error instanceof APIConnectionTimeoutError &&
+    (error instanceof APIConnectionTimeoutError || error instanceof RateLimitError) &&
     attempt < maxAttempts
   );
 }

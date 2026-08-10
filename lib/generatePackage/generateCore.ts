@@ -1,4 +1,4 @@
-import OpenAI, { APIConnectionTimeoutError } from "openai";
+import OpenAI, { APIConnectionTimeoutError, RateLimitError } from "openai";
 import { supabaseAdmin } from "../supabaseAdmin";
 import { logSafeError } from "../errors/publicError";
 import {
@@ -22,7 +22,7 @@ import {
   validateAnalysisLogic,
   warnCardDifferences,
   classifyGenerationError,
-  shouldRetryOpenAiTimeout,
+  shouldRetryOpenAiError,
   logGenerationStage,
   buildLayoutCompressionPromptBlock,
   buildOriginalLayoutPromptBlock,
@@ -105,13 +105,14 @@ const OPENAI_CALL_TIMEOUT_MS = 120_000;
   retry", never more - this is NOT a generic backoff/retry system, and
   is deliberately NOT implemented via the SDK's own `maxRetries` option
   (which retries indiscriminately on any retryable-by-SDK-definition
-  error, including classes this phase was explicitly told never to
-  retry, like 429). The loop below only ever retries when the caught
-  error is `instanceof APIConnectionTimeoutError` - any other error
-  (RateLimitError/429, other APIError, SyntaxError from a malformed
-  response, etc.) is re-thrown immediately on the first attempt and
-  reaches the existing outer catch/classifyGenerationError path exactly
-  as before this phase, unchanged.
+  error, with no observability into which class triggered it). The
+  loop below only ever retries when the caught error is `instanceof
+  APIConnectionTimeoutError` OR `RateLimitError` (Phase 6I.6.34 -
+  see shouldRetryOpenAiError()'s own comment in shared.ts for why
+  retrying a 429 here is safe) - any other error (other APIError,
+  SyntaxError from a malformed response, etc.) is re-thrown
+  immediately on the first attempt and reaches the existing outer
+  catch/classifyGenerationError path, unchanged.
 */
 const MAX_OPENAI_ATTEMPTS = 2;
 const OPENAI_TIMEOUT_RETRY_DELAY_MS = 2_000;
@@ -221,14 +222,21 @@ async function setStage(
   (previously inline, once, in runPackageGeneration) extracted verbatim so
   both the Resume+Analysis call and the Cover Letter+Email call get the
   exact same retry policy independently, with zero duplication between
-  the two call sites. Nothing about the policy itself changed: still
-  MAX_OPENAI_ATTEMPTS=2 ("1 original attempt + at most 1 retry"), still
-  only retries when shouldRetryOpenAiTimeout() (unchanged, imported from
-  ./shared) says the caught error is an APIConnectionTimeoutError and
-  attempts remain - any other error class is re-thrown on the first
-  attempt exactly as before, reaching the same outer catch/
+  the two call sites. Still MAX_OPENAI_ATTEMPTS=2 ("1 original attempt +
+  at most 1 retry"), still only retries when shouldRetryOpenAiError()
+  (imported from ./shared) says so and attempts remain - any other error
+  class is re-thrown on the first attempt, reaching the same outer catch/
   classifyGenerationError path. `callLabel` is diagnostics-only (which of
   the two calls this attempt belongs to), never affects control flow.
+
+  Phase 6I.6.34 - shouldRetryOpenAiError() (renamed from
+  shouldRetryOpenAiTimeout()) now also retries a RateLimitError (429),
+  not just APIConnectionTimeoutError - see that function's own comment
+  in shared.ts for why this is safe here specifically (Generate Package
+  quota is reserved once per logical request, before any OpenAI call,
+  and completed/released once after the whole attempt resolves - an
+  extra attempt inside this same bounded loop never double-reserves or
+  double-consumes it).
 */
 async function callOpenAiWithRetry(
   applicationId: string,
@@ -271,6 +279,8 @@ async function callOpenAiWithRetry(
     } catch (attemptError) {
       const isTimeout =
         attemptError instanceof APIConnectionTimeoutError;
+      const isRateLimited =
+        attemptError instanceof RateLimitError;
       console.log(
         JSON.stringify({
           event: "generate_package_openai_attempt",
@@ -280,17 +290,19 @@ async function callOpenAiWithRetry(
           maxAttempts: MAX_OPENAI_ATTEMPTS,
           model: resolvedModel,
           durationMs: Date.now() - attemptStartedAt,
-          outcome: isTimeout ? "timeout" : "error",
+          outcome: isTimeout ? "timeout" : isRateLimited ? "rate_limited" : "error",
           errorCode: isTimeout
             ? "OPENAI_TIMEOUT"
-            : attemptError instanceof Error
-              ? attemptError.name
-              : "Unknown",
+            : isRateLimited
+              ? "OPENAI_RATE_LIMITED"
+              : attemptError instanceof Error
+                ? attemptError.name
+                : "Unknown",
         })
       );
 
       if (
-        !shouldRetryOpenAiTimeout(
+        !shouldRetryOpenAiError(
           attemptError,
           attempt,
           MAX_OPENAI_ATTEMPTS

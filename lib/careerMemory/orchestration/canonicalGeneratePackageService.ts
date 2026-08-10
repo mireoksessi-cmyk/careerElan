@@ -17,7 +17,7 @@
   schema-validation failure only (round §7), never a second full
   generation attempt.
 */
-import OpenAI, { APIConnectionTimeoutError } from "openai";
+import OpenAI from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveCanonicalResumeContext } from "../services/resolveCanonicalResumeContext";
 import { getCanonicalRuntimeViaServiceRole } from "./canonicalMemoryBundleFetch";
@@ -35,7 +35,7 @@ import {
 import type { PaperSize } from "../../documentPreservation/professionalAtsHtml/types";
 import type { TemplateDensity } from "../../resumeTemplates/contracts/types";
 import type { ResumeStructuredModel } from "../../documentPreservation/resumeStructured/types";
-import { normalizePackageAnalysis, includesLoose, type PackageAnalysis } from "../../generatePackage/shared";
+import { normalizePackageAnalysis, includesLoose, shouldRetryOpenAiError, type PackageAnalysis } from "../../generatePackage/shared";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const OPENAI_CALL_TIMEOUT_MS = 60_000;
@@ -175,13 +175,26 @@ export function toPackageAnalysisInput(raw: CanonicalAnalysisRaw, groundedKeyCha
   };
 }
 
+/*
+  Phase 6I.6.34 - retry condition now delegates to the SAME
+  shouldRetryOpenAiError() predicate the legacy engine uses (imported
+  from ../../generatePackage/shared), instead of a separately-
+  maintained inline `error instanceof APIConnectionTimeoutError`
+  check - closes a real asymmetry the phase's own retry audit found
+  (legacy retried timeouts only; this engine's inline check, before
+  this change, did too, but the two conditions were drifting apart in
+  two different files with no shared source of truth). This also
+  means a RateLimitError (429) is now retried here too, bounded by the
+  same MAX_TAILORING_ATTEMPTS=2 - safe for the identical quota-timing
+  reason documented on shouldRetryOpenAiError() itself.
+*/
 async function callTailoringOpenAi(promptText: string): Promise<string> {
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= MAX_TAILORING_ATTEMPTS; attempt++) {
     try {
       const response = await client.responses.create({ model: process.env.OPENAI_PACKAGE_MODEL || PACKAGE_GENERATION_MODEL, input: promptText }, { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 });
       return response.output_text;
     } catch (error) {
-      if (attempt < 2 && error instanceof APIConnectionTimeoutError) continue;
+      if (shouldRetryOpenAiError(error, attempt, MAX_TAILORING_ATTEMPTS)) continue;
       throw error;
     }
   }

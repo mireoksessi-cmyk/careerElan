@@ -59,7 +59,7 @@ function baseParams(overrides: Partial<CanonicalDispatchParams>): CanonicalDispa
     analysis: {},
     jobUrl: null,
     body: {},
-    requestOrigin: "http://localhost:3000",
+    requestOrigin: "http://127.0.0.1:1", // reserved, never-bound port - hardened per Phase 6I.6.34 finding (a live server on this origin would silently make a real OpenAI call)
     routingReason: "test",
     canaryStage: 0,
     ...overrides,

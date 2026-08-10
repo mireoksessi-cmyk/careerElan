@@ -224,7 +224,7 @@ async function main() {
         analysis: { summary: "A software engineering role." },
         jobUrl: null,
         body: { templateId: "professional-ats" },
-        requestOrigin: "http://127.0.0.1:59999",
+        requestOrigin: "http://127.0.0.1:1", // reserved, never-bound port - see phase6i634's comment; safer than a high ephemeral port
         routingReason: "in_traffic_percent",
         canaryStage: 6,
       })
@@ -258,7 +258,7 @@ async function main() {
         analysis: { summary: "A software engineering role." },
         jobUrl: null,
         body: { templateId: "professional-ats" },
-        requestOrigin: "http://127.0.0.1:59999",
+        requestOrigin: "http://127.0.0.1:1", // reserved, never-bound port - see phase6i634's comment; safer than a high ephemeral port
         routingReason: "in_traffic_percent",
         canaryStage: 6,
       })

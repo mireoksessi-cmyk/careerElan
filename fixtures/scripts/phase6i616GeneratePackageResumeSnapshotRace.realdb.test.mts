@@ -113,14 +113,21 @@ async function claim(admin: ReturnType<typeof createClient>, user: { userId: str
       analysis: { summary: "test job analysis" },
       jobUrl: null,
       body: {},
-      requestOrigin: "http://localhost:3001",
+      // 127.0.0.1:1 (a reserved, never-bound port) rather than the real
+      // dev origin - a live Next.js dev server on localhost:3001 would
+      // silently accept this enqueue and run a real OpenAI generation,
+      // contradicting this file's own "Zero OpenAI calls are reachable
+      // from this path" claim (confirmed as a real gap during Phase
+      // 6I.6.34 verification). The claim-insert (with its frozen snapshot
+      // columns) already persists before the enqueue attempt either way.
+      requestOrigin: "http://127.0.0.1:1",
       routingReason: "phase6i616-test",
       canaryStage: 0,
     });
   } catch {
-    // Expected: no background worker listens in this standalone script -
-    // the claim-insert (with its frozen snapshot columns) already
-    // persisted before the enqueue attempt.
+    // Expected: enqueue always fails against the unreachable port - the
+    // claim-insert (with its frozen snapshot columns) already persisted
+    // before the enqueue attempt.
   }
   const { data: appRow, error } = await admin
     .from("applications")
@@ -205,10 +212,10 @@ async function main() {
       memory: memoryRowForRetry as Record<string, unknown>,
       generationRequestId: xGenerationRequestId,
       jobText: "retry", title: "Software Engineer", company: "Test Co", applicantName: "Test Applicant",
-      analysis: { summary: "retry" }, jobUrl: null, body: {}, requestOrigin: "http://localhost:3001",
+      analysis: { summary: "retry" }, jobUrl: null, body: {}, requestOrigin: "http://127.0.0.1:1",
       routingReason: "phase6i616-retry-test", canaryStage: 0,
     });
-  } catch { /* expected enqueue failure */ }
+  } catch { /* expected enqueue failure - unreachable port, see claim()'s own comment above */ }
   const { data: appXAfterRetry } = await admin.from("applications").select("canonical_resume_version_id, canonical_input_manifest, resume_id").eq("id", appX.id).single();
   check("E. retry: X.canonical_resume_version_id is STILL VERSION_A (not re-derived to B)", appXAfterRetry?.canonical_resume_version_id, versionA);
   check("E. retry: X's template snapshot is STILL professional-ats", (appXAfterRetry?.canonical_input_manifest as any)?.templateId, "professional-ats");

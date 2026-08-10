@@ -212,7 +212,7 @@ async function main() {
       analysis: {},
       jobUrl: null,
       body: {},
-      requestOrigin: "http://localhost:3000",
+      requestOrigin: "http://127.0.0.1:1", // reserved, never-bound port - hardened per Phase 6I.6.34 finding (a live server on this origin would silently make a real OpenAI call)
       routingReason: "test",
       canaryStage: 0,
     });
@@ -315,7 +315,7 @@ async function main() {
         analysis: { jobContext: { plan: "pro", isPro: true, limit: 999, monthlyLimit: 999 } } as any,
         jobUrl: null,
         body: { plan: "pro", isPro: true, limit: 999, monthlyLimit: 999 } as any,
-        requestOrigin: "http://localhost:3000",
+        requestOrigin: "http://127.0.0.1:1", // reserved, never-bound port - hardened per Phase 6I.6.34 finding (a live server on this origin would silently make a real OpenAI call)
         routingReason: "test",
         canaryStage: 0,
       });

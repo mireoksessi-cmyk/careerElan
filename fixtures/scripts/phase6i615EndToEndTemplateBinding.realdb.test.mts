@@ -137,7 +137,16 @@ async function dispatchAndGetApplication(
       analysis: { summary: "test job analysis" },
       jobUrl: null,
       body: {},
-      requestOrigin: "http://localhost:3001",
+      // 127.0.0.1:1 is a reserved, never-bound port - the enqueue to a
+      // background worker always fails deterministically here, regardless
+      // of whether a real Next.js dev server happens to be running on
+      // localhost:3001 on the machine executing this script. Using the
+      // real dev origin here was found (Phase 6I.6.34 verification) to
+      // silently reach a live server and trigger a real OpenAI call when
+      // one was running - this file's own header claims "No OpenAI call
+      // is ever reachable from this path," so the target must be
+      // structurally unreachable, not just usually-idle.
+      requestOrigin: "http://127.0.0.1:1",
       routingReason: "phase6i615-test",
       canaryStage: 0,
     });
