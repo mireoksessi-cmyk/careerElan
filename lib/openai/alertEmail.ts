@@ -38,7 +38,8 @@ export function getConfiguredAlertRecipients(): string[] {
 export async function sendBudgetAlertEmail(params: {
   level: BudgetAlertLevel;
   monthSpendUsd: number;
-  monthlyBudgetUsd: number;
+  /** Base budget + this month's recorded manual recharges - never raw OpenAI billing. */
+  effectiveBudgetUsd: number;
   budgetUsedPercent: number;
   timestampIso: string;
 }): Promise<{ sent: boolean; reason?: string }> {
@@ -62,7 +63,7 @@ export async function sendBudgetAlertEmail(params: {
       html: `
         <h2>${SUBJECT_BY_LEVEL[params.level]}</h2>
         <p>Current estimated spend: <strong>$${params.monthSpendUsd.toFixed(2)}</strong></p>
-        <p>Configured monthly budget: <strong>$${params.monthlyBudgetUsd.toFixed(2)}</strong></p>
+        <p>Effective monthly budget (base + manual recharges): <strong>$${params.effectiveBudgetUsd.toFixed(2)}</strong></p>
         <p>Percentage used: <strong>${params.budgetUsedPercent.toFixed(1)}%</strong></p>
         <p>Timestamp (UTC): ${params.timestampIso}</p>
         <p>Details: <a href="${adminPageUrl}">${adminPageUrl}</a> (AI &amp; API Costs tab)</p>

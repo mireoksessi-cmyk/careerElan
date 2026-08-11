@@ -1,14 +1,18 @@
 /*
-  Phase 6I.6.38A - orchestrates the 80/90/100% monthly budget email
-  alerts (Part J/K/L). Called after every openai_usage_events insert
-  (see lib/openai/telemetry.ts) - cheap (one aggregate read + at most
-  3 atomic claim attempts) and naturally fires exactly when spend could
+  Phase 6I.6.38A - orchestrates the 80/90/100% OpenAI monthly budget
+  email alerts. Called after every openai_usage_events insert (see
+  lib/openai/telemetry.ts) - cheap (one aggregate read + at most 3
+  atomic claim attempts) and naturally fires exactly when spend could
   have just crossed a threshold, with no separate cron job needed.
 
   Each threshold is checked and claimed independently every call, so a
   single cost event that jumps spend across more than one threshold at
   once (e.g. 70% -> 95%) still sends every newly-crossed alert exactly
-  once, never more.
+  once, never more. Thresholds are now evaluated against
+  effectiveBudgetUsd (base + this month's manual recharges, Operational
+  Activation) rather than the raw base budget, and claimBudgetAlertThreshold
+  itself allows a legitimate re-fire after a recharge raises the ceiling
+  (see lib/openai/budget.ts's own header comment).
 
   Never throws into the caller - a failure here must not affect the
   OpenAI call or its own telemetry write.
@@ -31,13 +35,13 @@ export async function checkAndTriggerBudgetAlerts(now = new Date()): Promise<voi
     for (const check of CHECKS) {
       if (summary.budgetUsedPercent < check.minPercent) continue;
 
-      const claimed = await claimBudgetAlertThreshold(check.threshold, now);
-      if (!claimed) continue; // already sent this month, or lost the race to another concurrent request
+      const claimed = await claimBudgetAlertThreshold(check.threshold, summary.effectiveBudgetUsd, now);
+      if (!claimed) continue; // already sent this month at this effective budget level, or lost the race to another concurrent request
 
       const result = await sendBudgetAlertEmail({
         level: check.level,
         monthSpendUsd: summary.monthSpendUsd,
-        monthlyBudgetUsd: summary.monthlyBudgetUsd,
+        effectiveBudgetUsd: summary.effectiveBudgetUsd,
         budgetUsedPercent: summary.budgetUsedPercent,
         timestampIso: now.toISOString(),
       });
@@ -47,7 +51,7 @@ export async function checkAndTriggerBudgetAlerts(now = new Date()): Promise<voi
         event: check.logEvent,
         budgetUsedPercent: summary.budgetUsedPercent,
         monthSpendUsd: summary.monthSpendUsd,
-        monthlyBudgetUsd: summary.monthlyBudgetUsd,
+        monthlyBudgetUsd: summary.effectiveBudgetUsd,
         emailSent: result.sent,
       } as OpenAiBudgetEvent);
     }

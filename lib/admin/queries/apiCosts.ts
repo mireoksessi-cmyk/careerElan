@@ -16,9 +16,10 @@
   presented as exact billing.
 */
 import { supabaseAdmin } from "../../supabaseAdmin";
-import { metric, startOfUtcMonth, listAllAuthUsers, type ClassifiedMetric } from "./shared";
+import { metric, startOfUtcMonth, startOfNextUtcMonth, listAllAuthUsers, type ClassifiedMetric } from "./shared";
 import { getBudgetSummary, type BudgetSummary } from "../../openai/budget";
 import { aggregateUsageRows, type UsageEventRow, type OperationBreakdownRow, type ModelBreakdownRow } from "../../openai/usageAggregation";
+import { listRecentRecharges, type RechargeHistoryRow } from "../../openai/recharges";
 
 export type PeriodMetrics = {
   calls: ClassifiedMetric<number>;
@@ -42,6 +43,7 @@ export type ApiCostMetrics = {
       lastCallAt: ClassifiedMetric<string | null>;
     };
     budget: BudgetSummary;
+    rechargeHistory: RechargeHistoryRow[];
     remainingCapacity: ClassifiedMetric<string>;
     unknownPricingModels: ClassifiedMetric<string[]>;
     perOperation: OperationBreakdownRow[];
@@ -71,6 +73,7 @@ function periodMetrics(summary: ReturnType<typeof aggregateUsageRows>["today"]):
 export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
   const now = new Date();
   const monthStart = startOfUtcMonth(now).toISOString();
+  const monthEnd = startOfNextUtcMonth(now).toISOString();
 
   const [{ data: monthRows, error: rowsError }, authUsers, budget] = await Promise.all([
     supabaseAdmin
@@ -78,7 +81,8 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       .select(
         "created_at, operation, model, status, duration_ms, input_tokens, output_tokens, total_tokens, estimated_cost_usd, cost_classification, retry_count, http_status_class"
       )
-      .gte("created_at", monthStart),
+      .gte("created_at", monthStart)
+      .lt("created_at", monthEnd),
     listAllAuthUsers(),
     getBudgetSummary(now),
   ]);
@@ -86,6 +90,9 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
   const rows: UsageEventRow[] = rowsError || !monthRows ? [] : (monthRows as UsageEventRow[]);
   const aggregation = aggregateUsageRows(rows, now);
   const authUserCount = authUsers.length;
+
+  const emailByUserId = new Map(authUsers.map((u) => [u.id, u.email]));
+  const rechargeHistory = await listRecentRecharges(emailByUserId);
 
   const unknownPricingModels = Array.from(
     new Set(aggregation.perModel.filter((m) => m.unknownPricingCount > 0).map((m) => m.model))
@@ -101,6 +108,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
         lastCallAt: metric(aggregation.thisMonth.lastCallAt, "EXACT_INTERNAL_DATA"),
       },
       budget,
+      rechargeHistory,
       remainingCapacity: metric(
         "Check OpenAI Dashboard",
         "MANUAL_PROVIDER_DASHBOARD_ONLY",

@@ -36,6 +36,10 @@ export function startOfUtcMonth(date = new Date()): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
+export function startOfNextUtcMonth(date = new Date()): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
+}
+
 export function daysAgo(days: number, from = new Date()): Date {
   return new Date(from.getTime() - days * 24 * 60 * 60 * 1000);
 }

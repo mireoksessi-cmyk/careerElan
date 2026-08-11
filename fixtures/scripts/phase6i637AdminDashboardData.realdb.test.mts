@@ -129,7 +129,11 @@ async function main() {
   checkTrue("5. every perOperation row exists for the 9-value closed taxonomy", apiCosts.openAi.perOperation.length === 9);
   checkTrue("5. perOperation with zero calls has successRatePercent null (never a fabricated 0%)", apiCosts.openAi.perOperation.every((op) => op.calls > 0 || op.successRatePercent === null));
   check("5. sentry.configured is false (Phase 6I.6.36's own confirmed finding - no DSN exists)", apiCosts.sentry.configured, false);
-  checkTrue("5. budget.configured is false when OPENAI_MONTHLY_BUDGET_USD is unset in this local run", apiCosts.openAi.budget.configured === false || typeof (apiCosts.openAi.budget as any).monthlyBudgetUsd === "number");
+  // Phase 6I.6.38A Operational Activation set OPENAI_MONTHLY_BUDGET_USD=100 in .env.local (a deliberate,
+  // permanent local config change) and renamed BudgetSummary's configured-branch fields from the old
+  // single monthlyBudgetUsd to baseBudgetUsd/rechargesUsd/effectiveBudgetUsd (see lib/openai/budget.ts) -
+  // this assertion is updated to match that now-real, intended state instead of the old "unset" baseline.
+  checkTrue("5. budget.configured is true with a numeric baseBudgetUsd now that OPENAI_MONTHLY_BUDGET_USD=100 is set (Phase 6I.6.38A)", apiCosts.openAi.budget.configured === true && typeof (apiCosts.openAi.budget as any).baseBudgetUsd === "number");
 
   /* ==================== 6: System Health - real column-backed counts ==================== */
   const health = await getSystemHealth();

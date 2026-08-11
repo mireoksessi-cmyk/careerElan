@@ -5,19 +5,26 @@
   rate from OpenAI's own published pricing page as of `effectiveDate` -
   never guessed.
 
-  As of this phase, this codebase's own lib/config/aiModels.ts names
-  three models actually in use: "gpt-5.5", "gpt-4.1", "gpt-4.1-mini".
-  None of their exact per-token USD rates could be independently
-  verified against an authoritative, dated OpenAI pricing source at the
-  time this file was written, so all three are intentionally left
-  UNPRICED below rather than guessed (Part E: "Do NOT silently assume a
-  price" / "If pricing for an encountered model is unknown:
-  estimated_cost_usd = NULL and report OPENAI_PRICING_UNKNOWN"). Once an
-  operator confirms the real per-1M-token input/output rates from
-  https://openai.com/api/pricing/ (or the OpenAI dashboard), fill them
-  in below - cost estimation activates automatically for every call site
-  the next time this file is deployed, with no other code changes
-  needed anywhere.
+  This codebase's own lib/config/aiModels.ts (cross-checked against
+  every real call site in Phase 6I.6.38A Part A's audit) names exactly
+  three models actually in production use: "gpt-5.5", "gpt-4.1",
+  "gpt-4.1-mini". All three are now confirmed below (Phase 6I.6.38A
+  Operational Activation) against OpenAI's own first-party developer
+  docs at https://developers.openai.com/api/docs/pricing - fetched
+  twice independently (once asking for these 3 models directly, once
+  asking for the full raw pricing table) with identical, mutually
+  consistent numbers both times. No third-party aggregator site was
+  used for any of the three confirmed rates below.
+
+  gpt-5.5's confirmed rate is specifically the "<272K context" tier -
+  the table also lists a separate, higher rate for requests exceeding
+  272K input tokens, which this codebase's call sites (job postings,
+  resumes, cover letters - all well under that threshold) never
+  approach in practice; the <272K rate is therefore the one that
+  applies to every real gpt-5.5 call this app makes. This is disclosed
+  here rather than silently assumed, per this phase's own "never
+  guess" standard - if a future call site's context length grows large
+  enough to matter, this note is the flag to revisit it.
 */
 
 export type ModelPricing = {
@@ -33,11 +40,34 @@ export type ModelPricing = {
 };
 
 /*
-  Models with a confirmed rate. Empty today - see header comment. Add an
-  entry here (and nothing else, anywhere) once a real rate is confirmed
-  for a model this codebase actually calls.
+  Models with a confirmed rate, sourced from OpenAI's own developer
+  docs (see header comment). Add an entry here (and nothing else,
+  anywhere) once a real rate is confirmed for a model this codebase
+  actually calls.
 */
-const CONFIRMED_PRICING: ModelPricing[] = [];
+const CONFIRMED_PRICING: ModelPricing[] = [
+  {
+    model: "gpt-5.5",
+    inputPricePerMillion: 5.0,
+    outputPricePerMillion: 30.0,
+    effectiveDate: "2026-08-11",
+    sourceNote: "https://developers.openai.com/api/docs/pricing (Standard pricing table, <272K context tier)",
+  },
+  {
+    model: "gpt-4.1",
+    inputPricePerMillion: 2.0,
+    outputPricePerMillion: 8.0,
+    effectiveDate: "2026-08-11",
+    sourceNote: "https://developers.openai.com/api/docs/pricing (Standard pricing table)",
+  },
+  {
+    model: "gpt-4.1-mini",
+    inputPricePerMillion: 0.4,
+    outputPricePerMillion: 1.6,
+    effectiveDate: "2026-08-11",
+    sourceNote: "https://developers.openai.com/api/docs/pricing (Standard pricing table)",
+  },
+];
 
 const PRICING_BY_MODEL = new Map<string, ModelPricing>(CONFIRMED_PRICING.map((p) => [p.model, p]));
 

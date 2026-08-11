@@ -33,6 +33,7 @@ export type AdminPermission =
   | "admin.subscriptions.manage"
   | "admin.product_usage.read"
   | "admin.api_costs.read"
+  | "admin.api_costs.manage"
   | "admin.system_health.read"
   | "admin.alerts.read"
   | "admin.alerts.manage"
@@ -57,6 +58,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
     "admin.subscriptions.manage",
     "admin.product_usage.read",
     "admin.api_costs.read",
+    "admin.api_costs.manage",
     "admin.system_health.read",
     "admin.alerts.read",
     "admin.alerts.manage",
@@ -72,6 +74,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
     "admin.subscriptions.manage",
     "admin.product_usage.read",
     "admin.api_costs.read",
+    "admin.api_costs.manage",
     "admin.system_health.read",
     "admin.alerts.read",
     "admin.alerts.manage",

@@ -175,6 +175,37 @@ async function main() {
   check("R.5 unpriced model returns classification UNKNOWN_PRICING", priced.classification, "UNKNOWN_PRICING");
   check("R.5 unpriced model returns costUsd null (never a guessed number)", priced.costUsd, null);
 
+  /* ==================== Part R.5b: confirmed-price cost math (Operational Activation) ====================
+     Rates confirmed against https://developers.openai.com/api/docs/pricing
+     (OpenAI's own developer docs, fetched twice independently with
+     matching numbers - see lib/openai/pricing.ts's own header comment).
+     Exact arithmetic verified below, not just "is a number". */
+  const gpt55Cost = estimateCostUsd("gpt-5.5", 1000, 500);
+  check("R.5b gpt-5.5 classification is ESTIMATED_COST now that it's priced", gpt55Cost.classification, "ESTIMATED_COST");
+  check(
+    "R.5b gpt-5.5: 1000 input @ $5.00/1M + 500 output @ $30.00/1M = 0.005 + 0.015 = 0.02",
+    gpt55Cost.costUsd,
+    0.02
+  );
+
+  const gpt41Cost = estimateCostUsd("gpt-4.1", 10000, 2000);
+  check(
+    "R.5b gpt-4.1: 10000 input @ $2.00/1M + 2000 output @ $8.00/1M = 0.02 + 0.016 = 0.036",
+    gpt41Cost.costUsd,
+    0.036
+  );
+
+  const gpt41MiniCost = estimateCostUsd("gpt-4.1-mini", 50000, 10000);
+  check(
+    "R.5b gpt-4.1-mini: 50000 input @ $0.40/1M + 10000 output @ $1.60/1M = 0.02 + 0.016 = 0.036",
+    gpt41MiniCost.costUsd,
+    0.036
+  );
+
+  const gpt55ZeroCost = estimateCostUsd("gpt-5.5", 0, 0);
+  check("R.5b gpt-5.5 with 0/0 tokens costs exactly $0 (not null - pricing IS known, usage was just zero)", gpt55ZeroCost.costUsd, 0);
+  check("R.5b gpt-5.5 with 0/0 tokens is still ESTIMATED_COST, not UNKNOWN_PRICING", gpt55ZeroCost.classification, "ESTIMATED_COST");
+
   /* ==================== Part R.6: classifyOpenAiError ==================== */
   const rl = classifyOpenAiError(new OpenAI.RateLimitError(429, { error: { message: "rate limited" } }, "rate limited", new Headers()));
   check("R.6 RateLimitError -> httpStatusClass 429", rl.httpStatusClass, "429");
@@ -227,37 +258,56 @@ async function main() {
   const yearMonthA = currentUtcYearMonth(syntheticNowA);
   await resetAlertRow(yearMonthA);
 
-  const firstClaim = await claimBudgetAlertThreshold("warning", syntheticNowA);
+  const SYNTHETIC_EFFECTIVE_BUDGET = 100;
+
+  const firstClaim = await claimBudgetAlertThreshold("warning", SYNTHETIC_EFFECTIVE_BUDGET, syntheticNowA);
   checkTrue("S.2 first claim of a new threshold succeeds (true)", firstClaim === true);
-  const secondClaim = await claimBudgetAlertThreshold("warning", syntheticNowA);
-  checkTrue("S.2 second claim of the SAME threshold/month fails (dedup - exactly once per threshold)", secondClaim === false);
+  const secondClaim = await claimBudgetAlertThreshold("warning", SYNTHETIC_EFFECTIVE_BUDGET, syntheticNowA);
+  checkTrue("S.2 second claim of the SAME threshold/month at the SAME effective budget fails (dedup - exactly once per threshold per budget level)", secondClaim === false);
 
   // Concurrent-crossing safety: two simultaneous claims of a fresh threshold must yield exactly one true.
   const syntheticNowB = new Date("2099-02-15T12:00:00.000Z");
   const yearMonthB = currentUtcYearMonth(syntheticNowB);
   await resetAlertRow(yearMonthB);
   const [concurrentA, concurrentB] = await Promise.all([
-    claimBudgetAlertThreshold("critical", syntheticNowB),
-    claimBudgetAlertThreshold("critical", syntheticNowB),
+    claimBudgetAlertThreshold("critical", SYNTHETIC_EFFECTIVE_BUDGET, syntheticNowB),
+    claimBudgetAlertThreshold("critical", SYNTHETIC_EFFECTIVE_BUDGET, syntheticNowB),
   ]);
   const concurrentTrueCount = [concurrentA, concurrentB].filter(Boolean).length;
   check("S.2 concurrent claims of the same threshold: exactly one succeeds (database-safe/atomic)", concurrentTrueCount, 1);
 
   // Independent thresholds within the same month must each be claimable once.
-  const exceededClaim = await claimBudgetAlertThreshold("exceeded", syntheticNowA);
+  const exceededClaim = await claimBudgetAlertThreshold("exceeded", SYNTHETIC_EFFECTIVE_BUDGET, syntheticNowA);
   checkTrue("S.2 a DIFFERENT threshold (exceeded) in the same month as an already-claimed warning still succeeds", exceededClaim === true);
 
   // New-UTC-month reset: a threshold already claimed in month A is claimable again in month B.
-  const monthBWarningClaim = await claimBudgetAlertThreshold("warning", syntheticNowB);
+  const monthBWarningClaim = await claimBudgetAlertThreshold("warning", SYNTHETIC_EFFECTIVE_BUDGET, syntheticNowB);
   checkTrue("S.2 new-UTC-month reset: warning claimable again in a different month", monthBWarningClaim === true);
+
+  // Re-alert-after-recharge: a threshold already claimed at the old effective budget IS claimable
+  // again once a genuine recharge raises the effective budget (Part L design in lib/openai/budget.ts).
+  const rechargedClaim = await claimBudgetAlertThreshold("warning", SYNTHETIC_EFFECTIVE_BUDGET + 50, syntheticNowA);
+  checkTrue("S.2 re-claim of an already-claimed threshold succeeds once the effective budget has genuinely increased", rechargedClaim === true);
+  const rechargedClaimAgainSameLevel = await claimBudgetAlertThreshold("warning", SYNTHETIC_EFFECTIVE_BUDGET + 50, syntheticNowA);
+  checkTrue("S.2 re-claiming at the SAME (already-claimed) effective budget again fails - never spuriously reopens", rechargedClaimAgainSameLevel === false);
 
   await resetAlertRow(yearMonthA);
   await resetAlertRow(yearMonthB);
 
-  /* ==================== Part Q: privacy - no content fields ever persisted or returned ==================== */
+  /* ==================== Part Q: privacy - no content fields ever persisted or returned ====================
+     The 20260810190000 migration grants service_role only SELECT/
+     INSERT on this table (never DELETE/UPDATE) - matching openai_
+     usage_events' own append-only design (real telemetry rows are
+     never edited or removed after the fact). This test's synthetic
+     rows are therefore backdated into a far-future synthetic year
+     (2099) so they can never be cleaned up but also can never pollute
+     a real "today"/"this month" dashboard query - the same pattern
+     already used for the budget-alert-state rows above. */
+  const syntheticInsertTime = "2099-06-01T00:00:00.000Z";
   const { data: insertedRow, error: insertError } = await admin
     .from("openai_usage_events")
     .insert({
+      created_at: syntheticInsertTime,
       operation: "OTHER",
       model: "test-privacy-model",
       status: "success",
@@ -287,6 +337,7 @@ async function main() {
   const attemptedInjection = await admin
     .from("openai_usage_events")
     .insert({
+      created_at: syntheticInsertTime,
       operation: "OTHER",
       model: "test-privacy-model-2",
       status: "success",
@@ -311,8 +362,10 @@ async function main() {
   const strictLeaked = strictForbidden.filter((f) => serialized.toLowerCase().includes(f.replace("_", "")) || serialized.toLowerCase().includes(f));
   checkTrue("Q.5 getApiCostMetrics() output never contains prompt/resume/job/cover-letter/career-memory content markers", strictLeaked.length === 0, `found: ${strictLeaked.join(", ")}`);
 
-  await admin.from("openai_usage_events").delete().eq("request_id", "phase638a-privacy-test");
-  await admin.from("openai_usage_events").delete().eq("model", "test-privacy-model-2");
+  // No cleanup call here: service_role has no DELETE grant on this
+  // table (by design - see the comment above Q.1). The two rows this
+  // test seeded stay in the local DB permanently, backdated into 2099
+  // so they never surface in a real dashboard query.
 
   console.log(`\n=== ${pass} PASS / ${fail} FAIL ===`);
   process.exit(fail > 0 ? 1 : 0);

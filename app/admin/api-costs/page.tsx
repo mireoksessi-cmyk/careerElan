@@ -2,6 +2,8 @@ import { guardAdminPage } from "@/lib/admin/pageAuth";
 import AdminDenied from "@/components/admin/AdminDenied";
 import { getApiCostMetrics, type PeriodMetrics } from "@/lib/admin/queries/apiCosts";
 import { PageTitle, CardGrid, MetricCard, Section, Badge } from "@/components/admin/ui";
+import { RecordRechargeForm } from "@/components/admin/RecordRechargeForm";
+import { hasPermission } from "@/lib/admin/permissions";
 import type { BudgetStatus } from "@/lib/openai/budget";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +39,7 @@ export default async function ApiCostsPage() {
   const guard = await guardAdminPage("admin.api_costs.read");
   if (guard.denied) return <AdminDenied message={guard.message} />;
 
+  const canManageBudget = hasPermission(guard.ctx.role, "admin.api_costs.manage");
   const m = await getApiCostMetrics();
   const budget = m.openAi.budget;
 
@@ -62,23 +65,70 @@ export default async function ApiCostsPage() {
         </div>
       </Section>
 
-      <Section title="Monthly Budget">
+      <Section title="OpenAI Budget">
         {budget.configured ? (
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="flex items-center gap-3">
-              <Badge tone={BUDGET_BADGE_TONE[budget.status]}>{budget.status}</Badge>
-              <span className="text-sm text-slate-600">
-                {usd(budget.monthSpendUsd)} of {usd(budget.monthlyBudgetUsd)} ({budget.budgetUsedPercent}%)
-              </span>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex items-center gap-3">
+                <Badge tone={BUDGET_BADGE_TONE[budget.status]}>{budget.status}</Badge>
+                <span className="text-sm text-slate-600">
+                  {usd(budget.monthSpendUsd)} of {usd(budget.effectiveBudgetUsd)} effective budget ({budget.budgetUsedPercent}%)
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full ${budget.status === "NORMAL" ? "bg-emerald-500" : budget.status === "WARNING" ? "bg-amber-500" : "bg-red-500"}`}
+                  style={{ width: `${Math.min(100, budget.budgetUsedPercent)}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-slate-400">
+                Remaining capacity: {usd(budget.remainingBudgetUsd)}. Alerts fire once per threshold (80% / 90% / 100% of the effective budget) per calendar month via email - see docs for ADMIN_ALERT_EMAILS configuration.
+              </div>
             </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-              <div
-                className={`h-full ${budget.status === "NORMAL" ? "bg-emerald-500" : budget.status === "WARNING" ? "bg-amber-500" : "bg-red-500"}`}
-                style={{ width: `${Math.min(100, budget.budgetUsedPercent)}%` }}
-              />
-            </div>
-            <div className="mt-2 text-xs text-slate-400">
-              Remaining: {usd(budget.remainingBudgetUsd)}. Alerts fire once per threshold (80% / 90% / 100%) per calendar month via email - see docs for ADMIN_ALERT_EMAILS configuration.
+
+            <CardGrid>
+              <MetricCard label="Base Monthly Budget" metric={{ value: budget.baseBudgetUsd, classification: "EXACT_INTERNAL_DATA" }} format={(v) => usd(Number(v))} />
+              <MetricCard label="Manual Recharges This Month" metric={{ value: budget.rechargesUsd, classification: "EXACT_INTERNAL_DATA" }} format={(v) => `+${usd(Number(v))}`} />
+              <MetricCard label="Effective Monthly Budget" metric={{ value: budget.effectiveBudgetUsd, classification: "EXACT_INTERNAL_DATA" }} format={(v) => usd(Number(v))} />
+              <MetricCard label="Estimated OpenAI Spend This Month" metric={{ value: budget.monthSpendUsd, classification: "DERIVED_ESTIMATE" }} format={(v) => usd(Number(v))} />
+            </CardGrid>
+
+            {canManageBudget ? (
+              <RecordRechargeForm />
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-400">
+                Recording a manual recharge requires the admin.api_costs.manage permission (OWNER/ADMIN).
+              </div>
+            )}
+
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recharge History</h3>
+              {m.openAi.rechargeHistory.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-400">No manual recharges recorded yet.</div>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Date</th>
+                        <th className="px-3 py-2">Amount</th>
+                        <th className="px-3 py-2">Admin</th>
+                        <th className="px-3 py-2">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {m.openAi.rechargeHistory.map((r) => (
+                        <tr key={r.id} className="border-b border-slate-100 last:border-0">
+                          <td className="px-3 py-2">{new Date(r.createdAt).toLocaleString()}</td>
+                          <td className="px-3 py-2">{usd(r.amountUsd)}</td>
+                          <td className="px-3 py-2 text-slate-500">{r.actorEmail ?? "—"}</td>
+                          <td className="px-3 py-2 text-slate-500">{r.note ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -88,8 +138,8 @@ export default async function ApiCostsPage() {
         )}
       </Section>
 
-      <Section title="OpenAI Remaining Capacity">
-        <MetricCard label="Balance / Remaining Capacity" metric={m.openAi.remainingCapacity} />
+      <Section title="OpenAI Provider Balance">
+        <MetricCard label="Provider Balance (actual OpenAI account balance)" metric={m.openAi.remainingCapacity} />
       </Section>
 
       {m.openAi.unknownPricingModels.value.length > 0 && (

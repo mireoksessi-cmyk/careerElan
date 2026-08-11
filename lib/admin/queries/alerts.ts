@@ -151,7 +151,7 @@ export async function getAlerts(): Promise<AdminAlert[]> {
           : budget.status === "CRITICAL"
             ? "OpenAI monthly budget critical (90%+)"
             : "OpenAI monthly budget warning (80%+)",
-      detail: `${budget.budgetUsedPercent}% of the $${budget.monthlyBudgetUsd} monthly budget used ($${budget.monthSpendUsd.toFixed(2)} spent).`,
+      detail: `${budget.budgetUsedPercent}% of the $${budget.effectiveBudgetUsd} effective monthly budget used ($${budget.monthSpendUsd.toFixed(2)} spent).`,
       status: "OPEN",
     });
   }
