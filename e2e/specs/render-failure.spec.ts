@@ -131,9 +131,9 @@ test.describe("Part K: Storage write failure injection", () => {
     await cleanupSyntheticE2eUser(admin, user.userId);
   });
 
-  test("K1. a Storage write failure does not fail generation, persists no document rows, and on-demand downloads still work", async ({ page }) => {
+  test("K1. a Storage write failure prevents a false success state - generation safely fails/falls back, persists no document rows, no fabricated ids, no leaked error detail", async ({ page }) => {
     test.skip(!process.env.E2E_FAULT_INJECT_STORAGE_WRITE, "run with E2E_FAULT_INJECT_STORAGE_WRITE=both set");
-    test.setTimeout(150_000);
+    test.setTimeout(180_000);
 
     await loginViaUi(page, user);
     await pasteAndAnalyze(page, E2E_SUPPORTED_JOB_POSTING);
@@ -142,41 +142,76 @@ test.describe("Part K: Storage write failure injection", () => {
     const generateButton = page.getByRole("button", { name: GENERATE_BUTTON_NAME });
     await expect(generateButton).toBeEnabled({ timeout: 10_000 });
     await generateButton.click();
+    await expect(generateButton).toBeDisabled({ timeout: 5_000 });
 
     /*
-      uploadGeneratedDocument() returning {uploaded:false} does NOT throw
-      (canonicalDocumentStorageService.ts) - renderCanonicalPackage()
-      just records documentStorage={persisted:false} and the whole
-      generation still completes normally, so the UI's own success state
-      is the CORRECT outcome here, not a bug to route around.
+      Phase 6I.6.39 (consistency fix, superseding this test's own prior
+      expectation) - renderCanonicalPackage() now throws the SAME
+      GeneratedDocumentError it already throws for the sibling "RPC
+      itself failed" case whenever a tailored resume exists but required
+      document persistence did not succeed (storage disabled, or - as
+      this fault-injection test forces once the storage flag is on -
+      the upload itself failing). classifyForFallback() correctly
+      classifies this as fallback-eligible (generated_document_failure) -
+      but this repo's actual current .env.local does NOT set
+      CANONICAL_LEGACY_FALLBACK_ENABLED=true (verified live: this test
+      previously failed here waiting for Part L's generic legacy-fallback
+      failure text, because that text is only reached once a fallback
+      attempt runs), so runCanonicalWithFallbackDecision()'s own
+      `if (!isCanonicalLegacyFallbackEnabled()) throw error;` branch
+      rethrows immediately instead of engaging fallback - the row never
+      leaves generation_engine='canonical'. The rethrow is caught by
+      canonicalGenerationWorker.ts's outer catch, which marks the row
+      failed with its own fixed p_error_summary literal, verified live
+      against the real rendered page: "Canonical generation failed and
+      could not be completed." A false "Your package is ready" success
+      state is no longer produced either way - that is the one
+      invariant this test exists to prove.
     */
-    await expect(page.getByText("✅ Your package is ready")).toBeVisible({ timeout: 120_000 });
+    const FAILURE_MESSAGE = "Canonical generation failed and could not be completed.";
+    await expect(page.getByText(FAILURE_MESSAGE).first()).toBeVisible({ timeout: 170_000 });
+    await expect(page.getByText("✅ Your package is ready")).not.toBeVisible();
 
-    /*
-      No UI surface anywhere in this app claims a persistence/"fully
-      downloadable" status for generated documents - verified by
-      searching app/ for "documentStorage"/"persisted"/"downloadable":
-      only app/api/applications/[id]/status/route.ts computes a
-      documentStorage.persisted boolean, and it is never rendered as
-      text anywhere in app/paste-job/page.tsx, components/
-      canonicalGeneratePackage/CanonicalTemplateSelector.tsx, or
-      app/job-tracker/*. There is therefore no false on-screen claim for
-      this test to catch; the real, checkable guarantee is the DB-level
-      one asserted below - generation_status stays "succeeded" while no
-      document id/row is fabricated for bytes that were never actually
-      written to Storage.
-    */
+    // The button must return to its normal idle, retryable state - never stay stuck disabled/"Generating...".
+    await expect(generateButton).toBeEnabled({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "Generate Full Package ✨" })).toBeVisible();
+
+    const bodyText = await page.locator("body").innerText();
+    expect(bodyText).not.toMatch(/at Object\.|TypeError|node_modules|\.ts:\d+:\d+/);
+    // The raw injected-fault message/internal error class name must never leak to the client.
+    expect(bodyText).not.toMatch(/E2E_FAULT_INJECT_STORAGE_WRITE|E2E fault injection|REAL_OPENAI_CALL_BLOCKED|GeneratedDocumentError|simulated upload failure/);
+
     const admin = adminClient();
     const { data: apps } = await admin
       .from("applications")
-      .select("id, generation_status, generation_engine, generated_pdf_document_id, generated_docx_document_id")
+      .select(
+        "id, generation_status, generation_engine, generation_error_code, fallback_used, fallback_reason, generated_pdf_document_id, generated_docx_document_id"
+      )
       .eq("user_id", user.userId)
       .eq("job_title", E2E_JOB_TITLE);
 
     expect(apps).toHaveLength(1);
     const app = apps![0];
-    expect(app.generation_status).toBe("succeeded");
+    expect(app.generation_status).toBe("failed");
+    expect(app.generation_error_code).toBe("generated_document_failed");
+    /*
+      Fallback did NOT engage (CANONICAL_LEGACY_FALLBACK_ENABLED is off
+      in this environment - see the comment above), so
+      mark_canonical_fallback/release_canonical_claim_for_legacy_fallback
+      were never called and the row never left the canonical engine -
+      the checkable proof the classification happened (fallback-eligible)
+      is generation_error_code itself, set from classifyForFallback()'s
+      SAME error-class switch (GeneratedDocumentError -> generated_
+      document_failed), not a fallback_used flag this run path never
+      touches.
+    */
+    expect(app.fallback_used).toBeFalsy();
+    expect(app.fallback_reason).toBeNull();
     expect(app.generation_engine).toBe("canonical");
+    // No canonical document was ever produced or persisted - the canonical
+    // attempt never got past the (now-thrown) persistence check, and these
+    // ids are written solely by complete_canonical_generation, which this
+    // row's canonical attempt never reached.
     expect(app.generated_pdf_document_id).toBeNull();
     expect(app.generated_docx_document_id).toBeNull();
 
@@ -186,40 +221,13 @@ test.describe("Part K: Storage write failure injection", () => {
       .eq("application_id", app.id);
     expect(docs ?? []).toHaveLength(0);
 
-    /*
-      The Resume tab's Download PDF/DOCX buttons (rendered by
-      components/canonicalGeneratePackage/CanonicalTemplateSelector.tsx,
-      the ONLY resume-preview surface for a canonical-engine application
-      - see app/paste-job/page.tsx's own resume-tab branch, which renders
-      `null` for its legacy download buttons whenever
-      packageData.generationEngine === "canonical") call
-      /api/internal/canonical-generate-package/preview, which re-renders
-      from the runtime on every request and never reads the persisted
-      generated_resume_documents row - expected to keep working even
-      though nothing was persisted above.
-    */
-    const downloadPdfButton = page.getByRole("button", { name: "Download PDF" }).first();
-    await expect(downloadPdfButton).toBeEnabled({ timeout: 20_000 });
-    const [pdfDownload] = await Promise.all([
-      page.waitForEvent("download"),
-      downloadPdfButton.click(),
-    ]);
-    const pdfPath = await pdfDownload.path();
-    expect(pdfPath).toBeTruthy();
-    const pdfBytes = await readFile(pdfPath!);
-    expect(pdfBytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
-
-    const downloadDocxButton = page.getByRole("button", { name: "Download DOCX" }).first();
-    await expect(downloadDocxButton).toBeEnabled({ timeout: 20_000 });
-    const [docxDownload] = await Promise.all([
-      page.waitForEvent("download"),
-      downloadDocxButton.click(),
-    ]);
-    const docxPath = await docxDownload.path();
-    expect(docxPath).toBeTruthy();
-    const docxBytes = await readFile(docxPath!);
-    // OOXML files are real ZIP archives - "PK\x03\x04" is the ZIP local-file-header magic.
-    expect(docxBytes.subarray(0, 4).toString("latin1")).toBe("PK\x03\x04");
+    // No duplicate row was created for this attempt.
+    const { data: allAppsForJob } = await admin
+      .from("applications")
+      .select("id")
+      .eq("user_id", user.userId)
+      .eq("job_title", E2E_JOB_TITLE);
+    expect(allAppsForJob).toHaveLength(1);
   });
 });
 

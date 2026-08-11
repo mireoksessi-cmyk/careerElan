@@ -146,6 +146,29 @@ export async function renderCanonicalPackage(client: SupabaseClient, input: Rend
       : { domain: "storage", event: "document_persist_skipped", applicationId: input.applicationId, reason: documentStorage.reason }
   );
 
+  /*
+    Phase 6I.6.39 (consistency fix) - a tailored resume exists, so
+    document persistence was actually required for this generation, but
+    it did not succeed (storage disabled or the upload itself failed).
+    Silently returning here previously let generateCanonicalPackage()
+    resolve normally, which let canonicalGenerationWorker.ts mark the
+    row generation_status='succeeded' with selected_template_id/
+    tailored_resume_id left null - a real consistency bug found by
+    investigation (generation reported success while its own required
+    persistence was silently skipped). Throwing the SAME
+    GeneratedDocumentError this function already throws for the
+    sibling "RPC itself failed" case below routes this through the
+    existing, unmodified fallback/hard-fail machinery
+    (classifyForFallback -> generated_document_failure, fallback-eligible)
+    instead of adding a new status path. "no_tailored_resume" is
+    excluded on purpose - that is the legitimate case where there was
+    never anything to persist (input.tailoredResumeId is falsy, so this
+    branch is unreachable for it).
+  */
+  if (input.tailoredResumeId && !documentStorage.persisted) {
+    throw new GeneratedDocumentError(`document persistence was required for this tailored resume but did not succeed (${documentStorage.reason}).`);
+  }
+
   return {
     html: htmlResult.html,
     pageCount: htmlResult.pageCount,

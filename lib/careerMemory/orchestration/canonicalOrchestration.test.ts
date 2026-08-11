@@ -24,7 +24,7 @@ import { classifyForFallback, runCanonicalWithFallbackDecision } from "./canonic
 import { validateAiTailoringResponse } from "./canonicalTailoringService";
 import { buildCanonicalTailoringPrompt } from "./canonicalTailoringPrompt";
 import { buildGeneratedDocumentStoragePath, uploadGeneratedDocument, GENERATED_DOCUMENTS_BUCKET } from "./canonicalDocumentStorageService";
-import { resolveCanonicalTemplateId } from "./canonicalRenderService";
+import { resolveCanonicalTemplateId, renderCanonicalPackage } from "./canonicalRenderService";
 import {
   AuthenticationRequiredError,
   AuthorizationError,
@@ -1033,6 +1033,85 @@ async function main() {
     const third = classifyForFallback(sameInput);
     check("classifyForFallback repeated-call idempotency: 3 identical calls with the same error instance return the identical result each time (1st vs 3rd)", third, first);
     check("classifyForFallback repeated-call idempotency: 2nd call also matches", second, first);
+  }
+
+  // ==================== AH. renderCanonicalPackage - generation must not silently succeed when a tailored resume's required persistence is skipped/failed (Phase 6I.6.39 regression) ====================
+  // Investigation finding: generateCanonicalPackage() -> renderCanonicalPackage()
+  // previously returned normally (documentStorage.persisted=false) whenever a
+  // tailored resume existed but Storage upload was disabled or failed, which let
+  // canonicalGenerationWorker.ts mark generation_status='succeeded' while
+  // selected_template_id/tailored_resume_id stayed null. The fix makes this
+  // function throw the SAME GeneratedDocumentError it already throws for the
+  // sibling "RPC failed" case, routing through the existing fallback/hard-fail
+  // machinery instead of a new status path. These 3 cases are the exact
+  // contract the fix must uphold.
+  {
+    const runtime = buildFixtureRuntime();
+    const baseInput = {
+      userId: "u-ah",
+      applicationId: "app-ah",
+      runtime,
+      useTailored: true,
+      templateId: "professional-ats",
+      paperSize: "letter" as const,
+      density: "comfortable" as const,
+      locale: "en",
+      canonicalProfileId: "profile-ah",
+      canonicalResumeVersionId: "version-ah",
+      generatedAt: new Date(0).toISOString(),
+    };
+
+    // Case A: tailored resume + persistence genuinely succeeds -> worker may mark succeeded (no throw).
+    await withEnvAsync("CANONICAL_DOCUMENT_STORAGE_ENABLED", "true", async () => {
+      const successClient = {
+        storage: { from: () => ({ upload: async () => ({ error: null }) }) },
+        rpc: async () => ({ data: { status: "success", pdfDocumentId: "pdf-doc-ah", docxDocumentId: "docx-doc-ah" }, error: null }),
+      } as never;
+      const result = await renderCanonicalPackage(successClient, { ...baseInput, tailoredResumeId: "tailored-ah" });
+      check(
+        "renderCanonicalPackage: tailored resume + persistence success -> documentStorage.persisted=true, no throw",
+        result.documentStorage,
+        { persisted: true, pdfDocumentId: "pdf-doc-ah", docxDocumentId: "docx-doc-ah" }
+      );
+    });
+
+    // Case B: tailored resume + storage disabled -> MUST NOT silently succeed; throws the existing GeneratedDocumentError (fallback-eligible).
+    await withEnvAsync("CANONICAL_DOCUMENT_STORAGE_ENABLED", undefined, async () => {
+      try {
+        await renderCanonicalPackage({} as never, { ...baseInput, tailoredResumeId: "tailored-ah" });
+        check("renderCanonicalPackage: tailored resume + storage disabled -> throws instead of silently succeeding", "did not throw", "GeneratedDocumentError thrown");
+      } catch (e) {
+        checkTrue("renderCanonicalPackage: tailored resume + storage disabled -> throws instead of silently succeeding", e instanceof GeneratedDocumentError);
+        checkTrue(
+          "renderCanonicalPackage: tailored resume + storage disabled -> is classified fallback-eligible by the existing, unmodified classifier",
+          classifyForFallback(e).shouldFallback && classifyForFallback(e).reason === "generated_document_failure"
+        );
+      }
+    });
+
+    // Case B2: tailored resume + storage enabled but the upload itself genuinely fails -> same throw, same fallback-eligible category.
+    await withEnvAsync("CANONICAL_DOCUMENT_STORAGE_ENABLED", "true", async () => {
+      const failingUploadClient = {
+        storage: { from: () => ({ upload: async () => ({ error: { message: "simulated upload failure" } } as never) }) },
+        rpc: async () => ({ data: null, error: null }),
+      } as never;
+      try {
+        await renderCanonicalPackage(failingUploadClient, { ...baseInput, tailoredResumeId: "tailored-ah" });
+        check("renderCanonicalPackage: tailored resume + upload fails -> throws instead of silently succeeding", "did not throw", "GeneratedDocumentError thrown");
+      } catch (e) {
+        checkTrue("renderCanonicalPackage: tailored resume + upload fails -> throws instead of silently succeeding", e instanceof GeneratedDocumentError);
+      }
+    });
+
+    // Case C: no tailored resume at all -> legitimate "nothing to persist" state, preserved unchanged (no throw).
+    await withEnvAsync("CANONICAL_DOCUMENT_STORAGE_ENABLED", "true", async () => {
+      const result = await renderCanonicalPackage({} as never, { ...baseInput, tailoredResumeId: null });
+      check(
+        "renderCanonicalPackage: no tailored resume -> legitimate no-op persistence state preserved, no throw",
+        result.documentStorage,
+        { persisted: false, reason: "no_tailored_resume" }
+      );
+    });
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
