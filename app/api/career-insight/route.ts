@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit } from "@/lib/security/rateLimiter";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eCareerInsightFakeResult } from "@/lib/testing/e2eFakeResponses";
+import { withOpenAiTelemetry } from "@/lib/openai/telemetry";
 
 const client = wrapOpenAiClientForE2eSafety(
   new OpenAI({
@@ -295,12 +296,15 @@ export async function POST(req: Request) {
       );
     }
 
+    const careerInsightModel =
+      process.env.OPENAI_PACKAGE_MODEL || "gpt-5.5";
+
     const response =
-      await client.responses.create({
-        model:
-          process.env
-            .OPENAI_PACKAGE_MODEL ||
-          "gpt-5.5",
+      await withOpenAiTelemetry(
+        { operation: "CAREER_INSIGHT", model: careerInsightModel, retryCount: 0, userId: user.id },
+        () =>
+          client.responses.create({
+        model: careerInsightModel,
 
         input: `
 You are Career Élan's Canadian recruiter, ATS specialist, and job-application analyst.
@@ -577,7 +581,8 @@ SAVED COVER LETTER — SUPPORTING CONTEXT ONLY
 
 ${coverLetter}
 `,
-      });
+      })
+      );
 
     const rawInsight =
       extractJson(

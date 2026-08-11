@@ -8,6 +8,7 @@ import {
 } from "@/lib/cache/contentHash";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eRecommendedJobsFakeResult } from "@/lib/testing/e2eFakeResponses";
+import { withOpenAiTelemetry } from "@/lib/openai/telemetry";
 
 const client = wrapOpenAiClientForE2eSafety(
   new OpenAI({
@@ -388,7 +389,10 @@ export async function POST(req: Request) {
 
     try {
       response =
-        await client.responses.create({
+        await withOpenAiTelemetry(
+          { operation: "RECOMMEND_JOBS", model: "gpt-5.5", retryCount: 0, userId: user.id },
+          () =>
+            client.responses.create({
           model: "gpt-5.5",
 
           input: `
@@ -532,7 +536,8 @@ Career Memory:
 
 ${JSON.stringify(careerMemory)}
 `,
-        });
+        })
+        );
     } catch (openAiError) {
       console.error(
         "Recommended jobs OpenAI error:",

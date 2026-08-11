@@ -14,6 +14,15 @@ export const ALERT_THRESHOLDS = {
   highFailureCount15m: 5,
   highFailureRate: 0.3, // 30%
   minAttemptsForRateAlert: 10,
+
+  // Phase 6I.6.38A Part O - OpenAI call-level spikes, computed from
+  // openai_usage_events (independent of the applications-table-based
+  // Generate Package thresholds above, since these cover every
+  // operation, not just Generate Package).
+  openAiRateLimitSpike15m: 5, // 429 responses in a 15-minute window
+  openAiTimeoutSpike15m: 5, // timeout responses in a 15-minute window
+  openAiFailureRate15m: 0.3, // 30%
+  minOpenAiCallsForRateAlert: 10,
 };
 
 export const BUDGET_THRESHOLDS_USD = {

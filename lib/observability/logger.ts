@@ -133,6 +133,18 @@ export type StorageEvent =
 export type ApiLatencyEvent = { domain: "api_latency"; route: string; status: number; latencyMs: number; outcome: "success" | "error" };
 
 /*
+  Phase 6I.6.38A - OpenAI monthly budget threshold-crossing events. Fired
+  by lib/openai/budgetAlerts.ts at most once per threshold per UTC month
+  (the openai_budget_alert_state table is the source of truth for that
+  dedup, not this log line - this is purely an observability record of
+  what already happened). Only safe budget figures, never user data.
+*/
+export type OpenAiBudgetEvent =
+  | { domain: "openai_budget"; event: "warning_80"; budgetUsedPercent: number; monthSpendUsd: number; monthlyBudgetUsd: number; emailSent: boolean }
+  | { domain: "openai_budget"; event: "critical_90"; budgetUsedPercent: number; monthSpendUsd: number; monthlyBudgetUsd: number; emailSent: boolean }
+  | { domain: "openai_budget"; event: "exceeded_100"; budgetUsedPercent: number; monthSpendUsd: number; monthlyBudgetUsd: number; emailSent: boolean };
+
+/*
   Phase 6I.6.37 - admin console events. actorUserId is always a UUID,
   never an email - matches this module's own PII-safety convention
   (see PII_DENYLIST_KEYS above) of only ever logging safe identifiers.
@@ -154,7 +166,8 @@ export type OperationalEvent =
   | RenderEvent
   | StorageEvent
   | ApiLatencyEvent
-  | AdminEvent;
+  | AdminEvent
+  | OpenAiBudgetEvent;
 
 export function logOperationalEvent(event: OperationalEvent & { metadata?: Record<string, unknown> }): void {
   const { metadata, ...rest } = event;

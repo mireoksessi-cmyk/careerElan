@@ -39,6 +39,7 @@ import { normalizePackageAnalysis, includesLoose, shouldRetryOpenAiError, type P
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../../testing/e2eAiIsolation";
 import { buildE2eCanonicalTailoringResponseText } from "../../testing/e2eFakeResponses";
 import { logOperationalEvent, elapsedMs } from "../../observability/logger";
+import { withOpenAiTelemetry } from "../../openai/telemetry";
 
 const client = wrapOpenAiClientForE2eSafety(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
 const OPENAI_CALL_TIMEOUT_MS = 60_000;
@@ -191,7 +192,7 @@ export function toPackageAnalysisInput(raw: CanonicalAnalysisRaw, groundedKeyCha
   same MAX_TAILORING_ATTEMPTS=2 - safe for the identical quota-timing
   reason documented on shouldRetryOpenAiError() itself.
 */
-async function callTailoringOpenAi(promptText: string): Promise<string> {
+async function callTailoringOpenAi(promptText: string, applicationId?: string, userId?: string): Promise<string> {
   /*
     Phase 6I.6.35 - E2E AI isolation: return a deterministic synthetic
     tailoring response instead of ever calling client.responses.create()
@@ -208,7 +209,10 @@ async function callTailoringOpenAi(promptText: string): Promise<string> {
     const startedAt = Date.now();
     logOperationalEvent({ domain: "openai", event: "call_started", route, model, attempt });
     try {
-      const response = await client.responses.create({ model, input: promptText }, { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 });
+      const response = await withOpenAiTelemetry(
+        { operation: "GENERATE_PACKAGE", model, retryCount: attempt - 1, applicationId, userId },
+        () => client.responses.create({ model, input: promptText }, { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 })
+      );
       logOperationalEvent({ domain: "openai", event: "call_succeeded", route, model, attempt, latencyMs: elapsedMs(startedAt) });
       return response.output_text;
     } catch (error) {
@@ -297,7 +301,7 @@ export async function generateCanonicalPackage(client_: SupabaseClient, input: C
 
   let validated: ReturnType<typeof validateAiTailoringResponse> | null = null;
   for (let attempt = 1; attempt <= MAX_TAILORING_ATTEMPTS; attempt++) {
-    const outputText = await callTailoringOpenAi(prompt);
+    const outputText = await callTailoringOpenAi(prompt, input.applicationId, input.userId);
     let raw: unknown;
     try {
       raw = extractJsonLoose(outputText);

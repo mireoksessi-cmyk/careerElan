@@ -118,14 +118,18 @@ async function main() {
   checkTrue("4. every non-first funnel step's pctOfRegistered is between 0 and 100", funnel.funnel.every((s) => s.pctOfRegistered >= 0 && s.pctOfRegistered <= 100));
   checkTrue("4. generateUsageBuckets sums to <= total registered users (0+1+2+3plus can't exceed population)", funnel.generateUsageBuckets.reduce((a, b) => a + b.count, 0) <= funnel.funnel[0].count);
 
-  /* ==================== 5: AI/API Costs - honest classification, never fabricated ==================== */
+  /* ==================== 5: AI/API Costs - honest classification, never fabricated ====================
+     Phase 6I.6.38A replaced the "no persisted call-log table" placeholders
+     with real openai_usage_events telemetry - re-asserted below against
+     the new shape (lib/admin/queries/apiCosts.ts, lib/openai/*). */
   const apiCosts = await getApiCostMetrics();
-  check("5. openAi.today.tokens is NOT_AVAILABLE (no persisted call-log table exists)", apiCosts.openAi.today.tokens.classification, "NOT_AVAILABLE");
-  check("5. openAi.today.cost is NOT_AVAILABLE", apiCosts.openAi.today.cost.classification, "NOT_AVAILABLE");
-  check("5. openAi.today.generatePackageAttempts is DERIVED_ESTIMATE (a proxy, not a raw call count)", apiCosts.openAi.today.generatePackageAttempts.classification, "DERIVED_ESTIMATE");
+  check("5. openAi.today.calls is EXACT_INTERNAL_DATA (real telemetry table now exists)", apiCosts.openAi.today.calls.classification, "EXACT_INTERNAL_DATA");
+  check("5. openAi.today.cost is DERIVED_ESTIMATE (local token x price calc, never provider billing)", apiCosts.openAi.today.cost.classification, "DERIVED_ESTIMATE");
   check("5. openAi.remainingCapacity is MANUAL_PROVIDER_DASHBOARD_ONLY (no OPENAI_ADMIN_KEY configured)", apiCosts.openAi.remainingCapacity.classification, "MANUAL_PROVIDER_DASHBOARD_ONLY");
-  checkTrue("5. every perOperation row's calls/successRate is NOT_AVAILABLE (no per-operation call log)", apiCosts.openAi.perOperation.every((op) => op.calls.classification === "NOT_AVAILABLE"));
+  checkTrue("5. every perOperation row exists for the 9-value closed taxonomy", apiCosts.openAi.perOperation.length === 9);
+  checkTrue("5. perOperation with zero calls has successRatePercent null (never a fabricated 0%)", apiCosts.openAi.perOperation.every((op) => op.calls > 0 || op.successRatePercent === null));
   check("5. sentry.configured is false (Phase 6I.6.36's own confirmed finding - no DSN exists)", apiCosts.sentry.configured, false);
+  checkTrue("5. budget.configured is false when OPENAI_MONTHLY_BUDGET_USD is unset in this local run", apiCosts.openAi.budget.configured === false || typeof (apiCosts.openAi.budget as any).monthlyBudgetUsd === "number");
 
   /* ==================== 6: System Health - real column-backed counts ==================== */
   const health = await getSystemHealth();

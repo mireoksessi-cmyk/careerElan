@@ -72,6 +72,7 @@ import { retryOverflowingLeaves } from "../documentPreservation/treeExecution/tr
   calling real OpenAI - a safe, loud failure, not a gap.
 */
 import { wrapOpenAiClientForE2eSafety } from "../testing/e2eAiIsolation";
+import { withOpenAiTelemetry } from "../openai/telemetry";
 
 /*
   Deliberately relative imports throughout this file (and everything it
@@ -268,12 +269,16 @@ async function callOpenAiWithRetry(
   for (let attempt = 1; attempt <= MAX_OPENAI_ATTEMPTS; attempt++) {
     const attemptStartedAt = Date.now();
     try {
-      aiResponse = await client.responses.create(
-        {
-          model: resolvedModel,
-          input: promptText,
-        },
-        { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+      aiResponse = await withOpenAiTelemetry(
+        { operation: "GENERATE_PACKAGE", model: resolvedModel, retryCount: attempt - 1, applicationId },
+        () =>
+          client.responses.create(
+            {
+              model: resolvedModel,
+              input: promptText,
+            },
+            { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          )
       );
       console.log(
         JSON.stringify({

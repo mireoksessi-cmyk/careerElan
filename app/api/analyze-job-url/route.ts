@@ -9,6 +9,7 @@ import { validateSpecificJobPosting } from "@/lib/jobPosting/postingValidation";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eJobAnalysisUrlResponseText } from "@/lib/testing/e2eFakeResponses";
 import { logOperationalEvent, elapsedMs } from "@/lib/observability/logger";
+import { withOpenAiTelemetry } from "@/lib/openai/telemetry";
 
 const client = wrapOpenAiClientForE2eSafety(
   new OpenAI({
@@ -454,7 +455,10 @@ export async function POST(req: Request) {
     */
     const aiOutputText = isE2eAiModeActive()
       ? buildE2eJobAnalysisUrlResponseText()
-      : (await client.responses.create({
+      : (await withOpenAiTelemetry(
+          { operation: "ANALYZE_JOB_URL", model: JOB_ANALYSIS_MODEL, retryCount: 0, userId, requestId },
+          () =>
+            client.responses.create({
       model: JOB_ANALYSIS_MODEL,
       input: `
 Analyze this job posting page text and return ONLY valid JSON.
@@ -764,7 +768,8 @@ ${jobText}
 
 Remember: Return ONLY valid JSON.
       `,
-    })).output_text;
+    })
+        )).output_text;
     console.timeEnd("4 openai analyze");
 
     console.time("5 parse json");

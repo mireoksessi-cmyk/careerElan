@@ -9,6 +9,7 @@ import { classifyCanadaJobScope } from "@/lib/jobPosting/canadaScopeClassifier";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eJobAnalysisResponseText } from "@/lib/testing/e2eFakeResponses";
 import { logOperationalEvent, elapsedMs } from "@/lib/observability/logger";
+import { withOpenAiTelemetry } from "@/lib/openai/telemetry";
 
 /*
   Phase 6I.6.34 - this was the one OpenAI call site in the codebase
@@ -185,7 +186,10 @@ export async function POST(req: Request) {
     const responseOutputText = isE2eAiModeActive()
       ? buildE2eJobAnalysisResponseText()
       : (
-          await client.responses.create({
+          await withOpenAiTelemetry(
+            { operation: "ANALYZE_JOB", model: JOB_ANALYSIS_MODEL, retryCount: 0, userId, requestId },
+            () =>
+              client.responses.create({
       model: JOB_ANALYSIS_MODEL,
       input: `
 Analyze this job posting and return ONLY valid JSON.
@@ -238,6 +242,7 @@ Job posting:
 ${jobText}
       `,
           }, { timeout: JOB_ANALYSIS_TIMEOUT_MS, maxRetries: 0 })
+          )
         ).output_text;
 
     const json =

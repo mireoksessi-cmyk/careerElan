@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase-server";
 import { hashContent } from "@/lib/cache/contentHash";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "@/lib/testing/e2eAiIsolation";
 import { buildE2eAnalyticsSummaryFakeText } from "@/lib/testing/e2eFakeResponses";
+import { withOpenAiTelemetry } from "@/lib/openai/telemetry";
 
 const client = wrapOpenAiClientForE2eSafety(
   new OpenAI({
@@ -261,7 +262,10 @@ export async function POST(req: Request) {
     let response;
 
     try {
-      response = await client.responses.create({
+      response = await withOpenAiTelemetry(
+        { operation: "ANALYTICS_SUMMARY", model: "gpt-5.5", retryCount: 0, userId: user.id },
+        () =>
+          client.responses.create({
         model: "gpt-5.5",
 
         input: `
@@ -300,7 +304,8 @@ Instructions
 - Consider the user's application volume, interview rate, and offer rate.
 - Sound like a professional Canadian career coach.
 `,
-      });
+      })
+      );
     } catch (openAiError) {
       console.error(
         "Analytics OpenAI error:",

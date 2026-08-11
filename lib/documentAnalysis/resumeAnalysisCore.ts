@@ -6,6 +6,7 @@ import { classifyGenerationError } from "./shared";
 import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../testing/e2eAiIsolation";
 import { buildE2eResumeAnalysisFields } from "../testing/e2eFakeResponses";
 import { logOperationalEvent, elapsedMs } from "../observability/logger";
+import { withOpenAiTelemetry } from "../openai/telemetry";
 import {
   RESUME_ALLOWED_EXTENSIONS,
   UploadValidationError,
@@ -396,14 +397,17 @@ export async function runResumeAnalysis(resumeId: string): Promise<void> {
 
     await setStage(resumeId, userId, "reconstructing_text");
 
-    const cleanedResume = await client.chat.completions.create(
-      {
-        model: RESUME_PARSE_DRAFT_MODEL,
-        temperature: 0,
-        messages: [
+    const cleanedResume = await withOpenAiTelemetry(
+      { operation: "RESUME_ANALYSIS", model: RESUME_PARSE_DRAFT_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
           {
-            role: "system",
-            content: `
+            model: RESUME_PARSE_DRAFT_MODEL,
+            temperature: 0,
+            messages: [
+              {
+                role: "system",
+                content: `
 You are an expert resume reconstruction engine.
 
 Your job is NOT to summarize.
@@ -447,13 +451,14 @@ Dates
 Output only the reconstructed resume.
       `,
           },
-          {
-            role: "user",
-            content: resumeText,
+              {
+                role: "user",
+                content: resumeText,
+              },
+            ],
           },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     resumeText = cleanedResume.choices[0].message.content || resumeText;
@@ -590,19 +595,23 @@ ${numberedResume}
 
     await setStage(resumeId, userId, "extracting_fields");
 
-    const completion = await client.chat.completions.create(
-      {
-        model: RESUME_PARSE_MODEL,
-        temperature: 0,
-        messages: [
+    const completion = await withOpenAiTelemetry(
+      { operation: "RESUME_ANALYSIS", model: RESUME_PARSE_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
           {
-            role: "system",
-            content: "You extract resume information. Respond ONLY with valid JSON.",
+            model: RESUME_PARSE_MODEL,
+            temperature: 0,
+            messages: [
+              {
+                role: "system",
+                content: "You extract resume information. Respond ONLY with valid JSON.",
+              },
+              { role: "user", content: prompt },
+            ],
           },
-          { role: "user", content: prompt },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     const content = completion.choices[0].message.content || "{}";
@@ -619,12 +628,15 @@ ${numberedResume}
 
     await setStage(resumeId, userId, "verifying");
 
-    const verify = await client.chat.completions.create(
-      {
-        model: RESUME_PARSE_DRAFT_MODEL,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
+    const verify = await withOpenAiTelemetry(
+      { operation: "RESUME_ANALYSIS", model: RESUME_PARSE_DRAFT_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
+          {
+            model: RESUME_PARSE_DRAFT_MODEL,
+            temperature: 0,
+            response_format: { type: "json_object" },
+            messages: [
           {
             role: "system",
             content: `
@@ -666,10 +678,11 @@ Do not invent information.
 
 Return ONLY valid JSON.
 `,
+              },
+            ],
           },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     parsed = JSON.parse(verify.choices[0].message.content || "{}");

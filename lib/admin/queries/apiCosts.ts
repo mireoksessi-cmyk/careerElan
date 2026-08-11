@@ -1,46 +1,51 @@
 /*
-  Phase 6I.6.37 - AI & API Costs tab. Built directly on Phase 6I.6.36's
-  External Provider Usage & Limit Readiness audit findings (this
-  phase's own re-confirmation, not re-derived): there is NO persisted
-  OpenAI call-log table anywhere in this codebase - every OpenAI event
-  (lib/observability/logger.ts's "openai" domain, and generateCore.ts's
-  own stage logs) is a stdout JSON line only, captured by Netlify
-  Function Logs, never written to a queryable table. Token counts ARE
-  read from the OpenAI SDK response (.usage) at exactly one call site
-  (lib/generatePackage/generateCore.ts) but, again, only logged, never
-  persisted. This tab is therefore honest about what it can and cannot
-  show, per Part K/L/AO's explicit "do not fabricate" / "classify every
-  metric" instructions - it does NOT reverse-engineer a per-call log
-  from `applications` rows beyond what that table's own generation_*
-  columns already represent (attempt counts, not call counts - legacy
-  makes 2 OpenAI calls per generation, canonical makes 1 + up to 1
-  repair retry, so "attempts" != "OpenAI calls" 1:1).
+  Phase 6I.6.38A - AI & API Costs tab, rewritten on top of the new
+  openai_usage_events telemetry table (see lib/openai/telemetry.ts and
+  the two 20260810190000/190100 migrations). Phase 6I.6.37 built this
+  tab honestly around the fact that no such table existed yet - it does
+  now, so every OpenAI metric below reads real rows instead of the
+  DERIVED_ESTIMATE/NOT_AVAILABLE placeholders that phase shipped.
+
+  Still honest about what remains genuinely unavailable: OpenAI's own
+  remaining prepaid balance/org usage requires an Admin API key
+  (OPENAI_ADMIN_KEY) this deployment does not have configured - Part N/
+  V's MANUAL_PROVIDER_DASHBOARD_ONLY classification for that one field
+  is unchanged. Everything else below is EXACT_INTERNAL_DATA, computed
+  from this codebase's own telemetry rows, not the provider's billing
+  system - estimated_cost_usd itself is ESTIMATED_COST (Part E), never
+  presented as exact billing.
 */
 import { supabaseAdmin } from "../../supabaseAdmin";
-import { metric, startOfUtcDay, startOfUtcMonth, listAllAuthUsers, type ClassifiedMetric } from "./shared";
+import { metric, startOfUtcMonth, listAllAuthUsers, type ClassifiedMetric } from "./shared";
+import { getBudgetSummary, type BudgetSummary } from "../../openai/budget";
+import { aggregateUsageRows, type UsageEventRow, type OperationBreakdownRow, type ModelBreakdownRow } from "../../openai/usageAggregation";
 
-export type OperationRow = {
-  operation: string;
-  calls: ClassifiedMetric<number | null>;
-  successRate: ClassifiedMetric<number | null>;
+export type PeriodMetrics = {
+  calls: ClassifiedMetric<number>;
+  successCount: ClassifiedMetric<number>;
+  errorCount: ClassifiedMetric<number>;
+  retryCount: ClassifiedMetric<number>;
+  totalTokens: ClassifiedMetric<number>;
+  cost: ClassifiedMetric<number>;
+  avgLatencyMs: ClassifiedMetric<number | null>;
+  rateLimited429: ClassifiedMetric<number>;
+  timeouts: ClassifiedMetric<number>;
+  serverErrors5xx: ClassifiedMetric<number>;
 };
 
 export type ApiCostMetrics = {
   openAi: {
-    today: {
-      generatePackageAttempts: ClassifiedMetric<number>;
-      tokens: ClassifiedMetric<null>;
-      cost: ClassifiedMetric<null>;
+    today: PeriodMetrics;
+    thisMonth: PeriodMetrics & {
+      dailyAverageCost: ClassifiedMetric<number>;
+      projectedMonthEndCost: ClassifiedMetric<number>;
+      lastCallAt: ClassifiedMetric<string | null>;
     };
-    thisMonth: {
-      generatePackageAttempts: ClassifiedMetric<number>;
-      tokens: ClassifiedMetric<null>;
-      cost: ClassifiedMetric<null>;
-      dailyAverageAttempts: ClassifiedMetric<number>;
-      projectedMonthEndAttempts: ClassifiedMetric<number>;
-    };
+    budget: BudgetSummary;
     remainingCapacity: ClassifiedMetric<string>;
-    perOperation: OperationRow[];
+    unknownPricingModels: ClassifiedMetric<string[]>;
+    perOperation: OperationBreakdownRow[];
+    perModel: ModelBreakdownRow[];
   };
   supabase: { authUsers: ClassifiedMetric<number>; note: string };
   netlify: { note: string };
@@ -48,58 +53,68 @@ export type ApiCostMetrics = {
   resend: { note: string };
 };
 
+function periodMetrics(summary: ReturnType<typeof aggregateUsageRows>["today"]): PeriodMetrics {
+  return {
+    calls: metric(summary.calls, "EXACT_INTERNAL_DATA"),
+    successCount: metric(summary.successCount, "EXACT_INTERNAL_DATA"),
+    errorCount: metric(summary.errorCount, "EXACT_INTERNAL_DATA"),
+    retryCount: metric(summary.retryCount, "EXACT_INTERNAL_DATA"),
+    totalTokens: metric(summary.totalTokens, "EXACT_INTERNAL_DATA", "NULL token rows (endpoint returned no usage) contribute 0"),
+    cost: metric(summary.costUsd, "DERIVED_ESTIMATE", "sum of estimated_cost_usd - local token x price calculation, never provider billing"),
+    avgLatencyMs: metric(summary.avgLatencyMs, "EXACT_INTERNAL_DATA"),
+    rateLimited429: metric(summary.rateLimited429, "EXACT_INTERNAL_DATA"),
+    timeouts: metric(summary.timeouts, "EXACT_INTERNAL_DATA"),
+    serverErrors5xx: metric(summary.serverErrors5xx, "EXACT_INTERNAL_DATA"),
+  };
+}
+
 export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
   const now = new Date();
-  const todayStart = startOfUtcDay(now).toISOString();
   const monthStart = startOfUtcMonth(now).toISOString();
-  const dayOfMonth = now.getUTCDate();
-  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
 
-  const [{ count: attemptsToday }, { count: attemptsThisMonth }, authUsers] = await Promise.all([
-    supabaseAdmin.from("applications").select("id", { count: "exact", head: true }).not("generation_status", "is", null).gte("created_at", todayStart),
-    supabaseAdmin.from("applications").select("id", { count: "exact", head: true }).not("generation_status", "is", null).gte("created_at", monthStart),
+  const [{ data: monthRows, error: rowsError }, authUsers, budget] = await Promise.all([
+    supabaseAdmin
+      .from("openai_usage_events")
+      .select(
+        "created_at, operation, model, status, duration_ms, input_tokens, output_tokens, total_tokens, estimated_cost_usd, cost_classification, retry_count, http_status_class"
+      )
+      .gte("created_at", monthStart),
     listAllAuthUsers(),
+    getBudgetSummary(now),
   ]);
+
+  const rows: UsageEventRow[] = rowsError || !monthRows ? [] : (monthRows as UsageEventRow[]);
+  const aggregation = aggregateUsageRows(rows, now);
   const authUserCount = authUsers.length;
 
-  const dailyAverage = dayOfMonth > 0 ? Math.round(((attemptsThisMonth ?? 0) / dayOfMonth) * 100) / 100 : 0;
-  const projected = Math.round(dailyAverage * daysInMonth);
-
-  const operations = [
-    "generate-package",
-    "analyze-job",
-    "analyze-job-url",
-    "resume-analysis",
-    "cover-letter-analysis",
-    "recommend-jobs",
-    "career-insight",
-    "analytics-summary",
-  ];
+  const unknownPricingModels = Array.from(
+    new Set(aggregation.perModel.filter((m) => m.unknownPricingCount > 0).map((m) => m.model))
+  );
 
   return {
     openAi: {
-      today: {
-        generatePackageAttempts: metric(attemptsToday ?? 0, "DERIVED_ESTIMATE", "Generate Package tailoring attempts, not a raw OpenAI call count"),
-        tokens: metric(null, "NOT_AVAILABLE", "no persisted call-log table"),
-        cost: metric(null, "NOT_AVAILABLE", "no persisted call-log table"),
-      },
+      today: periodMetrics(aggregation.today),
       thisMonth: {
-        generatePackageAttempts: metric(attemptsThisMonth ?? 0, "DERIVED_ESTIMATE"),
-        tokens: metric(null, "NOT_AVAILABLE"),
-        cost: metric(null, "NOT_AVAILABLE"),
-        dailyAverageAttempts: metric(dailyAverage, "DERIVED_ESTIMATE"),
-        projectedMonthEndAttempts: metric(projected, "DERIVED_ESTIMATE", "linear projection from month-to-date daily average"),
+        ...periodMetrics(aggregation.thisMonth),
+        dailyAverageCost: metric(aggregation.dailyAverageCostUsd, "DERIVED_ESTIMATE", "month-to-date cost / day of month"),
+        projectedMonthEndCost: metric(aggregation.projectedMonthEndCostUsd, "DERIVED_ESTIMATE", "linear projection from month-to-date daily average"),
+        lastCallAt: metric(aggregation.thisMonth.lastCallAt, "EXACT_INTERNAL_DATA"),
       },
+      budget,
       remainingCapacity: metric(
         "Check OpenAI Dashboard",
         "MANUAL_PROVIDER_DASHBOARD_ONLY",
-        "no OPENAI_ADMIN_KEY configured - the standard API key cannot read org usage/cost"
+        "no OPENAI_ADMIN_KEY configured - the standard API key cannot read org usage/cost/remaining balance"
       ),
-      perOperation: operations.map((operation) => ({
-        operation,
-        calls: metric(null, "NOT_AVAILABLE", "no persisted per-operation call log"),
-        successRate: metric(null, "NOT_AVAILABLE"),
-      })),
+      unknownPricingModels: metric(
+        unknownPricingModels,
+        unknownPricingModels.length > 0 ? "NOT_AVAILABLE" : "EXACT_INTERNAL_DATA",
+        unknownPricingModels.length > 0
+          ? "cost for these models could not be estimated - not in the confirmed pricing table (lib/openai/pricing.ts) - real spend on these models is understated above"
+          : undefined
+      ),
+      perOperation: aggregation.perOperation,
+      perModel: aggregation.perModel,
     },
     supabase: {
       authUsers: metric(authUserCount ?? 0, "EXACT_INTERNAL_DATA", "see Users tab for the authoritative count"),
@@ -113,7 +128,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       note: "Not Configured (Phase 6I.6.36 decision: no DSN exists, none was fabricated - see docs/PRODUCTION_MONITORING_RUNBOOK.md).",
     },
     resend: {
-      note: "Used only for /api/followup reminder emails. Send/failure counts: NOT_AVAILABLE (no persisted send-log; Resend's own dashboard has this).",
+      note: "Used only for /api/followup reminder emails and Phase 6I.6.38A budget alert emails. Send/failure counts: NOT_AVAILABLE (no persisted send-log; Resend's own dashboard has this).",
     },
   };
 }

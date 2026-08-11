@@ -7,6 +7,7 @@ import {
 } from "../config/aiModels";
 import { classifyGenerationError } from "./shared";
 import { logOperationalEvent, elapsedMs } from "../observability/logger";
+import { withOpenAiTelemetry } from "../openai/telemetry";
 import {
   COVER_LETTER_ALLOWED_EXTENSIONS,
   UploadValidationError,
@@ -99,30 +100,34 @@ async function pdfToImages(
   return images;
 }
 
-async function visionOCR(images: string[]) {
+async function visionOCR(images: string[], userId?: string) {
   let text = "";
 
   for (const img of images) {
-    const res = await client.chat.completions.create(
-      {
-        model: COVER_LETTER_PARSE_MODEL,
-        messages: [
+    const res = await withOpenAiTelemetry(
+      { operation: "COVER_LETTER_ANALYSIS", model: COVER_LETTER_PARSE_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
           {
-            role: "user",
-            content: [
+            model: COVER_LETTER_PARSE_MODEL,
+            messages: [
               {
-                type: "text",
-                text: "Extract every visible word from this cover letter. Preserve formatting and paragraphs. Do not summarize.",
-              },
-              {
-                type: "image_url",
-                image_url: { url: `data:image/png;base64,${img}` },
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "Extract every visible word from this cover letter. Preserve formatting and paragraphs. Do not summarize.",
+                  },
+                  {
+                    type: "image_url",
+                    image_url: { url: `data:image/png;base64,${img}` },
+                  },
+                ],
               },
             ],
           },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     text += (res.choices[0].message.content || "") + "\n";
@@ -275,7 +280,7 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
         }
 
         const images = await pdfToImages(buffer, fromBuffer);
-        coverLetterText = await visionOCR(images);
+        coverLetterText = await visionOCR(images, userId);
 
         console.log("Vision OCR complete.");
 
@@ -347,14 +352,17 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
 
     await setStage(coverLetterId, userId, "reconstructing_text");
 
-    const rebuilt = await client.chat.completions.create(
-      {
-        model: COVER_LETTER_PARSE_DRAFT_MODEL,
-        temperature: 0,
-        messages: [
+    const rebuilt = await withOpenAiTelemetry(
+      { operation: "COVER_LETTER_ANALYSIS", model: COVER_LETTER_PARSE_DRAFT_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
           {
-            role: "system",
-            content: `
+            model: COVER_LETTER_PARSE_DRAFT_MODEL,
+            temperature: 0,
+            messages: [
+              {
+                role: "system",
+                content: `
 You are an expert cover letter reconstruction engine.
 
 Rebuild the cover letter exactly as a human would type it.
@@ -376,11 +384,12 @@ split them naturally.
 
 Output ONLY the rebuilt cover letter.
 `,
+              },
+              { role: "user", content: coverLetterText },
+            ],
           },
-          { role: "user", content: coverLetterText },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     coverLetterText = rebuilt.choices[0].message.content || coverLetterText;
@@ -432,20 +441,24 @@ ${numberedLetter}
 
     await setStage(coverLetterId, userId, "extracting_fields");
 
-    const completion = await client.chat.completions.create(
-      {
-        model: COVER_LETTER_PARSE_MODEL,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
+    const completion = await withOpenAiTelemetry(
+      { operation: "COVER_LETTER_ANALYSIS", model: COVER_LETTER_PARSE_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
           {
-            role: "system",
-            content: "You extract cover letter information. Respond ONLY with valid JSON.",
+            model: COVER_LETTER_PARSE_MODEL,
+            temperature: 0,
+            response_format: { type: "json_object" },
+            messages: [
+              {
+                role: "system",
+                content: "You extract cover letter information. Respond ONLY with valid JSON.",
+              },
+              { role: "user", content: prompt },
+            ],
           },
-          { role: "user", content: prompt },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     const content = completion.choices[0].message.content || "{}";
@@ -454,15 +467,18 @@ ${numberedLetter}
 
     await setStage(coverLetterId, userId, "verifying");
 
-    const verify = await client.chat.completions.create(
-      {
-        model: COVER_LETTER_PARSE_DRAFT_MODEL,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
+    const verify = await withOpenAiTelemetry(
+      { operation: "COVER_LETTER_ANALYSIS", model: COVER_LETTER_PARSE_DRAFT_MODEL, retryCount: 0, userId },
+      () =>
+        client.chat.completions.create(
           {
-            role: "system",
-            content: `
+            model: COVER_LETTER_PARSE_DRAFT_MODEL,
+            temperature: 0,
+            response_format: { type: "json_object" },
+            messages: [
+              {
+                role: "system",
+                content: `
 You verify cover letter JSON.
 
 Never invent information.
@@ -473,10 +489,10 @@ Never change facts.
 
 Return ONLY valid JSON.
               `,
-          },
-          {
-            role: "user",
-            content: `
+              },
+              {
+                role: "user",
+                content: `
 Original Cover Letter
 
 ${numberedLetter}
@@ -491,10 +507,11 @@ Correct only extraction mistakes.
 
 Return ONLY valid JSON.
 `,
+              },
+            ],
           },
-        ],
-      },
-      { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+          { timeout: OPENAI_CALL_TIMEOUT_MS, maxRetries: 0 }
+        )
     );
 
     parsed = JSON.parse(verify.choices[0].message.content || "{}");

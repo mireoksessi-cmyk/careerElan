@@ -29,11 +29,36 @@ function record(line) {
 
 record("watch installed (pid=" + process.pid + ")");
 
+/*
+  Phase 6I.6.38A - hostname-only matching, not a full-URL substring
+  match. openai_usage_events (this phase's telemetry table) is queried
+  through Supabase's REST endpoint at paths like
+  http://127.0.0.1:54321/rest/v1/openai_usage_events - a full-URL
+  substring check false-positives on "openai" appearing in that PATH,
+  even though the request's real host (127.0.0.1, or the deployed
+  Supabase project) is never OpenAI's. Matching only the URL's hostname
+  is what this file's own header comment already describes ("host
+  contains openai") and what the http/https patch below already does -
+  this brings the fetch patch in line with that stated intent, without
+  weakening the real check: a genuine OpenAI request's hostname (e.g.
+  api.openai.com) still matches and still throws.
+*/
+function extractHostname(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    // Not a parseable absolute URL (e.g. a relative path) - never an
+    // outbound request to a real external host, so never a match.
+    return "";
+  }
+}
+
 const realFetch = globalThis.fetch;
 if (typeof realFetch === "function") {
   globalThis.fetch = function watchedFetch(input, init) {
     const url = typeof input === "string" ? input : input && input.url ? input.url : String(input);
-    if (url && url.toLowerCase().includes("openai")) {
+    const hostname = extractHostname(url);
+    if (hostname && hostname.includes("openai")) {
       const stack = new Error("stack-capture").stack || "";
       record("BLOCKED fetch() to " + url + "\n" + stack);
       throw new Error("OPENAI_NETWORK_WATCH_BLOCKED_FETCH: " + url);
