@@ -21,6 +21,20 @@
 # the bundler leaves a plain require() in place instead of bundling them,
 # letting them resolve from node_modules at runtime. List limited to the
 # packages resumeAnalysisCore.ts actually dynamically imports.
+#
+# "playwright" (Phase 6I.6.38C hotfix): generate-package-background.ts and
+# canonical-generate-package-background.ts both transitively reach the DPE
+# real-browser-measurement pipeline (lib/documentPreservation/sharedBrowser.ts,
+# which does `import { chromium } from "playwright"`). esbuild statically
+# walks playwright -> playwright-core's coreBundle.js and trips on a lazy,
+# never-used `require("chromium-bidi/...")` inside playwright-core's optional
+# BiDi-transport code path (this app only uses the default CDP transport via
+# chromium.launch(), and chromium-bidi is not and has never been an installed
+# dependency here). Externalizing "playwright" stops esbuild from walking
+# into its internals at all, so it never encounters that unresolvable nested
+# require - the real playwright/playwright-core directories still get copied
+# into the function bundle and resolve normally via require() at runtime,
+# exactly as pdf-parse-new/mammoth already do above.
 [functions]
   directory = "netlify/functions"
-  external_node_modules = ["pdf-parse-new", "mammoth"]
+  external_node_modules = ["pdf-parse-new", "mammoth", "playwright"]
