@@ -53,11 +53,48 @@ export type ApplyRecommendation =
   | "consider"
   | "not_recommended";
 
+export type RequirementSource =
+  | "primary_resume"
+  | "none";
+
 export type JobRequirementEvidence = {
   requirement: string;
   category: RequirementCategory;
   evidenceStatus: EvidenceStatus;
   sourceEvidence: string;
+  source: RequirementSource;
+  regulated: boolean;
+};
+
+/*
+  Re-added from origin/master's fd83fa8 during the canonical-template-system
+  merge (Phase 6I.6.38B git-conflict resolution) - this candidate-fit
+  evaluation existed at the branch's common ancestor and was dropped from
+  canonical's independent Call1/Call2 split rewrite. Kept as a single
+  whole-application evaluation (not per-requirement-item), matching how it
+  was scoped on master.
+*/
+export type ScheduleRequirement = {
+  dayShift: boolean;
+  eveningShift: boolean;
+  nightShift: boolean;
+  rotatingShift: boolean;
+  weekendWork: boolean;
+  holidayWork: boolean;
+
+  requirementLevel:
+    | "mandatory"
+    | "preferred"
+    | "not_required"
+    | "unclear";
+
+  candidateStatus:
+    | "supported"
+    | "partially_supported"
+    | "not_supported"
+    | "unclear";
+
+  explanation: string;
 };
 
 export type PackageVerification = {
@@ -107,6 +144,9 @@ export type PackageVerification = {
       | "not_required"
       | "unclear";
   };
+
+  scheduleRequirement:
+    ScheduleRequirement;
 };
 
 export type PackageAnalysis = {
@@ -2789,6 +2829,18 @@ function defaultVerification():
       evidence: "",
       status: "unclear",
     },
+
+    scheduleRequirement: {
+      dayShift: false,
+      eveningShift: false,
+      nightShift: false,
+      rotatingShift: false,
+      weekendWork: false,
+      holidayWork: false,
+      requirementLevel: "unclear",
+      candidateStatus: "unclear",
+      explanation: "",
+    },
   };
 }
 
@@ -3149,6 +3201,16 @@ export function normalizePackageAnalysis(
               getFirstText(
                 item.sourceEvidence
               ),
+
+            source:
+              item.source ===
+              "primary_resume"
+                ? "primary_resume"
+                : "none",
+
+            regulated:
+              item.regulated ===
+              true,
           }))
       : [];
 
@@ -3186,6 +3248,61 @@ export function normalizePackageAnalysis(
       .bilingualRequirement
       .languages = [];
   }
+
+  if (
+    !verification
+      .scheduleRequirement ||
+    typeof verification
+      .scheduleRequirement !==
+      "object"
+  ) {
+    verification
+      .scheduleRequirement =
+      defaultVerification()
+        .scheduleRequirement;
+  }
+
+  verification.scheduleRequirement.dayShift =
+    verification.scheduleRequirement.dayShift === true;
+  verification.scheduleRequirement.eveningShift =
+    verification.scheduleRequirement.eveningShift === true;
+  verification.scheduleRequirement.nightShift =
+    verification.scheduleRequirement.nightShift === true;
+  verification.scheduleRequirement.rotatingShift =
+    verification.scheduleRequirement.rotatingShift === true;
+  verification.scheduleRequirement.weekendWork =
+    verification.scheduleRequirement.weekendWork === true;
+  verification.scheduleRequirement.holidayWork =
+    verification.scheduleRequirement.holidayWork === true;
+
+  verification.scheduleRequirement.requirementLevel =
+    [
+      "mandatory",
+      "preferred",
+      "not_required",
+      "unclear",
+    ].includes(
+      verification.scheduleRequirement.requirementLevel
+    )
+      ? verification.scheduleRequirement.requirementLevel
+      : "unclear";
+
+  verification.scheduleRequirement.candidateStatus =
+    [
+      "supported",
+      "partially_supported",
+      "not_supported",
+      "unclear",
+    ].includes(
+      verification.scheduleRequirement.candidateStatus
+    )
+      ? verification.scheduleRequirement.candidateStatus
+      : "unclear";
+
+  verification.scheduleRequirement.explanation =
+    getFirstText(
+      verification.scheduleRequirement.explanation
+    );
 
   return packageAnalysis;
 }
@@ -3287,6 +3404,8 @@ export function validateRequirementEvidence(
           item.evidenceStatus =
             "unclear";
 
+          item.source = "none";
+
           return;
         }
 
@@ -3309,6 +3428,8 @@ export function validateRequirementEvidence(
 
           item.sourceEvidence =
             "";
+
+          item.source = "none";
         }
       }
 
@@ -4528,6 +4649,10 @@ If mandatory bilingual ability is not fully supported:
 - do not call the candidate bilingual
 - matchLevel must not be strong
 
+If mandatory night, rotating, weekend, or holiday availability is required but the source does not confirm it:
+- scheduleRequirement.candidateStatus must be not_supported or unclear
+- include it in missingRequirements when important
+
 ==================================================
 FOUR ANALYSIS CARDS
 ==================================================
@@ -4622,7 +4747,9 @@ Use exactly this structure:
           "requirement": "",
           "category": "mandatory | preferred | legal_or_regulated",
           "evidenceStatus": "supported | partially_supported | not_supported | unclear",
-          "sourceEvidence": ""
+          "sourceEvidence": "",
+          "source": "primary_resume | none",
+          "regulated": false
         }
       ],
       "regulatedRole": {
@@ -4638,6 +4765,17 @@ Use exactly this structure:
         "languages": [],
         "evidence": "",
         "status": "verified | partially_verified | missing | not_required | unclear"
+      },
+      "scheduleRequirement": {
+        "dayShift": false,
+        "eveningShift": false,
+        "nightShift": false,
+        "rotatingShift": false,
+        "weekendWork": false,
+        "holidayWork": false,
+        "requirementLevel": "mandatory | preferred | not_required | unclear",
+        "candidateStatus": "supported | partially_supported | not_supported | unclear",
+        "explanation": ""
       }
     }
   }

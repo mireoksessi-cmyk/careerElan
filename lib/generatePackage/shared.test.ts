@@ -283,6 +283,17 @@ const baseVerification: PackageAnalysis["verification"] = {
     evidence: "",
     status: "not_required",
   },
+  scheduleRequirement: {
+    dayShift: false,
+    eveningShift: false,
+    nightShift: false,
+    rotatingShift: false,
+    weekendWork: false,
+    holidayWork: false,
+    requirementLevel: "not_required",
+    candidateStatus: "unclear",
+    explanation: "",
+  },
 };
 
 /*
@@ -488,6 +499,8 @@ try {
           category: "mandatory",
           evidenceStatus: "supported",
           sourceEvidence: "",
+          source: "none",
+          regulated: false,
         },
       ],
     },
