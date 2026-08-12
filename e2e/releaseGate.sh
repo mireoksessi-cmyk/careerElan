@@ -36,8 +36,27 @@ kill_stray_server() {
   # port (3101), never a broad "kill node processes" sweep - a stray
   # server from an interrupted prior run is what this exists to catch,
   # not any other node.exe process on the machine.
-  if command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -NonInteractive -Command \
+  #
+  # Absolute path, not `command -v powershell.exe` - this git-bash
+  # environment's PATH (and its SystemRoot/windir env vars) does not
+  # carry the Windows System32 location, so `command -v powershell.exe`
+  # silently fails here even though the binary exists, and this whole
+  # function was a no-op on this machine: a stray port-3101 server left
+  # by any interrupted prior run (a killed/timed-out test command, an
+  # abnormally terminated globalTeardown, etc.) was never actually
+  # cleared before the next mode's globalSetup() spawned a fresh
+  # server - which then failed to bind (port already held) while
+  # e2e/globalSetup.ts's waitForServer() still reported success because
+  # it only checks for ANY HTTP response under 500 from the fixed URL,
+  # not that the response came from the server it just spawned. Every
+  # test in that run then talked to the wrong, unrelated process,
+  # producing uniform failures across completely unrelated specs. Same
+  # fixed system location globalTeardown.ts's own killProcessTree()
+  # already resolves for taskkill.exe (see that function's own header
+  # comment on this exact PATH gap).
+  local powershell_path="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+  if [ -x "$powershell_path" ]; then
+    "$powershell_path" -NoProfile -NonInteractive -Command \
       "Get-CimInstance Win32_Process | Where-Object { \$_.Name -eq 'node.exe' -and \$_.CommandLine -like '*3101*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" \
       >/dev/null 2>&1
   fi
