@@ -131,7 +131,7 @@ test.describe("Part K: Storage write failure injection", () => {
     await cleanupSyntheticE2eUser(admin, user.userId);
   });
 
-  test("K1. a Storage write failure prevents a false success state - generation safely fails/falls back, persists no document rows, no fabricated ids, no leaked error detail", async ({ page }) => {
+  test("K1. a Storage write failure prevents a false success state - fallback is attempted and correctly recorded, no fabricated ids, no leaked error detail, no duplicate row", async ({ page }) => {
     test.skip(!process.env.E2E_FAULT_INJECT_STORAGE_WRITE, "run with E2E_FAULT_INJECT_STORAGE_WRITE=both set");
     test.setTimeout(180_000);
 
@@ -145,30 +145,39 @@ test.describe("Part K: Storage write failure injection", () => {
     await expect(generateButton).toBeDisabled({ timeout: 5_000 });
 
     /*
-      Phase 6I.6.39 (consistency fix, superseding this test's own prior
-      expectation) - renderCanonicalPackage() now throws the SAME
-      GeneratedDocumentError it already throws for the sibling "RPC
-      itself failed" case whenever a tailored resume exists but required
-      document persistence did not succeed (storage disabled, or - as
-      this fault-injection test forces once the storage flag is on -
-      the upload itself failing). classifyForFallback() correctly
-      classifies this as fallback-eligible (generated_document_failure) -
-      but this repo's actual current .env.local does NOT set
-      CANONICAL_LEGACY_FALLBACK_ENABLED=true (verified live: this test
-      previously failed here waiting for Part L's generic legacy-fallback
-      failure text, because that text is only reached once a fallback
-      attempt runs), so runCanonicalWithFallbackDecision()'s own
-      `if (!isCanonicalLegacyFallbackEnabled()) throw error;` branch
-      rethrows immediately instead of engaging fallback - the row never
-      leaves generation_engine='canonical'. The rethrow is caught by
-      canonicalGenerationWorker.ts's outer catch, which marks the row
-      failed with its own fixed p_error_summary literal, verified live
-      against the real rendered page: "Canonical generation failed and
-      could not be completed." A false "Your package is ready" success
-      state is no longer produced either way - that is the one
-      invariant this test exists to prove.
+      Contract updated (superseding this test's own two prior
+      expectations) now that e2e/globalSetup.ts's E2E server always sets
+      CANONICAL_LEGACY_FALLBACK_ENABLED=true (paired with
+      CANONICAL_DOCUMENT_STORAGE_ENABLED=true per docs/canonical-canary-
+      plan.md's own Stage 1 config - see that file's header comment).
+
+      renderCanonicalPackage() throws GeneratedDocumentError whenever a
+      tailored resume exists but required document persistence did not
+      succeed (storage disabled, or - as this fault-injection test
+      forces once the storage flag is on - the upload itself failing).
+      classifyForFallback() classifies this as fallback-eligible
+      (generated_document_failure) - and unlike this test's own prior
+      assumption, CANONICAL_LEGACY_FALLBACK_ENABLED is now genuinely on,
+      so runCanonicalWithFallbackDecision() DOES call
+      mark_canonical_fallback (fallback_used=true, fallback_reason=
+      'generated_document_failure', generation_engine='legacy') and DOES
+      invoke legacy's own runPackageGeneration() against the same row -
+      the identical fallback path Part L's render-fault tests already
+      exercise and assert on below, just reached via a different
+      fallback-eligible error class (GeneratedDocumentError instead of
+      TemplateRenderingError).
+
+      That legacy retry attempt then hits the same separate, pre-existing
+      E2E-harness gap documented in this file's own header comment above:
+      legacy's own OpenAI calls have no deterministic E2E fixture, so
+      wrapOpenAiClientForE2eSafety() throws REAL_OPENAI_CALL_BLOCKED_IN_E2E,
+      caught by classifyGenerationError() and landing in the generic
+      VALIDATION_FAILED bucket ("The generated package failed a
+      content-quality check."). A false "Your package is ready" success
+      state is still never produced - that invariant holds regardless of
+      which fallback-eligible error class triggered it.
     */
-    const FAILURE_MESSAGE = "Canonical generation failed and could not be completed.";
+    const FAILURE_MESSAGE = "The generated package failed a content-quality check.";
     await expect(page.getByText(FAILURE_MESSAGE).first()).toBeVisible({ timeout: 170_000 });
     await expect(page.getByText("✅ Your package is ready")).not.toBeVisible();
 
@@ -193,25 +202,27 @@ test.describe("Part K: Storage write failure injection", () => {
     expect(apps).toHaveLength(1);
     const app = apps![0];
     expect(app.generation_status).toBe("failed");
-    expect(app.generation_error_code).toBe("generated_document_failed");
+    expect(app.generation_error_code).toBe("VALIDATION_FAILED");
     /*
-      Fallback did NOT engage (CANONICAL_LEGACY_FALLBACK_ENABLED is off
-      in this environment - see the comment above), so
-      mark_canonical_fallback/release_canonical_claim_for_legacy_fallback
-      were never called and the row never left the canonical engine -
-      the checkable proof the classification happened (fallback-eligible)
-      is generation_error_code itself, set from classifyForFallback()'s
-      SAME error-class switch (GeneratedDocumentError -> generated_
-      document_failed), not a fallback_used flag this run path never
-      touches.
+      Fallback genuinely engaged before the (separately, safely) failing
+      legacy retry - this is the real, checkable proof that the storage
+      write failure was correctly classified as fallback-eligible and
+      routed through canonicalGenerationFallbackService.ts, not silently
+      swallowed or misclassified as some other failure category. Mirrors
+      Part L's own fallback_used/fallback_reason/generation_engine
+      assertions exactly, differing only in fallback_reason's value
+      (this row's fallback-eligible error is GeneratedDocumentError, not
+      TemplateRenderingError).
     */
-    expect(app.fallback_used).toBeFalsy();
-    expect(app.fallback_reason).toBeNull();
-    expect(app.generation_engine).toBe("canonical");
+    expect(app.fallback_used).toBe(true);
+    expect(app.fallback_reason).toBe("generated_document_failure");
+    expect(app.generation_engine).toBe("legacy");
     // No canonical document was ever produced or persisted - the canonical
-    // attempt never got past the (now-thrown) persistence check, and these
-    // ids are written solely by complete_canonical_generation, which this
-    // row's canonical attempt never reached.
+    // attempt never got past the (thrown) persistence check, and these ids
+    // are written solely by complete_canonical_generation, which this row's
+    // canonical attempt never reached. The subsequent legacy retry also
+    // never reaches a successful document-write step, since it fails at
+    // the (E2E-blocked) OpenAI call stage, before any document exists.
     expect(app.generated_pdf_document_id).toBeNull();
     expect(app.generated_docx_document_id).toBeNull();
 

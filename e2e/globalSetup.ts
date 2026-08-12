@@ -109,6 +109,55 @@ export default async function globalSetup() {
     // (re-checked at call time, never cached) - a production deploy
     // can never read this as true no matter what value reaches it here.
     ALLOW_LOCAL_JOB_URLS: "true",
+    // canonicalTrafficRouter.ts's own isE2eAiModeActive() bypass already
+    // forces canonical ROUTING as if the system were at canary Stage 1+
+    // (see that file's own comment) - but per docs/canonical-rollout-plan.md
+    // and docs/canonical-canary-plan.md, every real Stage 1+ deployment
+    // pairs canonical routing with CANONICAL_LEGACY_FALLBACK_ENABLED=true
+    // ("always", not optionally). Without this override, the E2E server
+    // ran in a hybrid state that never occurs in any documented
+    // production stage (routing live, fallback off), causing
+    // render-failure.spec.ts's Part L fallback-eligible-failure tests to
+    // hard-fail immediately instead of engaging the legacy fallback they
+    // assert on.
+    CANONICAL_LEGACY_FALLBACK_ENABLED: "true",
+    // Same gap as the flag directly above, found while investigating why
+    // normal-mode (no fault injection) Generate Package runs were failing
+    // with VALIDATION_FAILED: docs/canonical-canary-plan.md's own Stage 1
+    // config pairs CANONICAL_LEGACY_FALLBACK_ENABLED=true with
+    // CANONICAL_DOCUMENT_STORAGE_ENABLED=true ("required for canonical
+    // output to actually persist") - this repo's E2E server never set the
+    // latter. Without it, uploadGeneratedDocument() short-circuits with
+    // reason:"storage_disabled" for every canonical generation
+    // (canonicalDocumentStorageService.ts), which canonicalRenderService.ts's
+    // own e800f38 consistency check (line ~168, "document persistence was
+    // required for this tailored resume but did not succeed") then always
+    // throws on - a real, correct production check that was simply never
+    // reachable-and-passing in E2E because storage was never enabled here.
+    // That throw is fallback-eligible, so every normal generation was
+    // routing into the legacy engine's real (E2E-blocked) OpenAI call
+    // instead of succeeding normally. The local "generated-documents"
+    // Storage bucket already exists (supabase/migrations/20260807000000),
+    // so canonical generation can now genuinely persist and succeed here.
+    CANONICAL_DOCUMENT_STORAGE_ENABLED: "true",
+    // templates.spec.ts drives the real Dashboard "Change Template" UI
+    // (CanonicalTemplatePicker), but that button only renders when
+    // resolution?.kind === "canonical" for a resume
+    // (app/dashboard/page.tsx) - and resumeTemplateResolutions is only
+    // ever populated when templateSelectorEnabled is true, which comes
+    // straight from isCanonicalTemplateSelectorEnabled() (featureFlags.ts)
+    // via GET /api/internal/canonical-generate-package/config. Confirmed
+    // live (manual browser session against a matching server): with this
+    // unset the config endpoint returns templateSelectorEnabled:false,
+    // the per-resume resolution fetch loop never runs at all, and
+    // "Change Template" never appears no matter how correctly the resume
+    // was canonically imported. Unlike the two flags above,
+    // docs/canonical-canary-plan.md does NOT list this as part of the
+    // standard canary-stage pairing - it is a separate, independently
+    // rolled-out feature (docs/canonical-production-architecture.md:
+    // "Exposes template switching UI/API") - so this is E2E-only,
+    // enabling exactly the UI templates.spec.ts exists to exercise.
+    CANONICAL_TEMPLATE_SELECTOR_ENABLED: "true",
   };
 
   const server: ChildProcess = spawn("npx", ["next", "dev", "-p", String(E2E_PORT)], {
