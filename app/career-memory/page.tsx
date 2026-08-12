@@ -1041,7 +1041,7 @@ return data;
   
   async function persistMemory() {
   if (!user) {
-    alert("User is null");
+    alert("We couldn't load your account. Please refresh the page and try again.");
     return;
   }
 
@@ -1242,7 +1242,7 @@ function continueUploadedDashboard() {
     Dashboard: "/dashboard",
     "Career Memory": "/career-memory",
     "Find Jobs": "/find-jobs",
-    "Create Package": "/create-package",
+    "Generate Package": "/create-package",
     "Job Tracker": "/job-tracker",
     Analytics: "/analytics",
     Settings: "/settings",
@@ -3395,7 +3395,7 @@ return;
         "Dashboard",
         "Career Memory",
         "Find Jobs",
-        "Create Package",
+        "Generate Package",
         "Job Tracker",
         "Analytics",
         "Settings",
@@ -3409,7 +3409,7 @@ return;
             ? "🧠"
             : item === "Find Jobs"
             ? "🔍"
-            : item === "Create Package"
+            : item === "Generate Package"
             ? "📦"
             : item === "Job Tracker"
             ? "💼"

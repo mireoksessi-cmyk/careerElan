@@ -41,7 +41,7 @@ export default function FilterBar({
             onClick={() => setFilterStatus(item)}
             className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
               filterStatus === item
-                ? "bg-blue-600 text-black"
+                ? "bg-blue-600 text-white"
                 : "bg-gray-100 hover:bg-blue-50"
             }`}
           >

@@ -1,6 +1,7 @@
 "use client";
 
 
+import Link from "next/link";
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import { exportPdfFromText, buildPdfBlob } from "@/lib/brand/render/pdfDocumentExport";
 import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
@@ -400,7 +401,7 @@ export function shouldProceedWithNavigation(isDirty: boolean, confirmFn: () => b
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
   { label: "Career Memory", href: "/career-memory", icon: "🧠" },
-  { label: "Create Package", href: "/create-package", icon: "📦" },
+  { label: "Generate Package", href: "/create-package", icon: "📦" },
   { label: "Find Jobs", href: "/find-jobs", icon: "🔍" },
   { label: "Paste Job", href: "/paste-job", icon: "📋" },
   { label: "Job Tracker", href: "/job-tracker", icon: "💼" },
@@ -3297,13 +3298,13 @@ async function downloadDocx() {
 
           <div className="mt-16 rounded-2xl bg-blue-50 p-5 text-center">
             <div className="text-3xl">👑</div>
-            <h3 className="mt-3 font-extrabold">Upgrade to Pro</h3>
+            <h3 className="mt-3 font-extrabold">Career Élan Pro</h3>
             <p className="mt-2 text-sm leading-6 text-gray-600">
-              Unlock unlimited AI package generation.
+              More capacity and premium features are coming soon.
             </p>
-            <button className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">
-              Upgrade Now
-            </button>
+            <Link href="/pricing" className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">
+              Coming Soon
+            </Link>
           </div>
         </aside>
 

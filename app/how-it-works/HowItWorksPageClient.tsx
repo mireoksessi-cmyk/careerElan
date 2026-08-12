@@ -258,7 +258,7 @@ function HowItWorksPageBody() {
               onClick={() => openAuth("login")}
               className="rounded-xl border border-white/40 px-6 py-3 text-sm font-black text-white transition hover:bg-white/10"
             >
-              Log In
+              Log in
             </button>
           </div>
         </div>

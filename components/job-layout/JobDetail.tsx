@@ -347,7 +347,7 @@ export default function JobDetail({
           }
           className={`rounded-xl px-5 py-3 font-semibold transition ${
             selectedTab === "resume"
-              ? "bg-blue-600 text-black"
+              ? "bg-blue-600 text-white"
               : "bg-gray-100 text-black hover:bg-blue-50"
           }`}
         >
@@ -360,7 +360,7 @@ export default function JobDetail({
           }
           className={`rounded-xl px-5 py-3 font-semibold transition ${
             selectedTab === "cover"
-              ? "bg-blue-600 text-black"
+              ? "bg-blue-600 text-white"
               : "bg-gray-100 text-black hover:bg-blue-50"
           }`}
         >
@@ -373,7 +373,7 @@ export default function JobDetail({
           }
           className={`rounded-xl px-5 py-3 font-semibold transition ${
             selectedTab === "email"
-              ? "bg-blue-600 text-black"
+              ? "bg-blue-600 text-white"
               : "bg-gray-100 text-black hover:bg-blue-50"
           }`}
         >
@@ -386,7 +386,7 @@ export default function JobDetail({
           }
           className={`rounded-xl px-5 py-3 font-semibold transition ${
             selectedTab === "notes"
-              ? "bg-blue-600 text-black"
+              ? "bg-blue-600 text-white"
               : "bg-gray-100 text-black hover:bg-blue-50"
           }`}
         >

@@ -1,12 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 const menuItems = [
   "Dashboard",
   "Career Memory",
   "Find Jobs",
-  "Create Package",
+  "Generate Package",
   "Job Tracker",
   "Analytics",
   "Settings",
@@ -20,7 +21,7 @@ function getMenuHref(item: string) {
       return "/career-memory";
     case "Find Jobs":
       return "/find-jobs";
-    case "Create Package":
+    case "Generate Package":
       return "/create-package";
     case "Job Tracker":
       return "/job-tracker";
@@ -41,7 +42,7 @@ function getMenuIcon(item: string) {
       return "🧠";
     case "Find Jobs":
       return "🔍";
-    case "Create Package":
+    case "Generate Package":
       return "📦";
     case "Job Tracker":
       return "💼";
@@ -113,17 +114,19 @@ export default function Sidebar({
         </div>
 
         <h3 className="mt-3 font-bold">
-          Upgrade to Pro
+          Career Élan Pro
         </h3>
 
         <p className="mt-2 text-sm text-black">
-          Unlock unlimited AI features
-          and faster package generation.
+          More capacity and premium features are coming soon.
         </p>
 
-        <button className="mt-5 w-full rounded-xl bg-blue-600 py-3 font-semibold text-black">
-          Upgrade
-        </button>
+        <Link
+          href="/pricing"
+          className="mt-5 block w-full rounded-xl bg-blue-600 py-3 font-semibold text-white"
+        >
+          Coming Soon
+        </Link>
 
       </div>
 

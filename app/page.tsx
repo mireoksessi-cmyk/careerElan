@@ -355,10 +355,10 @@ function HomePageBody() {
           <div className="h-px flex-1 bg-slate-200" />
         </div>
         <div className="mx-auto grid max-w-[1440px] gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-100 md:grid-cols-5">
-          <Stat icon="▣" label="Applications Generated" value="25,000+" />
-          <Stat icon="◎" label="Average ATS Match" value="92%" accent="text-green-600" />
-          <Stat icon="◷" label="Average Time Saved" value="75%" accent="text-violet-600" highlight />
-          <Stat icon="☆" label="User Satisfaction" value="4.9/5" accent="text-yellow-500" />
+          <Stat icon="▣" label="Generated in Minutes" value="Tailored Applications" />
+          <Stat icon="◎" label="Resume Templates" value="ATS-Friendly" accent="text-green-600" />
+          <Stat icon="◷" label="Built for Canada" value="Career Tools" accent="text-violet-600" highlight />
+          <Stat icon="☆" label="Apply Everywhere" value="One Profile" accent="text-yellow-500" />
           <div className="text-center md:border-r md:border-slate-200 last:border-r-0">
             <p className="text-xl font-black text-yellow-400">★★★★★</p>
             <p className="mt-2 text-sm font-bold text-slate-700">Join our first users.</p>

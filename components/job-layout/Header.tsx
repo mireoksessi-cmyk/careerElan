@@ -53,11 +53,11 @@ async function loadProfile() {
 
       <div className="flex items-center gap-4">
 
-        <button className="rounded-full bg-white p-3 shadow-sm">
+        <button aria-label="Notifications" className="rounded-full bg-white p-3 shadow-sm">
           🔔
         </button>
 
-        <button className="rounded-full bg-white p-3 shadow-sm">
+        <button aria-label="Open chat" className="rounded-full bg-white p-3 shadow-sm">
           💬
         </button>
 

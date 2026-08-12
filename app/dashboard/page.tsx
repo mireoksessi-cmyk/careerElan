@@ -2,6 +2,7 @@
 
 import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   useEffect,
@@ -27,7 +28,7 @@ const menuItems = [
   "Dashboard",
   "Career Memory",
   "Find Jobs",
-  "Create Package",
+  "Generate Package",
   "Job Tracker",
   "Analytics",
   "Settings",
@@ -104,7 +105,7 @@ function getMenuHref(item: string) {
   if (item === "Dashboard") return "/dashboard";
   if (item === "Career Memory") return "/career-memory";
   if (item === "Find Jobs") return "/find-jobs";
-  if (item === "Create Package") return "/create-package";
+  if (item === "Generate Package") return "/create-package";
   if (item === "Job Tracker") return "/job-tracker";
   if (item === "Analytics") return "/analytics";
   if (item === "Settings") return "/settings";
@@ -115,7 +116,7 @@ function getMenuIcon(item: string) {
   if (item === "Dashboard") return "🏠";
   if (item === "Career Memory") return "🧠";
   if (item === "Find Jobs") return "🔍";
-  if (item === "Create Package") return "📦";
+  if (item === "Generate Package") return "📦";
   if (item === "Job Tracker") return "💼";
   if (item === "Analytics") return "📊";
   return "⚙️";
@@ -2708,9 +2709,9 @@ if (!user) {
 
           <div className="mt-64 rounded-2xl bg-blue-50 p-5 text-center">
             <div className="text-3xl">👑</div>
-            <h3 className="mt-3 font-extrabold">Upgrade to Pro</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">Unlock unlimited AI features and boost your job search.</p>
-            <button className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">Upgrade Now</button>
+            <h3 className="mt-3 font-extrabold">Career Élan Pro</h3>
+            <p className="mt-2 text-sm leading-6 text-gray-600">More capacity and premium features are coming soon.</p>
+            <Link href="/pricing" className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">Coming Soon</Link>
           </div>
         </aside>
 
@@ -2733,8 +2734,8 @@ if (!user) {
             />
 
             <div className="flex items-center gap-4">
-              <button className="rounded-full bg-white p-3 shadow-sm">🔔</button>
-              <button className="rounded-full bg-white p-3 shadow-sm">💬</button>
+              <button aria-label="Notifications" className="rounded-full bg-white p-3 shadow-sm">🔔</button>
+              <button aria-label="Open chat" className="rounded-full bg-white p-3 shadow-sm">💬</button>
 
               <a href="/settings" className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-blue-50">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
@@ -3828,12 +3829,12 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       Plan: Free Beta
     </p>
 
-    <button
-      type="button"
+    <Link
+      href="/pricing"
       className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-600 transition hover:bg-blue-100"
     >
-      ⚡ Upgrade to Pro
-    </button>
+      ⚡ Coming Soon
+    </Link>
   </div>
 </div>
 

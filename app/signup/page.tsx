@@ -1,20 +1,16 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import AuthEntryPageClient from "@/components/marketing/AuthEntryPageClient";
 
+export const metadata: Metadata = {
+  title: "Sign up | Career Élan",
+  description: "Create a Career Élan account to build one profile and apply everywhere.",
+};
+
+/*
+  Server Component wrapper so `metadata` can stay exported here (a "use
+  client" file cannot export it). AuthEntryPageClient auto-opens the real
+  homepage auth modal (Phase 2A Quick Win - see that file's header comment).
+*/
 export default function SignUpPage() {
-  return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="rounded-2xl bg-white p-8 shadow-lg">
-        <h1 className="text-2xl font-bold">Sign Up</h1>
-        <p className="mt-2 text-slate-500">
-          Please sign up from the homepage modal.
-        </p>
-        <Link
-          href="/"
-          className="mt-6 inline-block rounded-xl bg-blue-600 px-5 py-3 font-bold text-white"
-        >
-          Go to Home
-        </Link>
-      </div>
-    </main>
-  );
+  return <AuthEntryPageClient mode="signup" />;
 }
