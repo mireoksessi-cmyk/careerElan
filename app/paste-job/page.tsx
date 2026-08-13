@@ -2,6 +2,7 @@
 
 
 import Link from "next/link";
+import MobileNav from "@/components/job-layout/MobileNav";
 import { exportDocx, exportPdf } from "@/lib/exportDocument";
 import { exportPdfFromText, buildPdfBlob } from "@/lib/brand/render/pdfDocumentExport";
 import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
@@ -3266,8 +3267,9 @@ async function downloadDocx() {
 
       
     <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+      <MobileNav active="Paste Job" />
       <div className="flex flex-1">
-        <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+        <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />

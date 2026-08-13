@@ -4,6 +4,7 @@ import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import MobileNav from "@/components/job-layout/MobileNav";
 import {
   useEffect,
   useRef,
@@ -2679,8 +2680,10 @@ if (!user) {
         </div>
       )}
 
+      <MobileNav active="Dashboard" />
+
       <div className="flex flex-1 flex-col md:flex-row">
-        <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
+        <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />

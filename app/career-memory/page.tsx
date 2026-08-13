@@ -4,6 +4,7 @@ import Image from "next/image";
 import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import MobileNav from "@/components/job-layout/MobileNav";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
@@ -3371,8 +3372,10 @@ return;
 
   </div>
 )}
+      <MobileNav active="Career Memory" />
+
       <div className="flex flex-1 flex-col md:flex-row">
-  <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
+  <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
   <div className="flex items-center justify-between">
     <a href="/dashboard">
       <Image

@@ -1,6 +1,7 @@
 "use client";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
+import MobileNav from "@/components/job-layout/MobileNav";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -366,8 +367,9 @@ setCategory(state.category || "All");
   return (
   
     <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+      <MobileNav active="Find Jobs" />
       <div className="flex flex-1">
-        <aside className="w-60 border-r border-blue-100 bg-white px-5 py-6">
+        <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
           <div className="flex items-center justify-between">
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />

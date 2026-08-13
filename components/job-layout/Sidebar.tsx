@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import MobileNav from "@/components/job-layout/MobileNav";
 
 const menuItems = [
   "Dashboard",
@@ -63,7 +64,9 @@ export default function Sidebar({
   active,
 }: SidebarProps) {
   return (
-    <aside className="w-full border-r border-blue-100 bg-white px-5 py-6 md:w-60">
+    <>
+    <MobileNav active={active} />
+    <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
 
       <div className="flex items-center justify-between">
 
@@ -131,5 +134,6 @@ export default function Sidebar({
       </div>
 
     </aside>
+    </>
   );
 }
