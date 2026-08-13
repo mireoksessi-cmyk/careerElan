@@ -9,6 +9,7 @@ import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   COVER_LETTER_ALLOWED_EXTENSIONS,
   MAX_UPLOAD_BYTES,
@@ -224,6 +225,7 @@ type UploadedResumeKind = "none" | "pdf" | "txt" | "docx" | "other";
 export default function CareerMemoryPage() {
   const { user, loading, refresh } = useLogin();
   const router = useRouter();
+  const toast = useToast();
   const [mode, setMode] = useState<
     "start" | "import" | "importCoverLetter" | "build"
   >("start");
@@ -1042,7 +1044,7 @@ return data;
   
   async function persistMemory() {
   if (!user) {
-    alert("We couldn't load your account. Please refresh the page and try again.");
+    toast.error("We couldn't load your account. Please refresh the page and try again.");
     return;
   }
 
@@ -1110,7 +1112,7 @@ volunteer_experience:
 
 if (error) {
   console.error("CAREER MEMORY SAVE ERROR =", error);
-  alert(error.message);
+  toast.error(error.message);
   return false;
 }
 
@@ -1142,7 +1144,7 @@ return true;
 
   await persistMemory();
 
-  alert("Career Memory saved.");
+  toast.success("Career Memory saved.");
 }
 
   /*
@@ -2431,7 +2433,7 @@ return;
 
   async function saveCoverLetterAndContinue() {
     await persistMemory();
-    alert("Cover Letter saved.");
+    toast.success("Cover Letter saved.");
     continueToDashboard();
   }
 

@@ -9,6 +9,8 @@ import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import { normalizeResumeTemplateId } from "@/lib/brand/render/templateId";
 import CanonicalTemplateSelector from "@/components/canonicalGeneratePackage/CanonicalTemplateSelector";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
 /*
   Phase 6I.6.33B - preserved-original-layout DPE output (D안 Phase 1)
   is no longer a supported user-facing rendering mode (see product
@@ -1014,6 +1016,8 @@ return lines.join("\n").trim();
 
 export default function PasteJobPage() {
   const { user, loading, hasResumeData } = useLogin();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [showResumeRequiredModal, setShowResumeRequiredModal] =
     useState(false);
 
@@ -2158,7 +2162,7 @@ packageAnalysis: null,
     successMessage = "Job posting analyzed successfully. Your application package is ready."
   ) {
     if (!jobText.trim()) {
-      alert("Please add a job URL, job description, or upload a file first.");
+      toast.warning("Please add a job URL, job description, or upload a file first.");
       return;
     }
 
@@ -2367,7 +2371,7 @@ packageAnalysis: null,
         error?.message ||
         "This website couldn't be analyzed automatically. Please paste the job description or upload a PDF, DOCX, or screenshot.";
 
-      alert(failureMessage);
+      toast.error(failureMessage);
 
       /*
         A failed/invalid analysis (e.g. NOT_A_SPECIFIC_JOB_POSTING) must
@@ -2525,7 +2529,7 @@ async function loadSelectedApplicationMaterials() {
 
   async function handleGeneratePackage() {
   if (!hasResumeData) {
-    alert(
+    toast.warning(
       "Please write your Career Memory or upload a resume before creating an application package."
     );
     setShowResumeRequiredModal(true);
@@ -2533,21 +2537,21 @@ async function loadSelectedApplicationMaterials() {
   }
 
   if (!analyzed) {
-    alert(
+    toast.warning(
       "Please analyze the job posting first."
     );
     return;
   }
 
   if (resumeSelectionStatus !== "ready") {
-    alert(
+    toast.warning(
       "Please select a resume from Dashboard."
     );
     return;
   }
 
   if (!generationRequestId) {
-    alert(
+    toast.warning(
       "Please analyze the job posting first."
     );
     return;
@@ -2694,18 +2698,18 @@ async function loadSelectedApplicationMaterials() {
     if (
       error?.code === "GENERATE_PACKAGE_LIMIT_REACHED"
     ) {
-      alert(
+      toast.error(
         "Generate Package limit reached\n\nYou've reached your monthly Generate Package limit. You can generate up to 3 packages per month."
       );
     } else if (
       error?.name === "TimeoutError" ||
       error?.name === "AbortError"
     ) {
-      alert(
+      toast.error(
         "This is taking longer than expected. Please try again."
       );
     } else {
-      alert(
+      toast.error(
         error?.message ||
           "Failed to generate package."
       );
@@ -2822,9 +2826,11 @@ async function loadSelectedApplicationMaterials() {
     const hasCompleteCoverLetter = isCompleteApplicationMaterial(coverLetter);
 
     if (!hasCompleteResume && !hasCompleteCoverLetter) {
-      const shouldGoToCareerMemory = window.confirm(
-        "Your saved resume or cover letter is missing or incomplete. Go to Career Memory to complete it now?"
-      );
+      const shouldGoToCareerMemory = await confirm({
+        title: "Go to Career Memory?",
+        description: "Your saved resume or cover letter is missing or incomplete. Go to Career Memory to complete it now?",
+        confirmLabel: "Go to Career Memory",
+      });
 
       if (
         shouldGoToCareerMemory &&
@@ -2885,7 +2891,7 @@ David Kwak`,
     const targetUrl = analysis.jobDetails.applyUrl || jobUrl.trim();
 
     if (!targetUrl) {
-      alert("No employer apply link is available. Paste the job URL first.");
+      toast.warning("No employer apply link is available. Paste the job URL first.");
       return;
     }
 
@@ -2920,7 +2926,7 @@ async function downloadDocx() {
     if (canonicalPreviewTemplateId) {
       const res = await fetch(`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=docx`);
       if (!res.ok) {
-        alert("Could not generate the DOCX for your canonical resume template.");
+        toast.error("Could not generate the DOCX for your canonical resume template.");
         return;
       }
       const blob = await res.blob();
@@ -3003,7 +3009,7 @@ async function downloadDocx() {
       .eq("user_id", user.id);
 
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
       return;
     }
   } else {
@@ -3042,14 +3048,14 @@ async function downloadDocx() {
       .single();
 
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
       return;
     }
 
     setApplicationId(data.id);
   }
 
-  alert("Application package has been saved successfully!");
+  toast.success("Application package has been saved successfully!");
 
   setMessage("Application package saved to cloud.");
   setIsDirty(false);
@@ -3084,7 +3090,7 @@ async function downloadDocx() {
 
   function downloadSelected(extension: "docx" | "pdf" | "txt") {
     if (!generated) {
-      alert("Generate the package first.");
+      toast.warning("Generate the package first.");
       return;
     }
 

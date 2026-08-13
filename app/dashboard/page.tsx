@@ -23,6 +23,8 @@ import ProvinceSelect from "@/components/careerFairs/ProvinceSelect";
 import { useUserLocation } from "@/lib/careerFairs/useUserLocation";
 import type { RecommendedCareerFair } from "@/lib/careerFairs/types";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
 
 const FREE_PACKAGE_LIMIT = 3;
 const menuItems = [
@@ -1329,6 +1331,8 @@ const aiUsageRemaining =
     : Math.max(0, aiUsageLimit - aiUsageUsed);
   const [showPackageChoice, setShowPackageChoice] = useState(false);
   const router = useRouter();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   
 
@@ -1359,18 +1363,18 @@ async function saveSelection(
 
 async function deleteSelectedResume() {
   if (!user) {
-    alert("Please sign in.");
+    toast.error("Please sign in.");
     return;
   }
 
   if (!selectedResume) {
-    alert("Please select a resume first.");
+    toast.warning("Please select a resume first.");
     return;
   }
 
   // Career Memory Resume는 사용자당 1개인 기본 이력서이므로 삭제 불가
   if (selectedResume === "career_memory") {
-  alert(
+  toast.warning(
     "Career Memory Resume cannot be deleted. You can edit it from Career Memory."
   );
   return;
@@ -1381,13 +1385,16 @@ async function deleteSelectedResume() {
   );
 
   if (!resume) {
-    alert("The selected resume could not be found.");
+    toast.error("The selected resume could not be found.");
     return;
   }
 
-  const confirmed = window.confirm(
-    `Delete "${resume.file_name || "Uploaded Resume"}"?\n\nThis action cannot be undone.`
-  );
+  const confirmed = await confirm({
+    title: `Delete "${resume.file_name || "Uploaded Resume"}"?`,
+    description: "This action cannot be undone.",
+    confirmLabel: "Delete",
+    destructive: true,
+  });
 
   if (!confirmed) return;
 
@@ -1409,7 +1416,7 @@ async function deleteSelectedResume() {
           storageError
         );
 
-        alert(
+        toast.error(
           `Unable to delete the resume file: ${storageError.message}`
         );
         return;
@@ -1436,14 +1443,14 @@ async function deleteSelectedResume() {
         databaseError
       );
 
-      alert(
+      toast.error(
         `Unable to delete the resume record: ${databaseError.message}`
       );
       return;
     }
 
     if (!deletedResume) {
-      alert(
+      toast.error(
         "The resume could not be deleted. Please check the resumes table DELETE policy."
       );
       return;
@@ -1475,14 +1482,14 @@ async function deleteSelectedResume() {
     */
     await refresh();
 
-    alert("Resume deleted successfully.");
+    toast.success("Resume deleted successfully.");
   } catch (error) {
     console.error(
       "DELETE RESUME ERROR =",
       error
     );
 
-    alert("Unable to delete this resume.");
+    toast.error("Unable to delete this resume.");
   } finally {
     setDeletingAsset(null);
   }
@@ -1490,7 +1497,7 @@ async function deleteSelectedResume() {
 
 async function deleteSelectedCoverLetter() {
   if (!user) {
-    alert("Please sign in.");
+    toast.error("Please sign in.");
     return;
   }
 
@@ -1498,7 +1505,7 @@ async function deleteSelectedCoverLetter() {
     빈 문자열은 None 옵션
   */
   if (!selectedCoverLetter) {
-    alert(
+    toast.warning(
       'The "None" option cannot be deleted because it is the automatic cover letter generation option.'
     );
     return;
@@ -1510,15 +1517,18 @@ async function deleteSelectedCoverLetter() {
   );
 
   if (!coverLetter) {
-    alert(
+    toast.error(
       "The selected cover letter could not be found."
     );
     return;
   }
 
-  const confirmed = window.confirm(
-    `Delete "${coverLetter.file_name || "Uploaded Cover Letter"}"?\n\nThis action cannot be undone.`
-  );
+  const confirmed = await confirm({
+    title: `Delete "${coverLetter.file_name || "Uploaded Cover Letter"}"?`,
+    description: "This action cannot be undone.",
+    confirmLabel: "Delete",
+    destructive: true,
+  });
 
   if (!confirmed) return;
 
@@ -1542,7 +1552,7 @@ async function deleteSelectedCoverLetter() {
           storageError
         );
 
-        alert(
+        toast.error(
           `Unable to delete the cover letter file: ${storageError.message}`
         );
         return;
@@ -1569,14 +1579,14 @@ async function deleteSelectedCoverLetter() {
         databaseError
       );
 
-      alert(
+      toast.error(
         `Unable to delete the cover letter record: ${databaseError.message}`
       );
       return;
     }
 
     if (!deletedCoverLetter) {
-      alert(
+      toast.error(
         "The cover letter could not be deleted. Please check the cover_letters table DELETE policy."
       );
       return;
@@ -1607,7 +1617,7 @@ async function deleteSelectedCoverLetter() {
     */
     await refresh();
 
-    alert(
+    toast.success(
       "Cover letter deleted successfully."
     );
   } catch (error) {
@@ -1616,7 +1626,7 @@ async function deleteSelectedCoverLetter() {
       error
     );
 
-    alert(
+    toast.error(
       "Unable to delete this cover letter."
     );
   } finally {
@@ -1626,15 +1636,17 @@ async function deleteSelectedCoverLetter() {
 
 async function resetCareerMemoryResume() {
   if (!user) {
-    alert("Please sign in.");
+    toast.error("Please sign in.");
     return;
   }
 
-  const confirmed = window.confirm(
-    "Reset your Career Memory Resume?\n\n" +
-      "This will remove the information entered in Career Memory, including personal information, experience, skills, education, languages, certifications, projects, and career goals.\n\n" +
-      "Your uploaded resumes and uploaded cover letters will not be deleted."
-  );
+  const confirmed = await confirm({
+    title: "Reset your Career Memory Resume?",
+    description:
+      "This will remove the information entered in Career Memory, including personal information, experience, skills, education, languages, certifications, projects, and career goals. Your uploaded resumes and uploaded cover letters will not be deleted.",
+    confirmLabel: "Reset",
+    destructive: true,
+  });
 
   if (!confirmed) return;
 
@@ -1682,7 +1694,7 @@ async function resetCareerMemoryResume() {
         error
       );
 
-      alert(error.message);
+      toast.error(error.message);
       return;
     }
 
@@ -1690,7 +1702,7 @@ async function resetCareerMemoryResume() {
 
     await refresh();
 
-    alert(
+    toast.success(
       "Career Memory Resume has been reset."
     );
 
@@ -1702,7 +1714,7 @@ async function resetCareerMemoryResume() {
       error
     );
 
-    alert(
+    toast.error(
       "Unable to reset your Career Memory Resume."
     );
   } finally {

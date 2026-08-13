@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useModalFocusTrap } from "@/lib/hooks/useModalFocusTrap";
+import { useToast } from "@/components/ui/ToastProvider";
 
 /*
   Phase 6I.6.28 - the SAME auth modal/state/handlers that previously lived
@@ -59,6 +60,7 @@ export default function PublicAuthActionsProvider({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [loading, setLoading] = useState(false);
@@ -461,14 +463,14 @@ console.log("LOOKUP DATA =", lookupData);
     }
 
     if (data.session) {
-  alert("Your account has been created successfully.");
+  toast.success("Your account has been created successfully.");
 
   router.replace("/career-memory");
   router.refresh();
   return;
 }
 
-alert(
+toast.success(
   "Your account has been created successfully. Please check your email and verify your account before logging in."
 );
 

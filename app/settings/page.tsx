@@ -8,6 +8,8 @@ import Header from "@/components/job-layout/Header";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import { useModalFocusTrap } from "@/lib/hooks/useModalFocusTrap";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
 
 /*
   Career Elan only operates in Canada, so Country is fixed - not a free-form
@@ -47,6 +49,8 @@ export default function SettingsPage() {
  const { user, loading } = useLogin();
 
   const router = useRouter();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -111,7 +115,7 @@ export default function SettingsPage() {
 
       if (error) {
         console.error("Profile Error:", error);
-        alert(error.message);
+        toast.error(error.message);
         return;
       }
 
@@ -139,7 +143,7 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error("Unexpected Error:", err);
-      alert("Failed to load profile.");
+      toast.error("Failed to load profile.");
     } finally {
       setPageLoading(false);
     }
@@ -166,7 +170,7 @@ export default function SettingsPage() {
 })
       .eq("id", userId);
 
-    alert("Profile updated!");
+    toast.success("Profile updated!");
 
     setSaving(false);
   }
@@ -174,17 +178,17 @@ export default function SettingsPage() {
 async function changePassword() {
 
   if (!password) {
-    alert("Enter a new password.");
+    toast.warning("Enter a new password.");
     return;
   }
 
   if (password.length < 8) {
-    alert("Password must be at least 8 characters.");
+    toast.warning("Password must be at least 8 characters.");
     return;
   }
 
   if (password !== confirmPassword) {
-    alert("Passwords do not match.");
+    toast.warning("Passwords do not match.");
     return;
   }
 
@@ -195,9 +199,9 @@ async function changePassword() {
   });
 
   if (error) {
-    alert(error.message);
+    toast.error(error.message);
   } else {
-    alert("Password updated successfully.");
+    toast.success("Password updated successfully.");
     setPassword("");
     setConfirmPassword("");
   }
@@ -206,7 +210,11 @@ async function changePassword() {
 }
 
 async function logout() {
-  const ok = confirm("Are you sure you want to log out?");
+  const ok = await confirm({
+    title: "Log out?",
+    description: "You'll need to sign in again to access your account.",
+    confirmLabel: "Log Out",
+  });
 
   if (!ok) return;
 
@@ -217,7 +225,7 @@ async function logout() {
 
 async function deleteAccount() {
   if (!deletePassword) {
-    alert("Please enter your password to confirm.");
+    toast.warning("Please enter your password to confirm.");
     return;
   }
 
@@ -246,7 +254,7 @@ async function deleteAccount() {
         route builds itself - the server never forwards a raw Supabase
         error or stack trace in this response.
       */
-      alert(
+      toast.error(
         data.error ||
           "We couldn't delete your account. Please try again."
       );
@@ -262,7 +270,7 @@ async function deleteAccount() {
     router.push("/");
   } catch (error) {
     console.error("DELETE ACCOUNT ERROR =", error);
-    alert("We couldn't delete your account. Please try again.");
+    toast.error("We couldn't delete your account. Please try again.");
   } finally {
     setDeletingAccount(false);
   }

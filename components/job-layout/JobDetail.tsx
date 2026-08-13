@@ -7,6 +7,7 @@ import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
 import ApplicationTemplateSwitcher from "@/components/canonicalGeneratePackage/ApplicationTemplateSwitcher";
 import { useIframeFitScale } from "@/components/shared/useIframeFitScale";
 import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
+import { useToast } from "@/components/ui/ToastProvider";
 
 type Props = {
   selectedApplication: any;
@@ -107,6 +108,7 @@ export default function JobDetail({
     declared before the early "no application selected" return below,
     per React's rule that hooks always run in the same order.
   */
+  const toast = useToast();
   const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"idle" | "loading" | "ready" | "not-applicable" | "error">("idle");
   const [canonicalPreviewHtml, setCanonicalPreviewHtml] = useState<string | null>(null);
   /*
@@ -323,7 +325,7 @@ export default function JobDetail({
               selectedApplication.job_url
             );
 
-            alert("Copied!");
+            toast.success("Copied!");
           }}
           className="rounded-xl border border-gray-300 px-5 py-3 font-semibold hover:bg-gray-100"
         >

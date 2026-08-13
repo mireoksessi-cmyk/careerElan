@@ -59,9 +59,18 @@ export async function dismissWelcomeTourIfPresent(page: Page): Promise<void> {
   await expect(skipButton).not.toBeVisible({ timeout: 5_000 });
 }
 
+/*
+  Phase 2E replaced Settings' native window.confirm("Are you sure you
+  want to log out?") with the branded ConfirmDialogProvider
+  (components/ui/ConfirmDialogProvider.tsx), so logout now needs a
+  click on the dialog's own "Log Out" confirm button instead of a
+  native dialog accept.
+*/
 export async function logoutViaUi(page: Page): Promise<void> {
   await page.goto("/settings");
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Log Out" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Log Out", exact: true }).click();
   await page.waitForURL("**/", { timeout: 15_000 });
 }

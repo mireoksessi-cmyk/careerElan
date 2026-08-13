@@ -16,6 +16,8 @@ import { exportDocxFromText } from "@/lib/brand/render/docxDocumentExport";
 import A4Preview from "./A4Preview";
 import { useLogin } from "@/lib/auth/LoginManager";
 import { stripCoverLetterContactBlock } from "@/lib/generatePackage/textCleanup";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
 
 export default function JobTrackerPage() {
     
@@ -29,6 +31,8 @@ export default function JobTrackerPage() {
   const [interviewDate, setInterviewDate] = useState("");
   const total = applications.length;
   const { user } = useLogin();
+  const toast = useToast();
+  const confirm = useConfirm();
 const applied = applications.filter(
   (a) => a.status === "Applied"
 ).length;
@@ -99,7 +103,7 @@ const [filterStatus, setFilterStatus] =
 
   if (error) {
     console.error(error);
-    alert(error.message);
+    toast.error(error.message);
     setLoading(false);
     return;
   }
@@ -138,11 +142,11 @@ const [filterStatus, setFilterStatus] =
     .eq("user_id", user.id);
 
   if (error) {
-    alert("Failed to save.");
+    toast.error("Failed to save.");
     return;
   }
 
- alert("Notes saved.");
+ toast.success("Notes saved.");
 
 setSelectedApplication({
   ...selectedApplication,
@@ -164,7 +168,7 @@ async function saveStatus() {
 
   if (error) {
     console.error(error);
-    alert(error.message);
+    toast.error(error.message);
     return;
   }
 
@@ -186,7 +190,7 @@ async function saveStatus() {
     )
   );
 
-  alert("Status updated.");
+  toast.success("Status updated.");
 }
 
 async function saveInterviewDate() {
@@ -196,7 +200,7 @@ async function saveInterviewDate() {
     status === "Interview" &&
     !interviewDate
   ) {
-    alert(
+    toast.warning(
       "Please select an interview date."
     );
     return;
@@ -216,7 +220,7 @@ async function saveInterviewDate() {
 
   if (error) {
     console.error(error);
-    alert(error.message);
+    toast.error(error.message);
     return;
   }
 
@@ -239,7 +243,7 @@ async function saveInterviewDate() {
     )
   );
 
-  alert("Interview date saved.");
+  toast.success("Interview date saved.");
 }
 
 async function clearNotes() {
@@ -254,7 +258,7 @@ async function clearNotes() {
     .eq("user_id", user.id);
 
   if (error) {
-    alert(error.message);
+    toast.error(error.message);
     return;
   }
 
@@ -265,7 +269,7 @@ async function clearNotes() {
     notes: "",
   });
 
-  alert("Notes cleared.");
+  toast.success("Notes cleared.");
 
   loadApplications();
 }
@@ -273,12 +277,13 @@ async function clearNotes() {
 async function deleteApplication() {
   if (!selectedApplication || !user) return;
 
-  if (
-    !confirm(
-      "Delete this job package permanently?\n\nThis cannot be undone."
-    )
-  )
-    return;
+  const ok = await confirm({
+    title: "Delete this job package permanently?",
+    description: "This cannot be undone.",
+    confirmLabel: "Delete",
+    destructive: true,
+  });
+  if (!ok) return;
 
   /*
     .select("id") turns this into a genuine success check: Postgrest
@@ -297,18 +302,18 @@ async function deleteApplication() {
     .select("id");
 
   if (error) {
-    alert(error.message);
+    toast.error(error.message);
     return;
   }
 
   if (!data || data.length === 0) {
-    alert(
+    toast.error(
       "Could not delete this package - it may have already been removed. Please refresh and try again."
     );
     return;
   }
 
-  alert("Package deleted.");
+  toast.success("Package deleted.");
 
   /*
     Cross-tab/cross-page signal only - never read back as a source of
@@ -372,7 +377,7 @@ async function deleteAllApplications() {
   setDeletingAll(false);
 
   if (error) {
-    alert("Unable to delete all applications. Please try again.");
+    toast.error("Unable to delete all applications. Please try again.");
     return;
   }
 
@@ -390,7 +395,7 @@ async function deleteAllApplications() {
 
   await loadApplications();
 
-  alert("All applications deleted.");
+  toast.success("All applications deleted.");
 }
 
 async function downloadPackage(type: "docx" | "pdf") {
@@ -434,7 +439,7 @@ async function downloadPackage(type: "docx" | "pdf") {
           }
         }
         if (resolution?.kind === "selection-required") {
-          alert("Choose a default resume template on Dashboard before downloading this resume.");
+          toast.warning("Choose a default resume template on Dashboard before downloading this resume.");
           return;
         }
       } catch {
