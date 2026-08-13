@@ -2632,13 +2632,13 @@ if (!user) {
 
       {showTour && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-labelledby="welcome-tour-title" className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>
-                <h2 className="text-3xl font-extrabold">Welcome to Career Élan! 👋</h2>
+                <h2 id="welcome-tour-title" className="text-3xl font-extrabold">Welcome to Career Élan! 👋</h2>
                 <p className="mt-2 text-sm text-gray-500">Take a quick 3-step tour to get started.</p>
               </div>
-              <button onClick={closeTour} className="text-2xl text-gray-400 hover:text-gray-700">×</button>
+              <button onClick={closeTour} aria-label="Close" className="text-2xl text-gray-400 hover:text-gray-700"><span aria-hidden="true">×</span></button>
             </div>
 
             <div className="mt-8 grid gap-5 md:grid-cols-3">

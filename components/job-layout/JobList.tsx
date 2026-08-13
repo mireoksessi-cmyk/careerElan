@@ -88,8 +88,9 @@ export default function JobList({
 
           .map((app) => (
 
-            <div
+            <button
               key={app.id}
+              type="button"
               onClick={() => {
 
                 setSelectedApplication(app);
@@ -106,6 +107,8 @@ export default function JobList({
               }}
 
               className="
+                w-full
+                text-left
                 cursor-pointer
                 rounded-2xl
                 border
@@ -116,6 +119,10 @@ export default function JobList({
                 hover:-translate-y-1
                 hover:border-blue-300
                 hover:shadow-lg
+                focus-visible:outline-none
+                focus-visible:ring-2
+                focus-visible:ring-blue-600
+                focus-visible:ring-offset-2
               "
             >
 
@@ -205,7 +212,7 @@ export default function JobList({
   </div>
 </div>
 
-            </div>
+            </button>
 
           ))}
 

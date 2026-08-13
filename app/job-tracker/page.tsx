@@ -523,7 +523,7 @@ return (
 />
     {loading ? (
 
-      <p className="mt-6">Loading...</p>
+      <p role="status" aria-live="polite" className="mt-6">Loading...</p>
 
     ) : (
 

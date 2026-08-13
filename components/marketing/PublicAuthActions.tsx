@@ -4,11 +4,13 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useModalFocusTrap } from "@/lib/hooks/useModalFocusTrap";
 
 /*
   Phase 6I.6.28 - the SAME auth modal/state/handlers that previously lived
@@ -77,6 +79,16 @@ const [
   const [loginId, setLoginId] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [agreedToLegalTerms, setAgreedToLegalTerms] = useState(false);
+
+  const authModalPanelRef = useRef<HTMLDivElement | null>(null);
+  const authModalCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  useModalFocusTrap(
+    showAuthModal,
+    authModalPanelRef,
+    authModalCloseButtonRef,
+    () => setShowAuthModal(false)
+  );
+
 useEffect(() => {
   const params = new URLSearchParams(
     window.location.search
@@ -657,10 +669,17 @@ async function handleUpdatePassword() {
 
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/30 px-6 py-6 backdrop-blur-md">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-[2rem] border border-slate-200 bg-white p-8 shadow-2xl">
+          <div
+            ref={authModalPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="auth-modal-title"
+            aria-describedby="auth-modal-description"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-[2rem] border border-slate-200 bg-white p-8 shadow-2xl"
+          >
             <div className="mb-6 flex items-start justify-between">
               <div>
-                <h2 className="text-2xl font-black text-slate-950">
+                <h2 id="auth-modal-title" className="text-2xl font-black text-slate-950">
   {authMode === "login"
     ? "Welcome back"
     : authMode === "signup"
@@ -670,7 +689,7 @@ async function handleUpdatePassword() {
     : "Create a new password"}
 </h2>
 
-<p className="mt-2 text-sm font-medium text-slate-500">
+<p id="auth-modal-description" className="mt-2 text-sm font-medium text-slate-500">
   {authMode === "login"
     ? "Continue building smarter applications."
     : authMode === "signup"
@@ -680,7 +699,15 @@ async function handleUpdatePassword() {
     : "Enter and confirm your new password."}
 </p>
               </div>
-              <button type="button" onClick={() => setShowAuthModal(false)} className="text-2xl leading-none text-slate-400 transition hover:text-slate-700">×</button>
+              <button
+                ref={authModalCloseButtonRef}
+                type="button"
+                onClick={() => setShowAuthModal(false)}
+                aria-label="Close"
+                className="text-2xl leading-none text-slate-400 transition hover:text-slate-700"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
             </div>
 
            {authMode !== "forgot-password" &&
@@ -1050,7 +1077,7 @@ async function handleUpdatePassword() {
 )}
 
 {message && (
-  <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-600">
+  <p role="status" aria-live="polite" className="mt-4 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-600">
     {message}
   </p>
 )}
@@ -1088,6 +1115,25 @@ async function handleUpdatePassword() {
   );
 }
 
-function Input({ value, onChange, placeholder, icon, type = "text" }: { value: string; onChange: (value: string) => void; placeholder: string; icon: string; type?: string }) {
-  return <div className="flex items-center rounded-xl border border-slate-300 px-4 transition focus-within:border-blue-600"><span className="mr-3 text-slate-400">{icon}</span><input value={value} onChange={(e) => onChange(e.target.value)} type={type} placeholder={placeholder} className="w-full bg-transparent py-3 outline-none" /></div>;
+/*
+  Only one auth mode's fields render at a time (the JSX above is an
+  if/else chain keyed on authMode), so an id slugified from this field's
+  own placeholder is always unique within the current render - no id prop
+  needed at each of this component's ~13 call sites.
+*/
+function slugifyForId(text: string): string {
+  return "auth-field-" + text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function Input({ value, onChange, placeholder, icon, type = "text", autoComplete }: { value: string; onChange: (value: string) => void; placeholder: string; icon: string; type?: string; autoComplete?: string }) {
+  const id = slugifyForId(placeholder);
+  return (
+    <div>
+      <label htmlFor={id} className="sr-only">{placeholder}</label>
+      <div className="flex items-center rounded-xl border border-slate-300 px-4 transition focus-within:border-blue-600">
+        <span aria-hidden="true" className="mr-3 text-slate-400">{icon}</span>
+        <input id={id} value={value} onChange={(e) => onChange(e.target.value)} type={type} placeholder={placeholder} autoComplete={autoComplete} className="w-full bg-transparent py-3 outline-none" />
+      </div>
+    </div>
+  );
 }

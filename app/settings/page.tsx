@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/job-layout/Sidebar";
 import Header from "@/components/job-layout/Header";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
+import { useModalFocusTrap } from "@/lib/hooks/useModalFocusTrap";
 
 /*
   Career Elan only operates in Canada, so Country is fixed - not a free-form
@@ -69,6 +70,14 @@ export default function SettingsPage() {
     timezone: "",
     email_notifications: true,
     marketing_notifications: false,
+  });
+
+  const deleteModalPanelRef = useRef<HTMLDivElement | null>(null);
+  const deleteModalCloseRef = useRef<HTMLButtonElement | null>(null);
+  useModalFocusTrap(showDeleteModal, deleteModalPanelRef, deleteModalCloseRef, () => {
+    setShowDeleteModal(false);
+    setDeleteText("");
+    setDeletePassword("");
   });
 
   useEffect(() => {
@@ -262,7 +271,7 @@ async function deleteAccount() {
   if (loading) {
     return (
       <main className="min-h-screen bg-[#f6fbff] flex items-center justify-center">
-        <p className="text-lg font-semibold">Loading...</p>
+        <p role="status" aria-live="polite" className="text-lg font-semibold">Loading...</p>
       </main>
     );
   }
@@ -300,11 +309,12 @@ async function deleteAccount() {
 
                 <div>
 
-                  <label className="font-semibold">
+                  <label htmlFor="settings-full-name" className="font-semibold">
                     Full Name
                   </label>
 
                   <input
+                    id="settings-full-name"
                     className="mt-2 w-full rounded-xl border p-3"
                     value={profile.full_name}
                     onChange={(e) =>
@@ -319,11 +329,12 @@ async function deleteAccount() {
 
                 <div>
 
-                  <label className="font-semibold">
+                  <label htmlFor="settings-login-id" className="font-semibold">
                     Login ID
                   </label>
 
                   <input
+                    id="settings-login-id"
                     disabled
                     className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
                     value={profile.login_id}
@@ -333,11 +344,12 @@ async function deleteAccount() {
 
                 <div>
 
-                  <label className="font-semibold">
+                  <label htmlFor="settings-email" className="font-semibold">
                     Email
                   </label>
 
                   <input
+                    id="settings-email"
                     disabled
                     className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
                     value={profile.email}
@@ -347,11 +359,12 @@ async function deleteAccount() {
 
                 <div>
 
-                  <label className="font-semibold">
+                  <label htmlFor="settings-phone" className="font-semibold">
                     Phone
                   </label>
 
                   <input
+                    id="settings-phone"
                     className="mt-2 w-full rounded-xl border p-3"
                     value={profile.phone}
                     onChange={(e) =>
@@ -368,11 +381,12 @@ async function deleteAccount() {
 
                   <div>
 
-                    <label className="font-semibold">
+                    <label htmlFor="settings-country" className="font-semibold">
                       Country
                     </label>
 
                     <input
+                      id="settings-country"
                       disabled
                       className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
                       value={FIXED_COUNTRY}
@@ -383,11 +397,12 @@ async function deleteAccount() {
 
                   <div>
 
-                    <label className="font-semibold">
+                    <label htmlFor="settings-timezone" className="font-semibold">
                       Time Zone
                     </label>
 
                     <select
+                      id="settings-timezone"
                       className="mt-2 w-full rounded-xl border p-3"
                       value={profile.timezone}
                       onChange={(e) =>
@@ -430,12 +445,14 @@ async function deleteAccount() {
 
     <div>
 
-      <label className="font-semibold">
+      <label htmlFor="settings-new-password" className="font-semibold">
         New Password
       </label>
 
       <input
+        id="settings-new-password"
         type="password"
+        autoComplete="new-password"
         value={password}
         onChange={(e) =>
           setPassword(e.target.value)
@@ -447,12 +464,14 @@ async function deleteAccount() {
 
     <div>
 
-      <label className="font-semibold">
+      <label htmlFor="settings-confirm-password" className="font-semibold">
         Confirm Password
       </label>
 
       <input
+        id="settings-confirm-password"
         type="password"
+        autoComplete="new-password"
         value={confirmPassword}
         onChange={(e) =>
           setConfirmPassword(e.target.value)
@@ -617,9 +636,15 @@ async function deleteAccount() {
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
 
-          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
+          <div
+            ref={deleteModalPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-account-modal-title"
+            className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl"
+          >
 
-            <h2 className="text-2xl font-bold">
+            <h2 id="delete-account-modal-title" className="text-2xl font-bold">
               Delete Account
             </h2>
 
@@ -627,23 +652,26 @@ async function deleteAccount() {
               This action is permanent and cannot be undone.
             </p>
 
-            <p className="mt-2 text-sm text-gray-600">
+            <label htmlFor="delete-account-confirm-text" className="mt-2 block text-sm text-gray-600">
               Type <span className="font-bold">DELETE</span> to continue.
-            </p>
+            </label>
 
             <input
+              id="delete-account-confirm-text"
               value={deleteText}
               onChange={(e) => setDeleteText(e.target.value)}
-              className="mt-5 w-full rounded-xl border p-3"
+              className="mt-2 w-full rounded-xl border p-3"
               placeholder="Type DELETE"
             />
 
-            <p className="mt-4 text-sm text-gray-600">
+            <label htmlFor="delete-account-password" className="mt-4 block text-sm text-gray-600">
               Enter your password to confirm.
-            </p>
+            </label>
 
             <input
+              id="delete-account-password"
               type="password"
+              autoComplete="current-password"
               value={deletePassword}
               onChange={(e) => setDeletePassword(e.target.value)}
               className="mt-2 w-full rounded-xl border p-3"
@@ -653,6 +681,7 @@ async function deleteAccount() {
             <div className="mt-8 flex justify-end gap-3">
 
               <button
+                ref={deleteModalCloseRef}
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDeleteText("");

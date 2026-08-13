@@ -235,7 +235,7 @@ export default function AnalyticsPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f6fbff]">
-        <p className="font-bold text-gray-500">
+        <p role="status" aria-live="polite" className="font-bold text-gray-500">
           Loading analytics...
         </p>
       </div>
