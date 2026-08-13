@@ -11,6 +11,8 @@ import CanonicalTemplateSelector from "@/components/canonicalGeneratePackage/Can
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 /*
   Phase 6I.6.33B - preserved-original-layout DPE output (D안 Phase 1)
   is no longer a supported user-facing rendering mode (see product
@@ -3272,7 +3274,7 @@ async function downloadDocx() {
       )}
 
       
-    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-slate-900">
       <MobileNav active="Paste Job" />
       <div className="flex flex-1">
         <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
@@ -3280,10 +3282,10 @@ async function downloadDocx() {
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
             </a>
-            <span className="text-gray-400">‹</span>
+            <span className="text-slate-400">‹</span>
           </div>
 
-          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
+          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-slate-400">
             Overview
           </p>
 
@@ -3295,7 +3297,7 @@ async function downloadDocx() {
                 className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                   item.label === "Paste Job"
                     ? "bg-blue-600 text-white shadow-sm"
-                    : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                    : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
                 }`}
               >
                 <span>{item.icon}</span>
@@ -3307,7 +3309,7 @@ async function downloadDocx() {
           <div className="mt-16 rounded-2xl bg-blue-50 p-5 text-center">
             <div className="text-3xl">👑</div>
             <h3 className="mt-3 font-extrabold">Career Élan Pro</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
+            <p className="mt-2 text-sm leading-6 text-slate-600">
               More capacity and premium features are coming soon.
             </p>
             <Link href="/pricing" className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">
@@ -3325,12 +3327,13 @@ async function downloadDocx() {
               <h1 className="mt-2 text-3xl font-extrabold">
                 Paste Job URL or Description
               </h1>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-slate-500">
                 Paste a job URL, description, or upload a file. We’ll analyze it and generate your full package.
               </p>
             </div>
 
-            <button
+            <Button
+              variant="secondary"
               onClick={() => {
                 if (
                   !shouldProceedWithNavigation(isDirty, () =>
@@ -3341,10 +3344,9 @@ async function downloadDocx() {
                 }
                 router.back();
               }}
-              className="rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm font-bold text-gray-600 shadow-sm hover:bg-blue-50"
             >
               ← Back to Results
-            </button>
+            </Button>
           </header>
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
@@ -3356,7 +3358,7 @@ async function downloadDocx() {
                     className={`min-w-0 px-3 py-4 text-xs font-extrabold sm:px-5 sm:text-sm ${
                       activeMode === "url"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
-                        : "text-gray-500 hover:bg-blue-50"
+                        : "text-slate-500 hover:bg-blue-50"
                     }`}
                   >
                     🔗 Paste URL
@@ -3367,7 +3369,7 @@ async function downloadDocx() {
                     className={`min-w-0 px-3 py-4 text-xs font-extrabold sm:px-5 sm:text-sm ${
                       activeMode === "description"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
-                        : "text-gray-500 hover:bg-blue-50"
+                        : "text-slate-500 hover:bg-blue-50"
                     }`}
                   >
                     📄 Paste Description
@@ -3381,7 +3383,7 @@ async function downloadDocx() {
                     className={`min-w-0 px-3 py-4 text-xs font-extrabold sm:px-5 sm:text-sm ${
                       activeMode === "file"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
-                        : "text-gray-500 hover:bg-blue-50"
+                        : "text-slate-500 hover:bg-blue-50"
                     }`}
                   >
                     ☁️ Upload File
@@ -3402,13 +3404,9 @@ async function downloadDocx() {
                           placeholder="https://www.linkedin.com/jobs/view/1234567890"
                           className="min-w-0 flex-1 rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500"
                         />
-                        <button
-                          onClick={handleAnalyze}
-                          disabled={isAnalyzing}
-                          className="rounded-xl bg-blue-600 px-7 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
-                        >
+                        <Button variant="primary" onClick={handleAnalyze} disabled={isAnalyzing}>
                           {isAnalyzing ? "Analyzing..." : "Analyze Job"}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -3426,13 +3424,9 @@ async function downloadDocx() {
                         placeholder="Paste the full job description here..."
                         className="mt-3 w-full resize-none rounded-xl border border-blue-100 px-5 py-4 text-sm outline-none focus:border-blue-500"
                       />
-                      <button
-                        onClick={handleAnalyze}
-                        disabled={isAnalyzing}
-                        className="mt-4 rounded-xl bg-blue-600 px-7 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
-                      >
+                      <Button variant="primary" className="mt-4" onClick={handleAnalyze} disabled={isAnalyzing}>
                         {isAnalyzing ? "Analyzing..." : "Analyze Job"}
-                      </button>
+                      </Button>
                     </div>
                   )}
 
@@ -3442,16 +3436,13 @@ async function downloadDocx() {
                       <h3 className="mt-4 text-xl font-extrabold">
                         Upload a job posting
                       </h3>
-                      <p className="mt-2 text-sm text-gray-500">
+                      <p className="mt-2 text-sm text-slate-500">
                         Upload TXT, PDF, DOCX, PNG, JPG, or JPEG.
                       </p>
 
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="mt-6 rounded-xl bg-blue-600 px-8 py-3 text-sm font-bold text-white hover:bg-blue-700"
-                      >
+                      <Button variant="primary" className="mt-6" onClick={() => fileInputRef.current?.click()}>
                         Choose File
-                      </button>
+                      </Button>
 
                       {selectedFileName && (
                         <p className="mt-4 text-sm font-bold text-blue-600">
@@ -3492,7 +3483,7 @@ async function downloadDocx() {
                   </div>
                   <div className="min-w-0">
                     <h2 className="text-2xl font-extrabold break-words">{analysis.title}</h2>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="mt-1 text-sm text-slate-500">
                       {analysis.company} · {analysis.location} · {analysis.type}
                     </p>
                     <p className="mt-1 text-xs font-bold text-blue-600">
@@ -3502,38 +3493,36 @@ async function downloadDocx() {
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border border-gray-100 p-5">
-                    <div className="rounded-2xl border border-gray-100 p-5">
-  <h3 className="text-3xl font-extrabold text-green-600">
-    {generated ? analysis.match : "✨"}
-  </h3>
+                  <div className="rounded-2xl border border-slate-100 p-5">
+                    <h3 className="text-3xl font-extrabold text-green-600">
+                      {generated ? analysis.match : "✨"}
+                    </h3>
 
-  <p className="mt-1 text-sm font-semibold text-gray-500">
-    {generated
-      ? "ATS Match"
-      : "Generate Full Package to see your ATS Match"}
-  </p>
-</div>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">
+                      {generated
+                        ? "ATS Match"
+                        : "Generate Full Package to see your ATS Match"}
+                    </p>
                   </div>
 
-                  <div className="rounded-2xl border border-gray-100 p-5">
+                  <div className="rounded-2xl border border-slate-100 p-5">
                     <h3 className="text-3xl font-extrabold text-blue-600">
                       {analysis.keywordCount}
                     </h3>
-                    <p className="mt-1 text-sm font-semibold text-gray-500">Keywords Found</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">Keywords Found</p>
                   </div>
 
-                  <div className="rounded-2xl border border-gray-100 p-5">
+                  <div className="rounded-2xl border border-slate-100 p-5">
                     <h3 className="text-3xl font-extrabold text-purple-600">
                       {analysis.requirementsMatched}
                     </h3>
-                    <p className="mt-1 text-sm font-semibold text-gray-500">Requirements Matched</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">Requirements Matched</p>
                   </div>
                 </div>
 
                 <div className="mt-6 rounded-2xl bg-slate-50 p-5">
                   <h3 className="font-extrabold">Detected Job Summary</h3>
-                  <p className="mt-2 text-sm leading-7 text-gray-600">
+                  <p className="mt-2 text-sm leading-7 text-slate-600">
                     {analysis.summary}
                   </p>
 
@@ -3549,15 +3538,15 @@ async function downloadDocx() {
                   </div>
                 </div>
 
-                <div className="mt-6 rounded-2xl border border-gray-100 bg-white p-6">
+                <div className="mt-6 rounded-2xl border border-slate-100 bg-white p-6">
                   <h3 className="text-xl font-extrabold">Your Saved Application</h3>
-                  <p className="mt-2 text-sm leading-6 text-gray-600">
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
                     We&apos;ll use your saved Career Memory materials. Generate a tailored package below if you want a stronger version for this specific job.
                   </p>
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
   {/* 선택된 Resume */}
-  <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
+  <Card padding="sm" className="min-w-0">
     <div className="flex items-start gap-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-2xl">
         📄
@@ -3577,7 +3566,7 @@ async function downloadDocx() {
                 "Loading selected resume..."}
         </h4>
 
-        <p className="mt-2 text-sm leading-6 text-gray-500">
+        <p className="mt-2 text-sm leading-6 text-slate-500">
           {resumeSelectionStatus === "error"
             ? "Please select a resume from Dashboard."
             : savedApplicationMaterial?.resume.sourceType === "uploaded"
@@ -3600,10 +3589,10 @@ async function downloadDocx() {
         </button>
       </div>
     </div>
-  </div>
+  </Card>
 
   {/* 선택된 Cover Letter */}
-  <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
+  <Card padding="sm" className="min-w-0">
     <div className="flex items-start gap-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-2xl">
         ✉️
@@ -3619,7 +3608,7 @@ async function downloadDocx() {
             "Loading cover letter..."}
         </h4>
 
-        <p className="mt-2 text-sm leading-6 text-gray-500">
+        <p className="mt-2 text-sm leading-6 text-slate-500">
           {savedApplicationMaterial?.coverLetter.sourceType === "upload"
             ? "The uploaded cover letter selected on your Dashboard will be used as a writing reference."
             : "No uploaded cover letter is selected. A new job-specific cover letter will be generated automatically."}
@@ -3641,7 +3630,7 @@ async function downloadDocx() {
         </button>
       </div>
     </div>
-  </div>
+  </Card>
    </div>
                     {analyzed &&
   analysis.jobContext.sector ===
@@ -3893,39 +3882,39 @@ async function downloadDocx() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-xl font-extrabold text-gray-900">
+                          <h3 className="text-xl font-extrabold text-slate-900">
                             Apply with Saved Resume
                           </h3>
                           <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold text-blue-600">
                             Quick
                           </span>
                         </div>
-                        <p className="mt-1 text-sm font-semibold text-gray-500">
+                        <p className="mt-1 text-sm font-semibold text-slate-500">
                           Apply using your saved Career Memory resume and cover letter.
                         </p>
                       </div>
                     </div>
-                    <span className="text-3xl text-gray-500">›</span>
+                    <span className="text-3xl text-slate-500">›</span>
                   </button>
 
                   <button
                     onClick={continueToApply}
-                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
                   >
                     <div className="flex items-center gap-4">
                       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
                         🌐
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-xl font-extrabold text-gray-900">
+                        <h3 className="text-xl font-extrabold text-slate-900">
                           Apply on Employer Website ↗
                         </h3>
-                        <p className="mt-1 text-sm font-semibold text-gray-500">
+                        <p className="mt-1 text-sm font-semibold text-slate-500">
                           Review the original job posting and complete your application on the employer's website.
                         </p>
                       </div>
                     </div>
-                    <span className="text-3xl text-gray-500">›</span>
+                    <span className="text-3xl text-slate-500">›</span>
                  </button>
                 </div>
               </section>
@@ -3933,7 +3922,7 @@ async function downloadDocx() {
 
             {/* 오른쪽 위: 스크롤을 따라오지 않는 안내 카드 */}
             <aside className="min-w-0 self-start xl:col-span-4">
-              <div className="rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
+              <Card padding="lg">
                 <h2 className="text-2xl font-extrabold">
                   What happens next?
                 </h2>
@@ -3974,7 +3963,7 @@ async function downloadDocx() {
                           {title}
                         </h3>
 
-                        <p className="mt-1 text-sm leading-6 text-gray-500">
+                        <p className="mt-1 text-sm leading-6 text-slate-500">
                           {desc}
                         </p>
                       </div>
@@ -3987,11 +3976,11 @@ async function downloadDocx() {
                     💡 Tip
                   </h3>
 
-                  <p className="mt-2 text-sm leading-6 text-gray-600">
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
                     A tailored application can help you apply faster and present a stronger profile.
                   </p>
                 </div>
-              </div>
+              </Card>
             </aside>
 
             {/* 아래: 전체 12칸을 사용하는 Generated Package */}
@@ -4006,7 +3995,7 @@ async function downloadDocx() {
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="mt-1 text-sm text-slate-500">
                       Review the original job posting beside your AI-generated application materials.
                     </p>
                   </div>
@@ -4025,7 +4014,7 @@ async function downloadDocx() {
                   <div className="mt-6 rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 p-8 text-center">
                     <div className="text-4xl">✨</div>
                     <h3 className="mt-3 text-lg font-extrabold">Generate to unlock the preview workspace</h3>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <p className="mt-2 text-sm text-slate-500">
                       Your original job posting, tailored resume, cover letter, email draft, and download buttons will appear here.
                     </p>
                   </div>
@@ -4035,8 +4024,8 @@ async function downloadDocx() {
   <div className="mt-6 grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
     {/* 왼쪽: 원본 채용공고 */}
     <aside className="min-w-0 xl:col-span-4">
-      <div className="h-full rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="border-b border-gray-100 p-5">
+      <div className="h-full rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-5">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
               📋
@@ -4047,7 +4036,7 @@ async function downloadDocx() {
                 Original Job Posting
               </h3>
 
-              <p className="text-xs font-semibold text-gray-400">
+              <p className="text-xs font-semibold text-slate-400">
                 Extracted from website
               </p>
             </div>
@@ -4059,11 +4048,11 @@ async function downloadDocx() {
             {analysis.title}
           </h4>
 
-          <p className="mt-1 text-sm font-semibold text-gray-500">
+          <p className="mt-1 text-sm font-semibold text-slate-500">
             {analysis.company}
           </p>
 
-          <p className="mt-1 text-xs text-gray-400">
+          <p className="mt-1 text-xs text-slate-400">
             {analysis.location} · {analysis.type} ·{" "}
             {analysis.category}
           </p>
@@ -4087,7 +4076,7 @@ async function downloadDocx() {
               About the Role
             </h5>
 
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-gray-600">
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">
               {getOriginalJobSnippet()}
             </p>
           </div>
@@ -4097,12 +4086,12 @@ async function downloadDocx() {
               {analysis.jobDetails
                 .responsibilities.length >
                 0 && (
-                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">
                   <h5 className="text-sm font-extrabold">
                     Key Responsibilities
                   </h5>
 
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-gray-600">
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
                     {analysis.jobDetails.responsibilities.map(
                       (item) => (
                         <li
@@ -4124,12 +4113,12 @@ async function downloadDocx() {
               {analysis.jobDetails
                 .qualifications.length >
                 0 && (
-                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">
                   <h5 className="text-sm font-extrabold">
                     Qualifications
                   </h5>
 
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-gray-600">
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
                     {analysis.jobDetails.qualifications.map(
                       (item) => (
                         <li
@@ -4150,12 +4139,12 @@ async function downloadDocx() {
 
               {analysis.jobDetails.benefits
                 .length > 0 && (
-                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">
                   <h5 className="text-sm font-extrabold">
                     Benefits
                   </h5>
 
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-gray-600">
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
                     {analysis.jobDetails.benefits.map(
                       (item) => (
                         <li
@@ -4180,12 +4169,12 @@ async function downloadDocx() {
                 <div className="grid gap-3">
                   {analysis.jobDetails
                     .salary && (
-                    <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                    <div className="rounded-2xl border border-slate-100 bg-white p-4">
                       <h5 className="text-sm font-extrabold">
                         Salary / Wage
                       </h5>
 
-                      <p className="mt-2 text-sm leading-6 text-gray-600">
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
                         {
                           analysis.jobDetails
                             .salary
@@ -4196,12 +4185,12 @@ async function downloadDocx() {
 
                   {analysis.jobDetails
                     .schedule && (
-                    <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                    <div className="rounded-2xl border border-slate-100 bg-white p-4">
                       <h5 className="text-sm font-extrabold">
                         Schedule
                       </h5>
 
-                      <p className="mt-2 text-sm leading-6 text-gray-600">
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
                         {
                           analysis.jobDetails
                             .schedule
@@ -4244,8 +4233,8 @@ async function downloadDocx() {
 
     {/* 가운데: 생성된 Resume / Cover Letter / Email */}
     <section className="min-w-0 xl:col-span-8">
-      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
+      <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-extrabold">
@@ -4257,7 +4246,7 @@ async function downloadDocx() {
               </span>
             </div>
 
-            <p className="mt-1 text-xs font-semibold text-gray-400">
+            <p className="mt-1 text-xs font-semibold text-slate-400">
               Click Resume, Cover Letter, or
               Email Draft, then edit the
               content directly.
@@ -4304,7 +4293,7 @@ async function downloadDocx() {
           )}
         </div>
 
-        <div className="grid border-b border-gray-100 md:grid-cols-3">
+        <div className="grid border-b border-slate-100 md:grid-cols-3">
           {[
             ["resume", "📄", "Resume"],
             [
@@ -4328,7 +4317,7 @@ async function downloadDocx() {
               className={`flex items-center gap-3 px-5 py-4 text-left transition ${
                 selectedPreview === key
                   ? "bg-blue-50 text-blue-700"
-                  : "bg-white text-gray-600 hover:bg-slate-50"
+                  : "bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
               <span className="text-2xl">
@@ -4340,7 +4329,7 @@ async function downloadDocx() {
                   {label}
                 </p>
 
-                <p className="text-xs font-semibold text-gray-400">
+                <p className="text-xs font-semibold text-slate-400">
                   {selectedPreview === key
                     ? "Viewing and editing now"
                     : "Click to preview and edit"}
@@ -4350,7 +4339,7 @@ async function downloadDocx() {
           ))}
         </div>
 
-        <div className="h-[1450px] overflow-y-auto bg-gray-100 p-6">
+        <div className="h-[1450px] overflow-y-auto bg-slate-100 p-6">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
@@ -4362,7 +4351,7 @@ async function downloadDocx() {
                   {getPreviewLabel()}
                 </h3>
 
-                <p className="text-xs font-semibold text-gray-400">
+                <p className="text-xs font-semibold text-slate-400">
                   Tailored for{" "}
                   {analysis.title} at{" "}
                   {analysis.company}
@@ -4371,14 +4360,14 @@ async function downloadDocx() {
             </div>
 
             {selectedPreview === "resume" && packageData.generationEngine !== "canonical" && (
-              <div className="flex overflow-hidden rounded-lg border border-gray-200 text-xs font-bold">
+              <div className="flex overflow-hidden rounded-lg border border-slate-200 text-xs font-bold">
                 <button
                   type="button"
                   onClick={() => setResumeViewMode("preview")}
                   className={`px-3 py-1.5 ${
                     resumeViewMode === "preview"
                       ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-500 hover:bg-gray-50"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
                   Preview
@@ -4389,7 +4378,7 @@ async function downloadDocx() {
                   className={`px-3 py-1.5 ${
                     resumeViewMode === "edit"
                       ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-500 hover:bg-gray-50"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
                   Edit
@@ -4413,10 +4402,10 @@ async function downloadDocx() {
               <iframe
                 src={resumePdfUrl}
                 title="Resume PDF preview"
-                className="h-[1350px] w-full rounded-2xl border border-gray-100 bg-white shadow-sm"
+                className="h-[1350px] w-full rounded-2xl border border-slate-100 bg-white shadow-sm"
               />
             ) : (
-              <div className="h-[1350px] w-full animate-pulse rounded-2xl border border-gray-100 bg-slate-50" />
+              <div className="h-[1350px] w-full animate-pulse rounded-2xl border border-slate-100 bg-slate-50" />
             )
           ) : selectedPreview ===
           "emailDraft" ? (
@@ -4434,7 +4423,7 @@ async function downloadDocx() {
                 );
                 setIsDirty(true);
               }}
-              className="min-h-[520px] w-full resize-y rounded-2xl border border-gray-100 bg-slate-50 p-6 text-sm leading-7 text-gray-700 outline-none"
+              className="min-h-[520px] w-full resize-y rounded-2xl border border-slate-100 bg-slate-50 p-6 text-sm leading-7 text-slate-700 outline-none"
             />
           ) : (
             <div className="flex justify-center">
@@ -4561,7 +4550,7 @@ function PackageAnalysisPanel({
           Package Analysis
         </h2>
 
-        <p className="mt-3 text-sm leading-6 text-gray-500">
+        <p className="mt-3 text-sm leading-6 text-slate-500">
           {isCanonical
             ? "Detailed AI match analysis isn't available for this package."
             : "AI analysis will appear here after the package is generated."}
@@ -4626,7 +4615,7 @@ function PackageAnalysisPanel({
               {analysis.overallMatch}%
             </p>
 
-            <p className="mt-1 text-sm font-bold text-gray-500">
+            <p className="mt-1 text-sm font-bold text-slate-500">
               Overall Match
             </p>
           </div>
@@ -4654,7 +4643,7 @@ function PackageAnalysisPanel({
               Key Changes
             </h3>
 
-            <p className="text-xs font-semibold text-gray-400">
+            <p className="text-xs font-semibold text-slate-400">
               Where, how, and why the resume was changed
             </p>
           </div>
@@ -4677,11 +4666,11 @@ function PackageAnalysisPanel({
 
                   {change.original && (
                     <div className="mt-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
                         Before
                       </p>
 
-                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
                         {change.original}
                       </p>
                     </div>
@@ -4689,11 +4678,11 @@ function PackageAnalysisPanel({
 
                   {change.revised && (
                     <div className="mt-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
                         After
                       </p>
 
-                      <p className="mt-1 text-xs font-semibold leading-5 text-gray-700">
+                      <p className="mt-1 text-xs font-semibold leading-5 text-slate-700">
                         {change.revised}
                       </p>
                     </div>
@@ -4709,11 +4698,11 @@ function PackageAnalysisPanel({
 
                   {change.evidence && (
                     <div className="mt-2">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
                         Evidence
                       </p>
 
-                      <p className="mt-1 text-xs italic leading-5 text-gray-500">
+                      <p className="mt-1 text-xs italic leading-5 text-slate-500">
                         {change.evidence}
                       </p>
                     </div>
@@ -4722,7 +4711,7 @@ function PackageAnalysisPanel({
               ))}
           </div>
         ) : (
-          <p className="mt-4 text-sm leading-6 text-gray-400">
+          <p className="mt-4 text-sm leading-6 text-slate-400">
             No meaningful resume changes were returned.
           </p>
         )}
@@ -4829,7 +4818,7 @@ function PackageAnalysisPanel({
               Match Strengths
             </h3>
 
-            <p className="text-xs font-semibold text-gray-400">
+            <p className="text-xs font-semibold text-slate-400">
               Direct matches and realistic transferable skills
             </p>
           </div>
@@ -4861,13 +4850,13 @@ function PackageAnalysisPanel({
                 ))}
             </div>
           ) : (
-            <p className="mt-3 text-sm leading-6 text-gray-400">
+            <p className="mt-3 text-sm leading-6 text-slate-400">
               No strong direct matches were identified.
             </p>
           )}
         </div>
 
-        <div className="mt-5 border-t border-gray-100 pt-4">
+        <div className="mt-5 border-t border-slate-100 pt-4">
           <p className="text-xs font-black uppercase tracking-wide text-blue-600">
             Transferable Skills
           </p>
@@ -4893,7 +4882,7 @@ function PackageAnalysisPanel({
                 ))}
             </div>
           ) : (
-            <p className="mt-3 text-sm leading-6 text-gray-400">
+            <p className="mt-3 text-sm leading-6 text-slate-400">
               No transferable skills were identified.
             </p>
           )}
@@ -5005,7 +4994,7 @@ function AnalysisListCard({
             </div>
           ))
         ) : (
-          <p className="text-sm leading-6 text-gray-400">
+          <p className="text-sm leading-6 text-slate-400">
             {emptyText}
           </p>
         )}
