@@ -164,13 +164,13 @@ if (application.ai_insight) {
       </h2>
 
       {!application && (
-        <p className="mt-6 text-gray-500">
+        <p className="mt-6 text-slate-500">
           Select an application.
         </p>
       )}
 
       {loading && (
-        <p className="mt-6 text-gray-600">
+        <p className="mt-6 text-slate-600">
           AI is analyzing the saved
           application...
         </p>
@@ -213,7 +213,7 @@ if (application.ai_insight) {
                 )}
               </ul>
             ) : (
-              <p className="mt-2 text-sm text-gray-500">
+              <p className="mt-2 text-sm text-slate-500">
                 No direct matches were
                 identified.
               </p>
@@ -243,7 +243,7 @@ if (application.ai_insight) {
                 )}
               </ul>
             ) : (
-              <p className="mt-2 text-sm text-gray-500">
+              <p className="mt-2 text-sm text-slate-500">
                 No transferable skills
                 were identified.
               </p>
@@ -257,7 +257,7 @@ if (application.ai_insight) {
 
             {result.mismatch
               .summary && (
-              <p className="mt-2 text-sm leading-6 text-gray-700">
+              <p className="mt-2 text-sm leading-6 text-slate-700">
                 {
                   result.mismatch
                     .summary
@@ -283,7 +283,7 @@ if (application.ai_insight) {
                 )}
               </ul>
             ) : (
-              <p className="mt-2 text-sm text-gray-500">
+              <p className="mt-2 text-sm text-slate-500">
                 No major missing
                 requirements were
                 identified.

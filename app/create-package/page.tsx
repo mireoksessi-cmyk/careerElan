@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import MobileNav from "@/components/job-layout/MobileNav";
+import { Card } from "@/components/ui/Card";
 
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
@@ -65,8 +66,8 @@ export default function CreatePackagePage() {
           </div>
         </aside>
 
-        <section className="flex-1 px-8 py-6">
-          <header className="mb-8 flex items-center justify-between">
+        <section className="min-w-0 flex-1 px-8 py-6">
+          <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-extrabold">Create Full Package</h1>
               <p className="mt-1 text-sm text-slate-500">
@@ -152,29 +153,29 @@ export default function CreatePackagePage() {
           </section>
 
           <section className="mt-8 grid gap-6 lg:grid-cols-3">
-            <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+            <Card padding="md">
               <div className="text-3xl">1️⃣</div>
               <h3 className="mt-4 font-extrabold">Choose a job</h3>
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 Find one in Career Élan or paste a job posting you found elsewhere.
               </p>
-            </div>
+            </Card>
 
-            <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+            <Card padding="md">
               <div className="text-3xl">2️⃣</div>
               <h3 className="mt-4 font-extrabold">Generate package</h3>
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 Create a tailored resume, cover letter, and follow-up email.
               </p>
-            </div>
+            </Card>
 
-            <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+            <Card padding="md">
               <div className="text-3xl">3️⃣</div>
               <h3 className="mt-4 font-extrabold">Apply directly</h3>
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 Open the original job posting and apply with your prepared package.
               </p>
-            </div>
+            </Card>
           </section>
         </section>
      </div>

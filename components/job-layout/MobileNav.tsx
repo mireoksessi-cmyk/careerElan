@@ -136,7 +136,7 @@ export default function MobileNav({ active }: MobileNavProps) {
           aria-expanded={open}
           aria-controls="mobile-nav-panel"
           onClick={() => setOpen(true)}
-          className="flex h-11 w-11 items-center justify-center rounded-xl border border-blue-100 text-xl text-gray-700"
+          className="flex h-11 w-11 items-center justify-center rounded-xl border border-blue-100 text-xl text-slate-700"
         >
           <span aria-hidden="true">☰</span>
         </button>
@@ -170,13 +170,13 @@ export default function MobileNav({ active }: MobileNavProps) {
                 type="button"
                 aria-label="Close navigation"
                 onClick={close}
-                className="flex h-11 w-11 items-center justify-center rounded-xl text-2xl leading-none text-gray-500 hover:bg-gray-100"
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-2xl leading-none text-slate-500 hover:bg-slate-100"
               >
                 <span aria-hidden="true">×</span>
               </button>
             </div>
 
-            <p className="mt-6 text-xs font-bold uppercase tracking-wider text-gray-400">
+            <p className="mt-6 text-xs font-bold uppercase tracking-wider text-slate-400">
               Overview
             </p>
 
@@ -190,7 +190,7 @@ export default function MobileNav({ active }: MobileNavProps) {
                   className={`flex min-h-[44px] items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                     active === item
                       ? "bg-blue-600 text-white shadow-sm"
-                      : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                      : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
                   }`}
                 >
                   <span aria-hidden="true">{getMenuIcon(item)}</span>
@@ -201,7 +201,7 @@ export default function MobileNav({ active }: MobileNavProps) {
 
             <div className="mt-6 rounded-2xl bg-blue-50 p-4 text-center">
               <h3 className="text-sm font-bold">Career Élan Pro</h3>
-              <p className="mt-1 text-xs text-black">
+              <p className="mt-1 text-xs text-slate-600">
                 More capacity and premium features are coming soon.
               </p>
               <Link

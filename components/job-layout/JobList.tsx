@@ -53,7 +53,7 @@ export default function JobList({
               Applications
             </h2>
 
-            <p className="mt-1 text-sm text-black">
+            <p className="mt-1 text-sm text-slate-500">
               Select a job to view details.
             </p>
           </div>
@@ -112,7 +112,7 @@ export default function JobList({
                 cursor-pointer
                 rounded-2xl
                 border
-                border-gray-100
+                border-blue-100
                 bg-white
                 p-5
                 transition
@@ -136,7 +136,7 @@ export default function JobList({
 
                   </h3>
 
-                  <p className="mt-1 text-sm text-black">
+                  <p className="mt-1 text-sm text-slate-500">
 
                     {app.job_title}
 
@@ -162,7 +162,7 @@ export default function JobList({
               <div className="mt-5 flex items-end justify-between gap-4">
   <div className="space-y-3">
     <div>
-      <p className="text-xs text-black">
+      <p className="text-xs text-slate-400">
         Applied
       </p>
 

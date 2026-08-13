@@ -2547,7 +2547,7 @@ if (!user) {
 
   return (
 
-    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-slate-900">
      {previewAsset && (
   <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
     <div className="mx-auto flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-slate-100 shadow-2xl">
@@ -2597,16 +2597,16 @@ if (!user) {
 )}
 
       {showPackageChoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
           <div className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-3xl font-extrabold">Create Full Package</h2>
-                <p className="mt-2 text-sm text-gray-500">
+                <p className="mt-2 text-sm text-slate-500">
                   Choose how you want to create your company-specific application package.
                 </p>
               </div>
-              <button onClick={() => setShowPackageChoice(false)} className="text-2xl text-gray-400 hover:text-gray-700">
+              <button onClick={() => setShowPackageChoice(false)} className="text-2xl text-slate-400 hover:text-slate-700">
                 ×
               </button>
             </div>
@@ -2618,7 +2618,7 @@ if (!user) {
               >
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-4xl shadow-sm">🔍</div>
                 <h3 className="mt-5 text-xl font-extrabold">Find Jobs in Career Élan</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600">
+                <p className="mt-2 text-sm leading-6 text-slate-600">
                   Search jobs matched to your Career Memory, choose a posting, then generate a tailored resume, cover letter, and email draft.
                 </p>
                 <p className="mt-5 font-bold text-blue-600">Find Jobs →</p>
@@ -2630,7 +2630,7 @@ if (!user) {
               >
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-4xl shadow-sm">📦</div>
                 <h3 className="mt-5 text-xl font-extrabold">Paste Job URL or Description</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600">
+                <p className="mt-2 text-sm leading-6 text-slate-600">
                   Already found a job on LinkedIn, Indeed, Job Bank, or a company website? Paste it here and generate your full package.
                 </p>
                 <p className="mt-5 font-bold text-blue-600">Create Package →</p>
@@ -2645,14 +2645,14 @@ if (!user) {
       )}
 
       {showTour && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-labelledby="welcome-tour-title" className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>
                 <h2 id="welcome-tour-title" className="text-3xl font-extrabold">Welcome to Career Élan! 👋</h2>
-                <p className="mt-2 text-sm text-gray-500">Take a quick 3-step tour to get started.</p>
+                <p className="mt-2 text-sm text-slate-500">Take a quick 3-step tour to get started.</p>
               </div>
-              <button onClick={closeTour} aria-label="Close" className="text-2xl text-gray-400 hover:text-gray-700"><span aria-hidden="true">×</span></button>
+              <button onClick={closeTour} aria-label="Close" className="text-2xl text-slate-400 hover:text-slate-700"><span aria-hidden="true">×</span></button>
             </div>
 
             <div className="mt-8 grid gap-5 md:grid-cols-3">
@@ -2660,21 +2660,21 @@ if (!user) {
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-4xl shadow-sm">🧠</div>
                 <span className="mt-5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">1</span>
                 <h3 className="mt-4 font-extrabold">Build Your Career Memory</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600">Save your experience, education, skills, and goals once.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Save your experience, education, skills, and goals once.</p>
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5 text-center">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-4xl shadow-sm">🔍</div>
                 <span className="mt-5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">2</span>
                 <h3 className="mt-4 font-extrabold">Find or Paste a Job</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600">Use Career Élan Search or paste a job URL/description.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Use Career Élan Search or paste a job URL/description.</p>
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5 text-center">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-4xl shadow-sm">📦</div>
                 <span className="mt-5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">3</span>
                 <h3 className="mt-4 font-extrabold">Generate Your Package</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600">Create a tailored resume, cover letter, and email draft.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Create a tailored resume, cover letter, and email draft.</p>
               </div>
             </div>
 
@@ -2686,7 +2686,7 @@ if (!user) {
               <a href="/career-memory" onClick={() => localStorage.setItem("careerElanTourSeen", "true")} className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white">
                 Start with Career Memory
               </a>
-              <button onClick={closeTour} className="rounded-xl border border-gray-200 px-6 py-3 text-sm font-bold text-gray-600">
+              <button onClick={closeTour} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600">
                 Skip for now
               </button>
             </div>
@@ -2702,10 +2702,10 @@ if (!user) {
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
             </a>
-            <span className="text-gray-400">‹</span>
+            <span className="text-slate-400">‹</span>
           </div>
 
-          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">Overview</p>
+          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-slate-400">Overview</p>
 
           <nav className="mt-4 space-y-2">
             {menuItems.map((item) => (
@@ -2715,7 +2715,7 @@ if (!user) {
                 className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                   item === "Dashboard"
                     ? "bg-blue-600 text-white shadow-sm"
-                    : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                    : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
                 }`}
               >
                 <span>{getMenuIcon(item)}</span>
@@ -2727,7 +2727,7 @@ if (!user) {
           <div className="mt-64 rounded-2xl bg-blue-50 p-5 text-center">
             <div className="text-3xl">👑</div>
             <h3 className="mt-3 font-extrabold">Career Élan Pro</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">More capacity and premium features are coming soon.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">More capacity and premium features are coming soon.</p>
             <Link href="/pricing" className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">Coming Soon</Link>
           </div>
         </aside>
@@ -2738,7 +2738,7 @@ if (!user) {
              <h1 className="text-2xl font-extrabold">
   Good morning, {displayName}! 👋
 </h1>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-slate-500">
                 Find jobs faster. Generate a tailored package in minutes.{" "}
                 <span className="font-bold text-blue-600">You apply. We prepare.</span>
               </p>
@@ -2747,7 +2747,7 @@ if (!user) {
             <input
               type="text"
               placeholder="Search jobs, packages..."
-              className="w-80 rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm outline-none focus:border-blue-500"
+              className="w-80 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
 
             <div className="flex items-center gap-4">
@@ -2760,7 +2760,7 @@ if (!user) {
 </div>
                 <div>
                   <p className="text-sm font-bold">{displayName}</p>
-                 <p className="text-sm text-gray-500">
+                 <p className="text-sm text-slate-400">
   User
 </p>
                 </div>
@@ -2998,7 +2998,7 @@ Choose which resume and cover letter will be used when generating your applicati
             Create Resume
           </p>
 
-          <p className="truncate text-sm text-gray-500">
+          <p className="truncate text-sm text-slate-500">
             {careerMemory.resume_name ||
               "Career Memory Resume"}
           </p>
@@ -3086,7 +3086,7 @@ Choose which resume and cover letter will be used when generating your applicati
                 Import Resume
               </p>
 
-              <p className="truncate text-sm text-gray-500">
+              <p className="truncate text-sm text-slate-500">
                 {resume.file_name}
               </p>
 
@@ -3178,7 +3178,7 @@ Choose which resume and cover letter will be used when generating your applicati
 <div className="mb-3 flex items-center justify-between gap-3">
   <h3 className="font-bold">
     Cover Letter
-    <span className="ml-2 text-xs text-gray-500">
+    <span className="ml-2 text-xs text-slate-500">
       (Optional)
     </span>
   </h3>
@@ -3239,7 +3239,7 @@ null
 None
 </p>
 
-<p className="text-sm text-gray-500">
+<p className="text-sm text-slate-500">
 Generate automatically
 </p>
 
@@ -3287,7 +3287,7 @@ Generate automatically
           Uploaded Cover Letter
         </p>
 
-        <p className="truncate text-sm text-gray-500">
+        <p className="truncate text-sm text-slate-500">
           {cover.file_name}
         </p>
       </div>
@@ -3407,19 +3407,19 @@ Array.from({ length: 6 }).map((_, index) => (
   // Array.from({ length: 6 }).map((_, index) => (
   <div
     key={index}
-    className="animate-pulse rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+    className="animate-pulse rounded-2xl border border-blue-100 bg-white p-5 shadow-sm"
   >
-    <div className="h-8 w-8 rounded bg-gray-200"></div>
+    <div className="h-8 w-8 rounded bg-slate-200"></div>
 
-    <div className="mt-4 h-5 rounded bg-gray-200"></div>
+    <div className="mt-4 h-5 rounded bg-slate-200"></div>
 
-    <div className="mt-2 h-4 w-2/3 rounded bg-gray-100"></div>
+    <div className="mt-2 h-4 w-2/3 rounded bg-slate-100"></div>
 
-    <div className="mt-4 h-4 rounded bg-gray-100"></div>
+    <div className="mt-4 h-4 rounded bg-slate-100"></div>
 
-    <div className="mt-2 h-4 rounded bg-gray-100"></div>
+    <div className="mt-2 h-4 rounded bg-slate-100"></div>
 
-    <div className="mt-5 h-10 rounded-xl bg-gray-200"></div>
+    <div className="mt-5 h-10 rounded-xl bg-slate-200"></div>
   </div>
 ))
                       }
@@ -3429,7 +3429,7 @@ Array.from({ length: 6 }).map((_, index) => (
 recommendedJobs.slice(0, visibleJobs).map((job) => (
   <div
     key={`${job.title}-${job.company}`}
-    className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+    className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm"
   >
     <div className="flex items-start justify-between">
       <div className="text-3xl">💼</div>
@@ -3438,13 +3438,13 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
           <p className="text-2xl font-extrabold text-green-600">{job.match}</p>
         )}
         {job.match && (
-          <p className="text-xs font-bold text-gray-500">Match</p>
+          <p className="text-xs font-bold text-slate-500">Match</p>
         )}
       </div>
     </div>
 
     <h3 className="mt-4 text-lg font-extrabold">{job.title}</h3>
-    <p className="mt-1 text-sm text-gray-500">
+    <p className="mt-1 text-sm text-slate-500">
       {job.company} · {job.location}
     </p>
 
@@ -3464,7 +3464,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
     </div>
 
     <div className="mt-5">
-      <h4 className="text-xs font-extrabold text-gray-700">
+      <h4 className="text-xs font-extrabold text-slate-700">
         Why this matches you
       </h4>
 
@@ -3478,7 +3478,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
     </div>
 
     <div className="mt-4">
-      <h4 className="text-xs font-extrabold text-gray-700">Missing</h4>
+      <h4 className="text-xs font-extrabold text-slate-700">Missing</h4>
 
       <div className="mt-2 space-y-1">
         {job.missing?.map((item) => (
@@ -3591,7 +3591,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
           onChange={(e) => setManualCity(e.target.value)}
           placeholder="City (optional)"
           aria-label="City (optional)"
-          className="min-w-0 flex-1 rounded-xl border border-gray-300 px-4 py-2 text-sm outline-none focus:border-blue-400"
+          className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-2 text-sm outline-none focus:border-blue-400"
         />
       </>
     )}

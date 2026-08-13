@@ -79,11 +79,11 @@ export default function Sidebar({
           />
         </a>
 
-        <span className="text-gray-400">‹</span>
+        <span className="text-slate-400">‹</span>
 
       </div>
 
-      <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
+      <p className="mt-8 text-xs font-bold uppercase tracking-wider text-slate-400">
         Overview
       </p>
 
@@ -97,7 +97,7 @@ export default function Sidebar({
             className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
               active === item
                 ? "bg-blue-600 text-white shadow-sm"
-                : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
             }`}
           >
             <span>{getMenuIcon(item)}</span>
@@ -110,23 +110,23 @@ export default function Sidebar({
 
       </nav>
 
-      <div className="mt-24 rounded-2xl bg-blue-50 p-5 text-center">
+      <div className="mt-16 rounded-2xl bg-blue-50 p-5 text-center">
 
         <div className="text-3xl">
           👑
         </div>
 
-        <h3 className="mt-3 font-bold">
+        <h3 className="mt-3 font-extrabold">
           Career Élan Pro
         </h3>
 
-        <p className="mt-2 text-sm text-black">
+        <p className="mt-2 text-sm leading-6 text-slate-600">
           More capacity and premium features are coming soon.
         </p>
 
         <Link
           href="/pricing"
-          className="mt-5 block w-full rounded-xl bg-blue-600 py-3 font-semibold text-white"
+          className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white"
         >
           Coming Soon
         </Link>

@@ -19,7 +19,7 @@ export default function StatsCards({
     {
       title: "Total",
       value: total,
-      color: "text-gray-900",
+      color: "text-slate-900",
       icon: "📁",
     },
     {
@@ -68,7 +68,7 @@ export default function StatsCards({
 
             <div>
 
-              <p className="text-sm text-black">
+              <p className="text-sm text-slate-500">
                 {card.title}
               </p>
 

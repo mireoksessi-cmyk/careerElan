@@ -45,7 +45,7 @@ async function loadProfile() {
           {title}
         </h1>
 
-        <p className="mt-1 text-sm text-black">
+        <p className="mt-1 text-sm text-slate-500">
           {subtitle}
         </p>
 
@@ -73,7 +73,7 @@ async function loadProfile() {
   {name}
 </p>
 
-<p className="text-xs text-black">
+<p className="text-xs text-slate-400">
   Career Élan User
 </p>
 
