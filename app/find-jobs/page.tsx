@@ -2,6 +2,8 @@
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import MobileNav from "@/components/job-layout/MobileNav";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -366,7 +368,7 @@ setCategory(state.category || "All");
 
   return (
   
-    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-slate-900">
       <MobileNav active="Find Jobs" />
       <div className="flex flex-1">
         <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
@@ -374,10 +376,10 @@ setCategory(state.category || "All");
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
             </a>
-            <span className="text-gray-400">‹</span>
+            <span className="text-slate-400">‹</span>
           </div>
 
-          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
+          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-slate-400">
             Overview
           </p>
 
@@ -389,7 +391,7 @@ setCategory(state.category || "All");
                 className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                   item.label === "Find Jobs"
                     ? "bg-blue-600 text-white shadow-sm"
-                    : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                    : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
                 }`}
               >
                 <span>{item.icon}</span>
@@ -401,7 +403,7 @@ setCategory(state.category || "All");
           <div className="mt-16 rounded-2xl bg-blue-50 p-5 text-center">
             <div className="text-3xl">👑</div>
             <h3 className="mt-3 font-extrabold">Career Élan Pro</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
+            <p className="mt-2 text-sm leading-6 text-slate-600">
               More capacity and premium features are coming soon.
             </p>
             <Link href="/pricing" className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">
@@ -410,8 +412,8 @@ setCategory(state.category || "All");
           </div>
         </aside>
 
-        <section className="flex-1 px-8 py-6">
-          <header className="mb-8 flex items-center justify-between">
+        <section className="min-w-0 flex-1 px-8 py-6">
+          <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-xs font-bold text-blue-600">
                 Create Package › Find Jobs in Career Élan
@@ -419,20 +421,20 @@ setCategory(state.category || "All");
               <h1 className="mt-2 text-3xl font-extrabold">
                 Find Jobs in Career Élan
               </h1>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-slate-500">
                Search jobs across Canada, the United States, the United Kingdom, and Australia.
               </p>
             </div>
 
             <a
               href="/create-package"
-              className="rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm font-bold text-gray-600 shadow-sm hover:bg-blue-50"
+              className="rounded-xl border border-blue-100 bg-white px-5 py-3 text-sm font-bold text-slate-600 shadow-sm hover:bg-blue-50"
             >
               ← Back to Choose Method
             </a>
           </header>
 
-          <section className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+          <Card padding="md">
             <div className="grid gap-3 lg:grid-cols-12">
               <input
   value={query}
@@ -441,13 +443,13 @@ setCategory(state.category || "All");
     clearSearchResults();
   }}
   placeholder="Search job title, company, or keyword..."
-  className="rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-4"
+  className="w-full min-w-0 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:col-span-4"
 />
 
-            <div className="rounded-xl border border-blue-100 bg-slate-50 px-4 py-3 text-sm text-gray-700 lg:col-span-2">
+            <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 lg:col-span-2">
   Canada
 </div>
-              
+
   <select
   value={province}
   onChange={(e) => {
@@ -457,7 +459,7 @@ setCategory(state.category || "All");
     setCitySuggestions([]);
     clearSearchResults();
   }}
-  className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
+  className="w-full min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:col-span-2"
 >
   <option value="All">Province / Territory</option>
 
@@ -489,11 +491,11 @@ setCategory(state.category || "All");
     }}
     placeholder="Search city..."
     autoComplete="off"
-    className="w-full rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500"
+    className="w-full min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
   />
 
   {isSearchingCities && (
-    <div className="absolute right-4 top-3.5 text-xs font-semibold text-gray-400">
+    <div className="absolute right-4 top-3.5 text-xs font-semibold text-slate-400">
       Searching...
     </div>
   )}
@@ -522,19 +524,19 @@ setCategory(state.category || "All");
             }}
             className="block w-full px-4 py-3 text-left hover:bg-blue-50"
           >
-            <p className="text-sm font-bold text-gray-800">
+            <p className="text-sm font-bold text-slate-800">
               {suggestion.name}
             </p>
 
             {suggestion.region && (
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-slate-500">
                 {suggestion.region}
               </p>
             )}
           </button>
         ))}
 
-        <div className="border-t border-gray-100 px-4 pt-2 text-right text-[10px] font-semibold text-gray-400">
+        <div className="border-t border-slate-100 px-4 pt-2 text-right text-[10px] font-semibold text-slate-400">
           Powered by Google
         </div>
       </div>
@@ -547,7 +549,7 @@ setCategory(state.category || "All");
   setJobType(e.target.value);
   clearSearchResults();
 }}
-                className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
+                className="w-full min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:col-span-2"
               >
                 <option>All</option>
                 <option>Full-time</option>
@@ -562,7 +564,7 @@ setCategory(state.category || "All");
   setCategory(e.target.value);
   clearSearchResults();
 }}
-                className="rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none focus:border-blue-500 lg:col-span-2"
+                className="w-full min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:col-span-2"
               >
                 <option>All</option>
                 <option>Administration</option>
@@ -571,13 +573,13 @@ setCategory(state.category || "All");
                 <option>Customer Service</option>
               </select>
 
-              <button
+              <Button
                 onClick={() => handleSearch(1)}
                 disabled={isSearching}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60 lg:col-span-2"
+                className="lg:col-span-2"
               >
                 {isSearching ? "Searching..." : "Search"}
-              </button>
+              </Button>
             </div>
 
             {message && (
@@ -585,9 +587,9 @@ setCategory(state.category || "All");
                 {message}
               </p>
             )}
-          </section>
+          </Card>
 
-          <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+          <Card padding="md" className="mt-6">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-extrabold">
@@ -597,7 +599,7 @@ setCategory(state.category || "All");
                     ? "AI Matched Jobs"
                     : "Recommended Jobs"}
                 </h2>
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-slate-500">
                   {externalMode
                     ? "Live job listings powered by JSearch. Select a job to generate your package."
                     : hasCareerMemory
@@ -607,20 +609,32 @@ setCategory(state.category || "All");
               </div>
 
               <div className="text-right">
-                <p className="text-sm font-bold text-gray-600">
+                <p className="text-sm font-bold text-slate-600">
                   Showing {jobsToShow.length} jobs
                 </p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-slate-400">
                   Page {page} of {totalPages}
                 </p>
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {jobsToShow.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+                <p className="text-sm font-semibold text-slate-500">
+                  No jobs to display yet.
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Use the search bar above to find opportunities.
+                </p>
+              </div>
+            )}
+
+            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-5">
               {jobsToShow.map((job, index) => (
-                <div
+                <Card
                   key={`${job.id}-${index}`}
-                  className="flex min-h-[310px] flex-col rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                  padding="sm"
+                  className="flex min-h-[310px] min-w-0 flex-col transition hover:-translate-y-1 hover:shadow-lg"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-blue-50 text-2xl">
@@ -656,24 +670,24 @@ setCategory(state.category || "All");
                   <h3 className="mt-5 line-clamp-2 text-sm font-extrabold">
                     {job.title}
                   </h3>
-                  <p className="mt-1 line-clamp-1 text-xs font-semibold text-gray-500">
+                  <p className="mt-1 line-clamp-1 text-xs font-semibold text-slate-500">
                     {job.company}
                   </p>
-                  <p className="mt-1 line-clamp-1 text-xs text-gray-400">
+                  <p className="mt-1 line-clamp-1 text-xs text-slate-400">
                     {job.location}
                   </p>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-bold text-blue-600">
+                    <span className="min-w-0 max-w-full break-words rounded-full bg-blue-50 px-3 py-1 text-[10px] font-bold text-blue-600">
                       {job.type}
                     </span>
-                    <span className="rounded-full bg-slate-50 px-3 py-1 text-[10px] font-bold text-gray-500">
+                    <span className="min-w-0 max-w-full break-words rounded-full bg-slate-50 px-3 py-1 text-[10px] font-bold text-slate-500">
                       {job.category}
                     </span>
                   </div>
 
                   <div className="mt-4">
-                    <h4 className="text-[11px] font-extrabold text-gray-700">
+                    <h4 className="text-[11px] font-extrabold text-slate-700">
                       Why this matches you
                     </h4>
                     <div className="mt-2 space-y-1">
@@ -689,7 +703,7 @@ setCategory(state.category || "All");
                   </div>
 
                   <div className="mt-3">
-                    <h4 className="text-[11px] font-extrabold text-gray-700">
+                    <h4 className="text-[11px] font-extrabold text-slate-700">
                       Missing
                     </h4>
                     <div className="mt-2 space-y-1">
@@ -713,12 +727,12 @@ setCategory(state.category || "All");
                     </button>
 
                     {job.source && (
-                      <p className="mt-2 text-center text-[10px] font-semibold text-gray-400">
+                      <p className="mt-2 break-words text-center text-[10px] font-semibold text-slate-400">
                         Source: {job.source}
                       </p>
                     )}
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
 
@@ -758,7 +772,7 @@ setCategory(state.category || "All");
                 ›
               </button>
             </div>
-          </section>
+          </Card>
         </section>
      </div>
     <CareerElanFooter />
