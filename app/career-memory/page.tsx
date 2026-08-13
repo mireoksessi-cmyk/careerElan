@@ -10,6 +10,8 @@ import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
 import { useToast } from "@/components/ui/ToastProvider";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import {
   COVER_LETTER_ALLOWED_EXTENSIONS,
   MAX_UPLOAD_BYTES,
@@ -2822,7 +2824,7 @@ return;
   const unlocked = canUseService();
 
   return (
-    <div className="mb-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+    <Card padding="sm" className="mb-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-sm font-black uppercase tracking-wide text-blue-600">
@@ -2871,7 +2873,7 @@ return;
           title="Skills"
         />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -3351,11 +3353,11 @@ return;
     if (currentStep === 4) return <ArraySection title="Certification" items={memoryData.certifications} section="certifications" emptyItem={emptyCertification} addLabel="+ Add Certification" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Certification / Award Name" value={item.name} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "name", v)} /><Input placeholder="Issuer / Organization" value={item.issuer} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "issuer", v)} /><Input placeholder="Date" value={item.date} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "date", v)} className="md:col-span-2" /><Textarea rows={4} placeholder="Description or details..." value={item.description} onChange={(v) => updateArrayItem<CertificationItem>("certifications", index, "description", v)} className="md:col-span-2" /></div>} />;
     if (currentStep === 5) return <ArraySection title="Project" items={memoryData.projects} section="projects" emptyItem={emptyProject} addLabel="+ Add Project" removeItem={removeItem} addItem={addItem} render={(item, index) => <div className="grid gap-5 md:grid-cols-2"><Input placeholder="Project Name" value={item.name} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "name", v)} /><Input placeholder="Role / Your Contribution" value={item.role} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "role", v)} /><Input placeholder="Dates" value={item.dates} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "dates", v)} className="md:col-span-2" /><Textarea rows={5} placeholder="Describe the project, tools used, result, and impact..." value={item.description} onChange={(v) => updateArrayItem<ProjectItem>("projects", index, "description", v)} className="md:col-span-2" /></div>} />;
     if (currentStep === 7) return <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="Target Roles" value={memoryData.targetRoles} onChange={(v) => updateMemory("targetRoles", v)} /><Input placeholder="Target Industry" value={memoryData.targetIndustry} onChange={(v) => updateMemory("targetIndustry", v)} /><Input placeholder="Preferred Location" value={memoryData.targetLocation} onChange={(v) => updateMemory("targetLocation", v)} /><Input placeholder="Salary Expectation" value={memoryData.salaryExpectation} onChange={(v) => updateMemory("salaryExpectation", v)} /><Textarea rows={6} placeholder="Describe your short-term and long-term career goals..." value={memoryData.careerGoalSummary} onChange={(v) => updateMemory("careerGoalSummary", v)} className="md:col-span-2" /></div>;
-    return <div><div className="mt-6 rounded-2xl bg-blue-50 p-5"><h3 className="font-extrabold">Career Memory Review</h3><p className="mt-2 text-sm text-gray-600">Source: {memoryData.resumeSource === "uploaded" ? "Uploaded Resume" : "Built From Scratch"}</p>{memoryData.uploadedResumeName && <p className="mt-1 text-sm font-bold text-blue-700">Uploaded: {memoryData.uploadedResumeName}</p>}<p className="mt-3 text-sm font-semibold text-slate-600">Required sections: {requiredCount}/3 · Overall strength: {memoryStrength()}%</p></div>{renderManualTemplateReview()}</div>;
+    return <div><div className="mt-6 rounded-2xl bg-blue-50 p-5"><h3 className="font-extrabold">Career Memory Review</h3><p className="mt-2 text-sm text-slate-600">Source: {memoryData.resumeSource === "uploaded" ? "Uploaded Resume" : "Built From Scratch"}</p>{memoryData.uploadedResumeName && <p className="mt-1 text-sm font-bold text-blue-700">Uploaded: {memoryData.uploadedResumeName}</p>}<p className="mt-3 text-sm font-semibold text-slate-600">Required sections: {requiredCount}/3 · Overall strength: {memoryStrength()}%</p></div>{renderManualTemplateReview()}</div>;
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-slate-900">
        {coverLetterPreview && (
   <div className="fixed inset-0 z-50 overflow-auto bg-white p-10">
 
@@ -3388,10 +3390,10 @@ return;
       />
     </a>
 
-    <span className="text-gray-400">‹</span>
+    <span className="text-slate-400">‹</span>
   </div>
 
-    <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
+    <p className="mt-8 text-xs font-bold uppercase tracking-wider text-slate-400">
       Overview
     </p>
 
@@ -3430,7 +3432,7 @@ return;
             className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
   item === "Career Memory"
     ? "bg-blue-600 text-white"
-    : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+    : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
 }`}
           >
             <span>{icon}</span>
@@ -3464,19 +3466,15 @@ return;
       Career Memory
     </h1>
 
-    <p className="mt-1 text-sm text-gray-500">
+    <p className="mt-1 text-sm text-slate-500">
       Your career database. AI uses this information to create
       company-specific application packages.
     </p>
   </div>
 
-  <button
-    type="button"
-    onClick={saveMemory}
-    className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white"
-  >
+  <Button variant="primary" onClick={saveMemory}>
     Save Memory
-  </button>
+  </Button>
 </header>
 
 {renderRequiredBanner()}
@@ -3526,7 +3524,7 @@ return;
           Import Resume
         </h2>
 
-        <p className="mt-3 text-gray-500">
+        <p className="mt-3 text-slate-500">
           Upload your existing resume. Career Élan will extract your
           information and build your Career Memory.
         </p>
@@ -3560,7 +3558,7 @@ return;
       : "Drop your resume here"}
   </h3>
 
-  <p className="mt-2 text-sm text-gray-500">
+  <p className="mt-2 text-sm text-slate-500">
     PDF or DOCX · Maximum 10MB
   </p>
 
@@ -3631,7 +3629,7 @@ return;
       Import Cover Letter
     </h2>
 
-    <p className="mt-3 text-gray-500">
+    <p className="mt-3 text-slate-500">
       Upload your existing cover letter. Career Élan will save it so
       you can reuse or tailor it for every job you apply to.
     </p>
@@ -3665,7 +3663,7 @@ return;
           : "Drop your cover letter here"}
       </h3>
 
-      <p className="mt-2 text-sm text-gray-500">
+      <p className="mt-2 text-sm text-slate-500">
         PDF, DOCX, or TXT · Maximum 10MB
       </p>
 
@@ -3740,7 +3738,7 @@ return;
 
 {mode === "build" && (
   <>
-    <div className="mb-8 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+    <Card padding="md" className="mb-8">
       <button
         type="button"
         onClick={() => setMode("start")}
@@ -3749,19 +3747,19 @@ return;
         ← Back
       </button>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold">
             Profile Progress
           </h2>
 
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-slate-500">
             Step {currentStep + 1} of {steps.length} ·{" "}
             {steps[currentStep].title}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full bg-green-50 px-4 py-2 text-sm font-bold text-green-700">
             Recommended {requiredCount}/3
           </span>
@@ -3772,16 +3770,17 @@ return;
         </div>
       </div>
 
-      <div className="mt-5 h-3 rounded-full bg-gray-100">
+      <div className="mt-5 h-3 rounded-full bg-slate-100">
         <div
           className="h-3 rounded-full bg-blue-600"
           style={{ width: `${progress}%` }}
         />
       </div>
-    </div>
+    </Card>
 
     <div className="grid grid-cols-12 gap-6">
-      <aside className="col-span-12 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm xl:col-span-3">
+      <aside className="col-span-12 xl:col-span-3">
+      <Card padding="sm">
         <h2 className="text-lg font-bold">
           Steps
         </h2>
@@ -3795,7 +3794,7 @@ return;
               className={`w-full rounded-xl px-4 py-3 text-left transition ${
                 index === currentStep
                   ? "bg-blue-600 text-white"
-                  : "text-gray-600 hover:bg-blue-50"
+                  : "text-slate-600 hover:bg-blue-50"
               }`}
             >
               <p className="flex items-center justify-between text-sm font-bold">
@@ -3820,7 +3819,7 @@ return;
                 className={`mt-1 text-xs leading-5 ${
                   index === currentStep
                     ? "text-blue-100"
-                    : "text-gray-400"
+                    : "text-slate-400"
                 }`}
               >
                 {step.description}
@@ -3828,6 +3827,7 @@ return;
             </button>
           ))}
         </div>
+      </Card>
       </aside>
 
       <section
@@ -3837,12 +3837,12 @@ return;
             : "xl:col-span-6"
         }`}
       >
-        <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+        <Card padding="md">
           <h2 className="text-xl font-bold">
             {steps[currentStep].title}
           </h2>
 
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-slate-500">
             {steps[currentStep].description}
           </p>
 
@@ -3869,21 +3869,21 @@ return;
                 : "Save & Continue →"}
             </button>
           </div>
-        </div>
+        </Card>
       </section>
 
       {!isReviewStep && (
         <aside className="col-span-12 space-y-6 xl:col-span-3">
-          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+          <Card padding="sm">
             <h2 className="text-lg font-bold">
               Memory Strength
             </h2>
 
-            <p className="mt-2 text-sm text-gray-500">
+            <p className="mt-2 text-sm text-slate-500">
               More complete information creates better AI results.
             </p>
 
-            <div className="mt-5 h-2 rounded-full bg-gray-100">
+            <div className="mt-5 h-2 rounded-full bg-slate-100">
               <div
                 className="h-2 rounded-full bg-blue-600"
                 style={{ width: `${strength}%` }}
@@ -3893,14 +3893,14 @@ return;
             <p className="mt-3 text-sm font-bold text-blue-600">
               {strength}% Overall · Recommended {requiredCount}/3
             </p>
-          </div>
+          </Card>
 
-          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+          <Card padding="sm">
             <h2 className="text-lg font-bold">
               Recommended Information
             </h2>
 
-            <div className="mt-4 space-y-3 text-sm font-semibold text-gray-600">
+            <div className="mt-4 space-y-3 text-sm font-semibold text-slate-600">
               <RequiredLine
                 done={hasPersonalInfo()}
                 text="Personal Information"
@@ -3916,34 +3916,34 @@ return;
                 text="Skills"
               />
             </div>
-          </div>
+          </Card>
 
-          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+          <Card padding="sm">
             <h2 className="text-lg font-bold">
               Selected Style
             </h2>
 
-            <div className="mt-4 space-y-2 text-sm font-semibold text-gray-600">
+            <div className="mt-4 space-y-2 text-sm font-semibold text-slate-600">
               <p>📄 {memoryData.resumeTemplate}</p>
               <p>✉️ {memoryData.coverLetterTemplate}</p>
               <p>🎨 {memoryData.themeColor}</p>
               <p>🔤 {memoryData.font}</p>
               <p>🔎 {memoryData.textSize}</p>
             </div>
-          </div>
+          </Card>
 
-          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+          <Card padding="sm">
             <h2 className="text-lg font-bold">
               This Memory Powers
             </h2>
 
-            <div className="mt-4 space-y-3 text-sm font-semibold text-gray-600">
+            <div className="mt-4 space-y-3 text-sm font-semibold text-slate-600">
               <p>📦 Application Packages</p>
               <p>📄 Resume Generation</p>
               <p>✉️ Cover Letter Generation</p>
               <p>🎯 Job URL Analysis</p>
             </div>
-          </div>
+          </Card>
         </aside>
       )}
     </div>
@@ -4039,14 +4039,14 @@ canUseService: boolean;
     onClick={onImportCoverLetter}
     className="w-full rounded-3xl border border-purple-400 bg-gradient-to-r from-purple-200 to-violet-200 p-6 text-left shadow-md transition hover:-translate-y-1 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 focus-visible:ring-offset-2"
   >
-    <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex items-start gap-5">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-purple-50 text-4xl">
           ✉️
         </div>
 
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-2xl font-black">
               Cover Letter
             </h2>
@@ -4157,7 +4157,7 @@ canUseService: boolean;
         </div>
       </div>
 
-      <div className="mt-8 rounded-3xl border border-blue-100 bg-white p-6 shadow-sm"><h3 className="text-center text-lg font-black text-slate-950">What happens after this?</h3><div className="mt-6 grid gap-5 md:grid-cols-4"><FlowStep number="1" icon="⇧" title="Add Required Info" body="Personal information, experience, and skills." /><FlowStep number="2" icon="🧠" title="Career Memory Learns You" body="AI organizes your career information." /><FlowStep number="3" icon="🔗" title="Find or Paste Any Job URL" body="Search jobs inside Career Élan or Paste any job URL you want to apply to" /><FlowStep number="4" icon="📄 ✉️" title="Get Your Tailored Package" body="Resume, cover letter, and email ready in seconds." /></div></div><div className="mt-6 grid gap-4 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm md:grid-cols-4"><TrustItem icon="🛡️" title="Trusted by job seekers" body="worldwide" /><TrustItem icon="🔒" title="Your privacy" body="is our priority" /><TrustItem icon="👥" title="Join professionals" body="getting more interviews" /><TrustItem icon="☆" title="AI-Powered" body="Human-Focused. Results-Driven." /></div>
+      <div className="mt-8 rounded-3xl border border-blue-100 bg-white p-6 shadow-sm"><h3 className="text-center text-lg font-black text-slate-950">What happens after this?</h3><div className="mt-6 grid gap-5 lg:grid-cols-4"><FlowStep number="1" icon="⇧" title="Add Required Info" body="Personal information, experience, and skills." /><FlowStep number="2" icon="🧠" title="Career Memory Learns You" body="AI organizes your career information." /><FlowStep number="3" icon="🔗" title="Find or Paste Any Job URL" body="Search jobs inside Career Élan or Paste any job URL you want to apply to" /><FlowStep number="4" icon="📄 ✉️" title="Get Your Tailored Package" body="Resume, cover letter, and email ready in seconds." /></div></div><div className="mt-6 grid gap-4 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm lg:grid-cols-4"><TrustItem icon="🛡️" title="Trusted by job seekers" body="worldwide" /><TrustItem icon="🔒" title="Your privacy" body="is our priority" /><TrustItem icon="👥" title="Join professionals" body="getting more interviews" /><TrustItem icon="☆" title="AI-Powered" body="Human-Focused. Results-Driven." /></div>
     </div>
   );
 }
@@ -4198,7 +4198,7 @@ function ParsingStatus({
         <p className="mt-3 text-2xl font-bold text-blue-600">
            {progress}%
         </p>
-        <p className="mt-3 text-center text-gray-500 max-w-xl">
+        <p className="mt-3 text-center text-slate-500 max-w-xl">
           {stage === "parsing"
   ? (type === "resume"
       ? "Extracting your experience, education, skills and building your Career Memory."
@@ -4249,11 +4249,11 @@ function ParsingStatus({
 }
 function RequiredStatus({ done, title }: { done: boolean; title: string }) { return <div className={`rounded-xl border px-4 py-3 text-sm font-bold ${done ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>{done ? "✓" : "○"} {title}</div>; }
 function RequiredLine({ done, text }: { done: boolean; text: string }) { return <p className={done ? "text-green-700" : "text-slate-500"}>{done ? "✓" : "○"} {text}</p>; }
-function FlowStep({ number, icon, title, body }: { number: string; icon: string; title: string; body: string }) { return <div className="relative rounded-2xl bg-white p-4"><div className="absolute -top-3 left-0 flex h-7 w-7 items-center justify-center rounded-full bg-green-600 text-xs font-black text-white">{number}</div><div className="flex gap-4"><div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-white text-3xl text-blue-600">{icon}</div><div><p className="font-black text-slate-950">{title}</p><p className="mt-2 text-xs leading-5 text-slate-500">{body}</p></div></div></div>; }
-function TrustItem({ icon, title, body }: { icon: string; title: string; body: string }) { return <div className="flex items-center gap-4 border-slate-100 px-3 md:border-r last:border-r-0"><div className="text-3xl text-blue-600">{icon}</div><div><p className="text-sm font-bold text-slate-700">{title}</p><p className="text-sm text-slate-500">{body}</p></div></div>; }
-function Select({ label, value, onChange, items }: { label: string; value: string; onChange: (value: string) => void; items: string[] }) { return <div><label className="text-sm font-bold text-gray-600">{label}<select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-blue-600">{items.map((item) => <option key={item}>{item}</option>)}</select></label></div>; }
-function Input({ placeholder, value, onChange, className = "" }: { placeholder: string; value: string; onChange: (value: string) => void; className?: string }) { return <input aria-label={placeholder} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} className={`rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-blue-600 ${className}`} />; }
-function Textarea({ placeholder, value, onChange, rows, className = "" }: { placeholder: string; value: string; onChange: (value: string) => void; rows: number; className?: string }) { return <textarea aria-label={placeholder} rows={rows} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} className={`rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-blue-600 ${className}`} />; }
+function FlowStep({ number, icon, title, body }: { number: string; icon: string; title: string; body: string }) { return <div className="relative rounded-2xl bg-white p-4"><div className="absolute -top-3 left-0 flex h-7 w-7 items-center justify-center rounded-full bg-green-600 text-xs font-black text-white">{number}</div><div className="flex gap-4"><div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-white text-3xl text-blue-600">{icon}</div><div className="min-w-0"><p className="font-black text-slate-950">{title}</p><p className="mt-2 text-xs leading-5 text-slate-500">{body}</p></div></div></div>; }
+function TrustItem({ icon, title, body }: { icon: string; title: string; body: string }) { return <div className="flex items-center gap-4 border-slate-100 px-3 lg:border-r last:border-r-0"><div className="text-3xl text-blue-600">{icon}</div><div className="min-w-0"><p className="text-sm font-bold text-slate-700">{title}</p><p className="text-sm text-slate-500">{body}</p></div></div>; }
+function Select({ label, value, onChange, items }: { label: string; value: string; onChange: (value: string) => void; items: string[] }) { return <div><label className="text-sm font-bold text-slate-600">{label}<select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100">{items.map((item) => <option key={item}>{item}</option>)}</select></label></div>; }
+function Input({ placeholder, value, onChange, className = "" }: { placeholder: string; value: string; onChange: (value: string) => void; className?: string }) { return <input aria-label={placeholder} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} className={`w-full min-w-0 max-w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ${className}`} />; }
+function Textarea({ placeholder, value, onChange, rows, className = "" }: { placeholder: string; value: string; onChange: (value: string) => void; rows: number; className?: string }) { return <textarea aria-label={placeholder} rows={rows} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} className={`rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ${className}`} />; }
 function MonthInput({
   label,
   value,
@@ -4283,7 +4283,7 @@ function MonthInput({
     </label>
   );
 }
-function ArraySection<T extends object>({ title, items, section, emptyItem, addLabel, removeItem, addItem, render }: { title: string; items: T[]; section: keyof CareerMemoryData; emptyItem: object; addLabel: string; removeItem: (section: keyof CareerMemoryData, index: number) => void; addItem: (section: keyof CareerMemoryData, emptyItem: object) => void; render: (item: T, index: number) => ReactNode }) { return <div className="mt-6 space-y-5">{items.map((item, index) => <div key={index} className="rounded-2xl border border-gray-100 bg-slate-50 p-5"><div className="mb-4 flex items-center justify-between"><h3 className="font-bold">{title} #{index + 1}</h3><button onClick={() => removeItem(section, index)} className="text-sm font-bold text-red-500">Remove</button></div>{render(item, index)}</div>)}<button onClick={() => addItem(section, emptyItem)} className="rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600">{addLabel}</button></div>; }
+function ArraySection<T extends object>({ title, items, section, emptyItem, addLabel, removeItem, addItem, render }: { title: string; items: T[]; section: keyof CareerMemoryData; emptyItem: object; addLabel: string; removeItem: (section: keyof CareerMemoryData, index: number) => void; addItem: (section: keyof CareerMemoryData, emptyItem: object) => void; render: (item: T, index: number) => ReactNode }) { return <div className="mt-6 space-y-5">{items.map((item, index) => <div key={index} className="rounded-2xl border border-slate-100 bg-slate-50 p-5"><div className="mb-4 flex items-center justify-between"><h3 className="font-bold">{title} #{index + 1}</h3><button onClick={() => removeItem(section, index)} className="text-sm font-bold text-red-500">Remove</button></div>{render(item, index)}</div>)}<button onClick={() => addItem(section, emptyItem)} className="rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600">{addLabel}</button></div>; }
 function Step({
   title,
   done,
@@ -4303,7 +4303,7 @@ function Step({
       ) : loading ? (
         <div className="h-8 w-8 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
       ) : (
-        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-300">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300">
           ○
         </div>
       )}
