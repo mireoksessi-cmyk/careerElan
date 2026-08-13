@@ -18,6 +18,7 @@ import { useLogin } from "@/lib/auth/LoginManager";
 import { stripCoverLetterContactBlock } from "@/lib/generatePackage/textCleanup";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
+import { Button } from "@/components/ui/Button";
 
 export default function JobTrackerPage() {
     
@@ -601,27 +602,27 @@ return (
             Delete all applications?
           </h2>
 
-          <p className="mt-3 text-sm text-gray-600">
+          <p className="mt-3 text-sm text-slate-600">
             This will permanently delete all applications and generated packages in your Job Tracker. Your Career Memory and saved resumes will not be deleted.
           </p>
 
           <div className="mt-8 flex justify-end gap-3">
 
-            <button
+            <Button
               onClick={() => setShowDeleteAllModal(false)}
               disabled={deletingAll}
-              className="rounded-xl border px-5 py-2 disabled:opacity-40"
+              variant="secondary"
             >
               Cancel
-            </button>
+            </Button>
 
-            <button
+            <Button
               disabled={deletingAll}
               onClick={deleteAllApplications}
-              className="rounded-xl bg-red-600 px-5 py-2 font-bold text-white disabled:opacity-40"
+              variant="danger"
             >
               {deletingAll ? "Deleting…" : "Delete All Applications"}
-            </button>
+            </Button>
 
           </div>
 

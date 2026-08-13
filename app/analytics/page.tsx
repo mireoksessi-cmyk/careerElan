@@ -235,7 +235,7 @@ export default function AnalyticsPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f6fbff]">
-        <p role="status" aria-live="polite" className="font-bold text-gray-500">
+        <p role="status" aria-live="polite" className="font-bold text-slate-500">
           Loading analytics...
         </p>
       </div>
@@ -243,8 +243,8 @@ export default function AnalyticsPage() {
   }
 
   return (
-   
-      <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+
+      <main className="flex min-h-screen flex-col bg-[#f6fbff] text-slate-900">
         <div className="flex flex-1 flex-col md:flex-row">
           <Sidebar active="Analytics" />
 

@@ -10,6 +10,9 @@ import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import { useModalFocusTrap } from "@/lib/hooks/useModalFocusTrap";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { SectionHeading } from "@/components/ui/SectionHeading";
 
 /*
   Career Elan only operates in Canada, so Country is fixed - not a free-form
@@ -29,6 +32,17 @@ const CANADIAN_TIMEZONES = [
 ] as const;
 
 const DEFAULT_CANADIAN_TIMEZONE = "America/Toronto";
+
+/*
+  Phase 2F design-system unification. Settings previously had no
+  consistent border/focus style on its inputs at all (audit found it
+  was the only page with a bare "rounded-xl border p-3" and no focus
+  ring) - this is the shared input shape used elsewhere in the new
+  design system's default (border-slate-300, blue focus ring).
+*/
+const INPUT_CLASS =
+  "mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+const DISABLED_INPUT_CLASS = `${INPUT_CLASS} bg-slate-100 text-slate-500`;
 
 function isCanadianTimezone(value: string): boolean {
   return CANADIAN_TIMEZONES.some((zone) => zone.value === value);
@@ -286,7 +300,7 @@ async function deleteAccount() {
 
   return (
     <main className="flex min-h-screen flex-col bg-[#f6fbff]">
-      <div className="flex flex-1">
+      <div className="flex flex-1 flex-col md:flex-row">
 
         <Sidebar active="Settings" />
 
@@ -299,7 +313,7 @@ async function deleteAccount() {
 
           <div className="max-w-4xl">
 
-            <div className="rounded-3xl bg-white p-8 shadow-sm border border-blue-100">
+            <Card padding="lg">
 
               <div className="mb-8 flex justify-center">
 
@@ -323,7 +337,7 @@ async function deleteAccount() {
 
                   <input
                     id="settings-full-name"
-                    className="mt-2 w-full rounded-xl border p-3"
+                    className={INPUT_CLASS}
                     value={profile.full_name}
                     onChange={(e) =>
                       setProfile({
@@ -344,7 +358,7 @@ async function deleteAccount() {
                   <input
                     id="settings-login-id"
                     disabled
-                    className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
+                    className={DISABLED_INPUT_CLASS}
                     value={profile.login_id}
                   />
 
@@ -359,7 +373,7 @@ async function deleteAccount() {
                   <input
                     id="settings-email"
                     disabled
-                    className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
+                    className={DISABLED_INPUT_CLASS}
                     value={profile.email}
                   />
 
@@ -373,7 +387,7 @@ async function deleteAccount() {
 
                   <input
                     id="settings-phone"
-                    className="mt-2 w-full rounded-xl border p-3"
+                    className={INPUT_CLASS}
                     value={profile.phone}
                     onChange={(e) =>
                       setProfile({
@@ -396,7 +410,7 @@ async function deleteAccount() {
                     <input
                       id="settings-country"
                       disabled
-                      className="mt-2 w-full rounded-xl border bg-gray-100 p-3"
+                      className={DISABLED_INPUT_CLASS}
                       value={FIXED_COUNTRY}
                       title="Career Élan currently operates in Canada only."
                     />
@@ -411,7 +425,7 @@ async function deleteAccount() {
 
                     <select
                       id="settings-timezone"
-                      className="mt-2 w-full rounded-xl border p-3"
+                      className={INPUT_CLASS}
                       value={profile.timezone}
                       onChange={(e) =>
                         setProfile({
@@ -431,23 +445,15 @@ async function deleteAccount() {
 
                 </div>
 
-                <button
-                  onClick={saveProfile}
-                  disabled={saving}
-                  className="rounded-xl bg-blue-600 px-8 py-3 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-                >
+                <Button onClick={saveProfile} disabled={saving} size="lg">
                   {saving ? "Saving..." : "Save Changes"}
-                </button>
-                   
+                </Button>
+
                 <div className="mt-12 border-t pt-10">
 
-  <h2 className="text-2xl font-bold">
+  <SectionHeading subtitle="Update your account password.">
     Change Password
-  </h2>
-
-  <p className="mt-1 text-sm text-gray-500">
-    Update your account password.
-  </p>
+  </SectionHeading>
 
   <div className="mt-6 space-y-5">
 
@@ -465,7 +471,7 @@ async function deleteAccount() {
         onChange={(e) =>
           setPassword(e.target.value)
         }
-        className="mt-2 w-full rounded-xl border p-3"
+        className={INPUT_CLASS}
       />
 
     </div>
@@ -484,20 +490,16 @@ async function deleteAccount() {
         onChange={(e) =>
           setConfirmPassword(e.target.value)
         }
-        className="mt-2 w-full rounded-xl border p-3"
+        className={INPUT_CLASS}
       />
 
     </div>
 
-    <button
-      onClick={changePassword}
-      disabled={changingPassword}
-      className="rounded-xl bg-red-600 px-8 py-3 font-bold text-white hover:bg-red-700"
-    >
+    <Button onClick={changePassword} disabled={changingPassword} size="lg">
       {changingPassword
         ? "Updating..."
         : "Change Password"}
-    </button>
+    </Button>
 
   </div>
 
@@ -505,13 +507,9 @@ async function deleteAccount() {
 
 <div className="mt-12 border-t pt-10">
 
-  <h2 className="text-2xl font-bold">
+  <SectionHeading subtitle="Choose which emails you want to receive.">
     Notifications
-  </h2>
-
-  <p className="mt-1 text-sm text-gray-500">
-    Choose which emails you want to receive.
-  </p>
+  </SectionHeading>
 
   <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
     These preferences are saved, but Career Élan doesn&apos;t send
@@ -530,12 +528,12 @@ async function deleteAccount() {
             Email Notifications
           </p>
 
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
             Coming soon
           </span>
         </div>
 
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-slate-500">
           Receive important account updates.
         </p>
 
@@ -565,12 +563,12 @@ async function deleteAccount() {
             Marketing Emails
           </p>
 
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
             Coming soon
           </span>
         </div>
 
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-slate-500">
           Receive product updates and feature announcements.
         </p>
 
@@ -597,24 +595,17 @@ async function deleteAccount() {
 
 <div className="mt-12 border-t pt-10">
 
-  <h2 className="text-2xl font-bold">
+  <SectionHeading subtitle="Manage your account session.">
     Account
-  </h2>
+  </SectionHeading>
 
-  <p className="mt-1 text-sm text-gray-500">
-    Manage your account session.
-  </p>
-
-  <button
-    onClick={logout}
-    className="mt-6 rounded-xl bg-gray-900 px-8 py-3 font-bold text-white transition hover:bg-black"
-  >
+  <Button onClick={logout} variant="secondary" size="lg" className="mt-6">
     Log Out
-  </button>
+  </Button>
 
   <div className="mt-8 border-t pt-6">
 
-    <p className="text-xs text-gray-400">
+    <p className="text-xs text-slate-400">
       Permanently remove your account and all associated data.
     </p>
 
@@ -631,7 +622,7 @@ async function deleteAccount() {
 
               </div>
 
-            </div>
+            </Card>
 
           </div>
 
@@ -656,11 +647,11 @@ async function deleteAccount() {
               Delete Account
             </h2>
 
-            <p className="mt-3 text-sm text-gray-600">
+            <p className="mt-3 text-sm text-slate-600">
               This action is permanent and cannot be undone.
             </p>
 
-            <label htmlFor="delete-account-confirm-text" className="mt-2 block text-sm text-gray-600">
+            <label htmlFor="delete-account-confirm-text" className="mt-2 block text-sm text-slate-600">
               Type <span className="font-bold">DELETE</span> to continue.
             </label>
 
@@ -668,11 +659,11 @@ async function deleteAccount() {
               id="delete-account-confirm-text"
               value={deleteText}
               onChange={(e) => setDeleteText(e.target.value)}
-              className="mt-2 w-full rounded-xl border p-3"
+              className={INPUT_CLASS}
               placeholder="Type DELETE"
             />
 
-            <label htmlFor="delete-account-password" className="mt-4 block text-sm text-gray-600">
+            <label htmlFor="delete-account-password" className="mt-4 block text-sm text-slate-600">
               Enter your password to confirm.
             </label>
 
@@ -682,37 +673,37 @@ async function deleteAccount() {
               autoComplete="current-password"
               value={deletePassword}
               onChange={(e) => setDeletePassword(e.target.value)}
-              className="mt-2 w-full rounded-xl border p-3"
+              className={INPUT_CLASS}
               placeholder="Password"
             />
 
             <div className="mt-8 flex justify-end gap-3">
 
-              <button
+              <Button
                 ref={deleteModalCloseRef}
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDeleteText("");
                   setDeletePassword("");
                 }}
-                className="rounded-xl border px-5 py-2"
+                variant="secondary"
               >
                 Cancel
-              </button>
+              </Button>
 
-              <button
+              <Button
                 disabled={
                   deleteText !== "DELETE" ||
                   !deletePassword ||
                   deletingAccount
                 }
                 onClick={deleteAccount}
-                className="rounded-xl bg-red-600 px-5 py-2 font-bold text-white disabled:opacity-40"
+                variant="danger"
               >
                 {deletingAccount
                   ? "Deleting…"
                   : "Delete Account"}
-              </button>
+              </Button>
 
             </div>
 

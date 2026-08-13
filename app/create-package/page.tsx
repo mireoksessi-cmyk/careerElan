@@ -21,7 +21,7 @@ export default function CreatePackagePage() {
   const { profile } = useLogin();
  return (
   
-    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-gray-900">
+    <main className="flex min-h-screen flex-col bg-[#f6fbff] text-slate-900">
       <MobileNav active="Generate Package" />
       <div className="flex flex-1">
         <aside className="hidden border-r border-blue-100 bg-white px-5 py-6 md:block md:w-60">
@@ -29,10 +29,10 @@ export default function CreatePackagePage() {
             <a href="/dashboard">
               <Image src="/logo.png" alt="Career Élan" width={120} height={45} />
             </a>
-            <span className="text-gray-400">‹</span>
+            <span className="text-slate-400">‹</span>
           </div>
 
-          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-gray-400">
+          <p className="mt-8 text-xs font-bold uppercase tracking-wider text-slate-400">
             Overview
           </p>
 
@@ -44,7 +44,7 @@ export default function CreatePackagePage() {
                 className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                   item.label === "Generate Package"
                     ? "bg-blue-600 text-white shadow-sm"
-                    : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                    : "text-slate-600 hover:bg-blue-50 hover:text-blue-600"
                 }`}
               >
                 <span>{item.icon}</span>
@@ -56,7 +56,7 @@ export default function CreatePackagePage() {
           <div className="mt-16 rounded-2xl bg-blue-50 p-5 text-center">
             <div className="text-3xl">👑</div>
             <h3 className="mt-3 font-extrabold">Career Élan Pro</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
+            <p className="mt-2 text-sm leading-6 text-slate-600">
               More capacity and premium features are coming soon.
             </p>
             <Link href="/pricing" className="mt-4 block w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white">
@@ -69,7 +69,7 @@ export default function CreatePackagePage() {
           <header className="mb-8 flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-extrabold">Create Full Package</h1>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-slate-500">
                 Choose how you want to create your company-specific application package.
               </p>
             </div>
@@ -100,7 +100,7 @@ export default function CreatePackagePage() {
                   Find Jobs in Career Élan
                 </h2>
 
-                <p className="mt-3 text-sm leading-7 text-gray-600">
+                <p className="mt-3 text-sm leading-7 text-slate-600">
                   Search jobs matched to your Career Memory, choose a posting,
                   then generate a tailored resume, cover letter, and email draft.
                 </p>
@@ -127,7 +127,7 @@ export default function CreatePackagePage() {
                   Paste Job URL or Description
                 </h2>
 
-                <p className="mt-3 text-sm leading-7 text-gray-600">
+                <p className="mt-3 text-sm leading-7 text-slate-600">
                   Already found a job on LinkedIn, Indeed, Job Bank, or a company
                   website? Paste it here and generate your full package.
                 </p>
@@ -155,7 +155,7 @@ export default function CreatePackagePage() {
             <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
               <div className="text-3xl">1️⃣</div>
               <h3 className="mt-4 font-extrabold">Choose a job</h3>
-              <p className="mt-2 text-sm leading-6 text-gray-500">
+              <p className="mt-2 text-sm leading-6 text-slate-500">
                 Find one in Career Élan or paste a job posting you found elsewhere.
               </p>
             </div>
@@ -163,7 +163,7 @@ export default function CreatePackagePage() {
             <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
               <div className="text-3xl">2️⃣</div>
               <h3 className="mt-4 font-extrabold">Generate package</h3>
-              <p className="mt-2 text-sm leading-6 text-gray-500">
+              <p className="mt-2 text-sm leading-6 text-slate-500">
                 Create a tailored resume, cover letter, and follow-up email.
               </p>
             </div>
@@ -171,7 +171,7 @@ export default function CreatePackagePage() {
             <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
               <div className="text-3xl">3️⃣</div>
               <h3 className="mt-4 font-extrabold">Apply directly</h3>
-              <p className="mt-2 text-sm leading-6 text-gray-500">
+              <p className="mt-2 text-sm leading-6 text-slate-500">
                 Open the original job posting and apply with your prepared package.
               </p>
             </div>
