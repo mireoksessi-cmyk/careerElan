@@ -25,6 +25,8 @@ import type { RecommendedCareerFair } from "@/lib/careerFairs/types";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 const FREE_PACKAGE_LIMIT = 3;
 const menuItems = [
@@ -2772,11 +2774,11 @@ if (!user) {
                 <h2 className="mb-4 text-lg font-bold">Overview</h2>
 
                 <div className="grid gap-5 md:grid-cols-4">
-  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  <Card padding="sm">
     <div className="flex items-start justify-between">
       <div>
-        <p className="text-sm font-semibold text-gray-500">
-            Create Resume & Import Resume
+        <p className="text-sm font-semibold text-slate-500">
+            Career Memory Strength
         </p>
 
         <h3 className="mt-3 text-3xl font-extrabold">
@@ -2794,7 +2796,7 @@ if (!user) {
     {selectedResumeTypeLabel}
   </p>
 
-  <p className="mt-1 truncate text-xs text-gray-500">
+  <p className="mt-1 truncate text-xs text-slate-500">
     {selectedResumeLabel}
   </p>
 </div>
@@ -2809,12 +2811,12 @@ if (!user) {
 
       <span>→</span>
     </div>
-  </div>
+  </Card>
 
-  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  <Card padding="sm">
     <div className="flex items-start justify-between">
       <div>
-        <p className="text-sm font-semibold text-gray-500">
+        <p className="text-sm font-semibold text-slate-500">
           Application Packages
         </p>
 
@@ -2828,7 +2830,7 @@ if (!user) {
       </div>
     </div>
 
-    <p className="mt-3 text-xs text-gray-500">
+    <p className="mt-3 text-xs text-slate-500">
       <span className="font-bold text-green-600">
         +{stats.packagesThisMonth}
       </span>{" "}
@@ -2845,12 +2847,12 @@ if (!user) {
 
       <span>→</span>
     </div>
-  </div>
+  </Card>
 
-  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  <Card padding="sm">
     <div className="flex items-start justify-between">
       <div>
-        <p className="text-sm font-semibold text-gray-500">
+        <p className="text-sm font-semibold text-slate-500">
           Applications Sent
         </p>
 
@@ -2864,7 +2866,7 @@ if (!user) {
       </div>
     </div>
 
-    <p className="mt-3 text-xs text-gray-500">
+    <p className="mt-3 text-xs text-slate-500">
       <span className="font-bold text-green-600">
         +{stats.applicationsThisMonth}
       </span>{" "}
@@ -2881,12 +2883,12 @@ if (!user) {
 
       <span>→</span>
     </div>
-  </div>
+  </Card>
 
-  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  <Card padding="sm">
     <div className="flex items-start justify-between">
       <div>
-        <p className="text-sm font-semibold text-gray-500">
+        <p className="text-sm font-semibold text-slate-500">
           Interviews
         </p>
 
@@ -2900,7 +2902,7 @@ if (!user) {
       </div>
     </div>
 
-    <p className="mt-3 text-xs text-gray-500">
+    <p className="mt-3 text-xs text-slate-500">
       <span className="font-bold text-green-600">
         +{stats.interviewsThisMonth}
       </span>{" "}
@@ -2917,17 +2919,17 @@ if (!user) {
 
       <span>→</span>
     </div>
-  </div>
+  </Card>
 </div>
               </div>
                  
-                <div className="mb-6 rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+                <Card className="mb-6">
 
 <h2 className="text-lg font-bold">
 Resume & Cover Letter
 </h2>
 
-<p className="mt-1 text-sm text-gray-500">
+<p className="mt-1 text-sm text-slate-500">
 Choose which resume and cover letter will be used when generating your application package.
 </p>
 
@@ -3309,7 +3311,7 @@ Generate automatically
 
 </div>
 
-</div> 
+</Card>
 
               <div>
                 <h2 className="mb-4 text-lg font-bold">Quick Actions</h2>
@@ -3318,25 +3320,25 @@ Generate automatically
                   <a href="/find-jobs" className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
                     <div className="text-3xl">🔍</div>
                     <h3 className="mt-3 font-extrabold">Find Jobs</h3>
-                    <p className="mt-1 text-sm text-gray-500">Search jobs matched to your Career Memory.</p>
+                    <p className="mt-1 text-sm text-slate-500">Search jobs matched to your Career Memory.</p>
                     <span className="mt-8 block text-right text-xl">→</span>
                   </a>
 
                   <button
                     onClick={() => setShowPackageChoice(true)}
-                    className="rounded-2xl border border-blue-300 bg-white p-5 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-lg md:col-span-2"
+                    className="rounded-2xl border-2 border-blue-400 bg-gradient-to-br from-blue-50 to-white p-5 text-left shadow-md transition hover:-translate-y-1 hover:shadow-xl md:col-span-2"
                   >
                     <div className="flex items-start justify-between">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-3xl">📦</div>
-                      <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-600">CORE FEATURE</span>
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-3xl shadow-sm">📦</div>
+                      <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">CORE FEATURE</span>
                     </div>
 
                     <h3 className="mt-4 text-lg font-extrabold">Create Full Package</h3>
-                    <p className="mt-2 text-sm leading-6 text-gray-600">
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
                       Generate a tailored resume, cover letter, and email draft for any job in minutes.
                     </p>
 
-                    <div className="mt-4 space-y-2 text-sm font-semibold text-gray-600">
+                    <div className="mt-4 space-y-2 text-sm font-semibold text-slate-600">
                       <p>✓ Find jobs in Career Élan</p>
                       <p>✓ Paste job URL or description</p>
                       <p>✓ Generate full application package</p>
@@ -3351,7 +3353,7 @@ Generate automatically
                   <a href="/job-tracker" className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
                     <div className="text-3xl">📊</div>
                     <h3 className="mt-3 font-extrabold">Job Tracker</h3>
-                    <p className="mt-1 text-sm text-gray-500">Track every application and interview.</p>
+                    <p className="mt-1 text-sm text-slate-500">Track every application and interview.</p>
                     <span className="mt-8 block text-right text-xl">→</span>
                   </a>
                 </div>
@@ -3361,7 +3363,7 @@ Generate automatically
                 <div className="mb-5 flex items-center justify-between">
                   <div>
                     <h2 className="text-lg font-bold">Recommended Jobs</h2>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="mt-1 text-sm text-slate-500">
                       {hasResumeData
                         ? "Based on your Career Memory and profile."
                         : "General recommendations. Upload your resume to unlock personalized matches."}
@@ -3538,7 +3540,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
     <div>
       <h2 className="text-lg font-bold">🎪 Career Fair Search</h2>
 
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-slate-500">
         {careerFairsHasLocation
           ? "Career fairs near you."
           : "Upcoming across Canada."}
@@ -3661,8 +3663,8 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
             </section>
 
             <aside className="col-span-12 space-y-6 xl:col-span-3">
-  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-    <h2 className="text-lg font-bold"> Create Resume & Import Resume</h2>
+  <Card padding="sm">
+    <h2 className="text-lg font-bold">Career Memory Progress</h2>
 
     <div className="mt-5 flex justify-center">
       <div className="flex h-28 w-28 items-center justify-center rounded-full border-8 border-blue-200 bg-blue-50 text-4xl">
@@ -3673,12 +3675,12 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
     <div className="mt-6 space-y-4">
       {/* Memory Completed */}
       <div>
-        <div className="flex justify-between text-xs font-bold text-gray-500">
+        <div className="flex justify-between text-xs font-bold text-slate-500">
           <span>Memory Completed</span>
           <span>{memoryStrength}%</span>
         </div>
 
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
           <div
             className="h-2 rounded-full bg-blue-600 transition-all duration-500"
             style={{
@@ -3690,12 +3692,12 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 
       {/* AI Personalization */}
       <div>
-        <div className="flex justify-between text-xs font-bold text-gray-500">
+        <div className="flex justify-between text-xs font-bold text-slate-500">
           <span>AI Personalization</span>
           <span>{aiPersonalization}%</span>
         </div>
 
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
           <div
             className="h-2 rounded-full bg-cyan-500 transition-all duration-500"
             style={{
@@ -3712,12 +3714,12 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
     >
       Improve My Profile →
     </a>
-  </div>
+  </Card>
 
-  <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+  <Card padding="sm">
     <h2 className="text-lg font-bold">Career Insights</h2>
 
-    <p className="mt-1 text-sm text-gray-500">
+    <p className="mt-1 text-sm text-slate-500">
       Suggestions based on{" "}
       <span className="font-bold text-blue-600">
         {selectedResumeLabel}
@@ -3755,30 +3757,30 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
         </div>
       ))}
     </div>
-  
 
 
-                
-              </div>
 
-              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+
+              </Card>
+
+              <Card padding="sm">
                 <h2 className="text-lg font-bold">New here?</h2>
-                <p className="mt-2 text-sm leading-6 text-gray-600">
+                <p className="mt-2 text-sm leading-6 text-slate-600">
                   Take a 30-second tour to see how Career Élan helps you build better applications.
                 </p>
-                <button onClick={() => setShowTour(true)} className="mt-4 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white">
+                <Button onClick={() => setShowTour(true)} className="mt-4">
                   Start Tour →
-                </button>
-              </div>
+                </Button>
+              </Card>
 
-              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+              <Card padding="sm">
   <div className="flex items-start justify-between gap-3">
     <div>
       <h2 className="text-lg font-bold">
         AI Usage
       </h2>
 
-      <p className="mt-2 text-sm text-gray-500">
+      <p className="mt-2 text-sm text-slate-500">
         Monthly package generation usage.
       </p>
     </div>
@@ -3789,7 +3791,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
   </div>
 
   <div className="mt-5">
-    <div className="flex items-center justify-between text-xs font-bold text-gray-500">
+    <div className="flex items-center justify-between text-xs font-bold text-slate-500">
       <span>Packages Generated</span>
 
       <span
@@ -3798,14 +3800,14 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
             ? "text-red-600"
             : aiUsagePercent >= 80
               ? "text-amber-600"
-              : "text-gray-600"
+              : "text-slate-600"
         }
       >
         {aiUsageUsed} / {aiUsageLimit}
       </span>
     </div>
 
-    <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
       <div
         className={`h-full rounded-full transition-all duration-500 ${
           aiUsageUsed >= aiUsageLimit
@@ -3821,11 +3823,11 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
     </div>
 
     <div className="mt-3 flex items-center justify-between gap-3">
-      <p className="text-xs font-semibold text-gray-400">
+      <p className="text-xs font-semibold text-slate-400">
         Resets at the beginning of each month
       </p>
 
-      <p className="whitespace-nowrap text-xs font-bold text-gray-500">
+      <p className="whitespace-nowrap text-xs font-bold text-slate-500">
         {aiUsageRemaining} remaining
       </p>
     </div>
@@ -3840,7 +3842,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
   )}
 
   <div className="mt-5 flex items-center justify-between gap-3">
-    <p className="text-sm font-bold text-gray-600">
+    <p className="text-sm font-bold text-slate-600">
       Plan: Free Beta
     </p>
 
@@ -3851,16 +3853,16 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       ⚡ Coming Soon
     </Link>
   </div>
-</div>
+</Card>
 
-              <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+              <Card padding="sm">
   <div className="flex items-start justify-between gap-3">
     <div>
       <h2 className="text-lg font-bold">
         Upcoming Interview
       </h2>
 
-      <p className="mt-1 text-xs text-gray-400">
+      <p className="mt-1 text-xs text-slate-400">
         Your nearest scheduled interview
       </p>
     </div>
@@ -3876,7 +3878,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
         {upcomingInterview.company}
       </p>
 
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-slate-500">
         {upcomingInterview.jobTitle}
       </p>
 
@@ -3927,7 +3929,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
       </button>
     </>
   )}
-</div>
+</Card>
             </aside>
           </div>
         </section>
