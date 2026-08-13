@@ -3310,9 +3310,9 @@ async function downloadDocx() {
           </div>
         </aside>
 
-        <section className="flex-1 px-8 py-6">
-          <header className="mb-8 flex items-center justify-between">
-            <div>
+        <section className="min-w-0 flex-1 px-8 py-6">
+          <header className="mb-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <div className="text-xs font-bold text-blue-600">
                 Create Package › Paste Job URL or Description
               </div>
@@ -3341,13 +3341,13 @@ async function downloadDocx() {
             </button>
           </header>
 
-          <div className="grid gap-6 xl:grid-cols-12">
-            <section className="xl:col-span-8">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+            <section className="min-w-0 xl:col-span-8">
               <div className="rounded-2xl border border-blue-100 bg-white shadow-sm">
                 <div className="grid grid-cols-3 border-b border-blue-100 bg-slate-50">
                   <button
                     onClick={() => setActiveMode("url")}
-                    className={`px-5 py-4 text-sm font-extrabold ${
+                    className={`min-w-0 px-3 py-4 text-xs font-extrabold sm:px-5 sm:text-sm ${
                       activeMode === "url"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
                         : "text-gray-500 hover:bg-blue-50"
@@ -3358,7 +3358,7 @@ async function downloadDocx() {
 
                   <button
                     onClick={() => setActiveMode("description")}
-                    className={`px-5 py-4 text-sm font-extrabold ${
+                    className={`min-w-0 px-3 py-4 text-xs font-extrabold sm:px-5 sm:text-sm ${
                       activeMode === "description"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
                         : "text-gray-500 hover:bg-blue-50"
@@ -3372,7 +3372,7 @@ async function downloadDocx() {
                       setActiveMode("file");
                       fileInputRef.current?.click();
                     }}
-                    className={`px-5 py-4 text-sm font-extrabold ${
+                    className={`min-w-0 px-3 py-4 text-xs font-extrabold sm:px-5 sm:text-sm ${
                       activeMode === "file"
                         ? "border-b-4 border-blue-600 bg-white text-blue-600"
                         : "text-gray-500 hover:bg-blue-50"
@@ -3386,7 +3386,7 @@ async function downloadDocx() {
                   {activeMode === "url" && (
                     <div>
                       <label className="text-sm font-bold">Job Posting URL</label>
-                      <div className="mt-3 flex gap-3">
+                      <div className="mt-3 flex flex-col gap-3 sm:flex-row">
                         <input
                           value={jobUrl}
                           onChange={(e) => {
@@ -3394,7 +3394,7 @@ async function downloadDocx() {
                             setMessage("New job detected. Click Analyze Job to update the page.");
                           }}
                           placeholder="https://www.linkedin.com/jobs/view/1234567890"
-                          className="flex-1 rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500"
+                          className="min-w-0 flex-1 rounded-xl border border-blue-100 px-5 py-3 text-sm outline-none focus:border-blue-500"
                         />
                         <button
                           onClick={handleAnalyze}
@@ -3481,11 +3481,11 @@ async function downloadDocx() {
 
               <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-4xl">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-4xl">
                     {analysis.icon}
                   </div>
-                  <div>
-                    <h2 className="text-2xl font-extrabold">{analysis.title}</h2>
+                  <div className="min-w-0">
+                    <h2 className="text-2xl font-extrabold break-words">{analysis.title}</h2>
                     <p className="mt-1 text-sm text-gray-500">
                       {analysis.company} · {analysis.location} · {analysis.type}
                     </p>
@@ -3551,7 +3551,7 @@ async function downloadDocx() {
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
   {/* 선택된 Resume */}
-  <div className="rounded-2xl border border-gray-100 bg-white p-5">
+  <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
     <div className="flex items-start gap-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-2xl">
         📄
@@ -3597,7 +3597,7 @@ async function downloadDocx() {
   </div>
 
   {/* 선택된 Cover Letter */}
-  <div className="rounded-2xl border border-gray-100 bg-white p-5">
+  <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
     <div className="flex items-start gap-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-2xl">
         ✉️
@@ -3885,8 +3885,8 @@ async function downloadDocx() {
                       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
                         🛩️
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-xl font-extrabold text-gray-900">
                             Apply with Saved Resume
                           </h3>
@@ -3910,7 +3910,7 @@ async function downloadDocx() {
                       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
                         🌐
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <h3 className="text-xl font-extrabold text-gray-900">
                           Apply on Employer Website ↗
                         </h3>
@@ -3926,7 +3926,7 @@ async function downloadDocx() {
             </section>
 
             {/* 오른쪽 위: 스크롤을 따라오지 않는 안내 카드 */}
-            <aside className="self-start xl:col-span-4">
+            <aside className="min-w-0 self-start xl:col-span-4">
               <div className="rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
                 <h2 className="text-2xl font-extrabold">
                   What happens next?
@@ -3963,7 +3963,7 @@ async function downloadDocx() {
                         {num}
                       </div>
 
-                      <div>
+                      <div className="min-w-0">
                         <h3 className="font-extrabold">
                           {title}
                         </h3>
@@ -4026,9 +4026,9 @@ async function downloadDocx() {
                 )}
 
                 {generated && (
-  <div className="mt-6 grid items-start gap-5 xl:grid-cols-12">
+  <div className="mt-6 grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
     {/* 왼쪽: 원본 채용공고 */}
-    <aside className="xl:col-span-4">
+    <aside className="min-w-0 xl:col-span-4">
       <div className="h-full rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="border-b border-gray-100 p-5">
           <div className="flex items-center gap-3">
@@ -4237,7 +4237,7 @@ async function downloadDocx() {
     </aside>
 
     {/* 가운데: 생성된 Resume / Cover Letter / Email */}
-    <section className="xl:col-span-8">
+    <section className="min-w-0 xl:col-span-8">
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
           <div>
