@@ -86,14 +86,32 @@ function wrapValue(value: unknown): unknown {
 }
 
 /*
-  Recursively proxies every property access so nested namespaces
-  (client.responses, client.chat.completions, etc.) are wrapped too,
-  without needing to know the openai SDK's exact shape in advance.
-  Passing through un-wrapped when E2E mode is inactive means this has
-  no observable effect on production behavior beyond one extra Proxy
-  indirection per call.
+  Phase 6I.6.39 bugfix - the Proxy wrapping below is only ever load-
+  bearing while E2E mode is active. Applying it unconditionally (the
+  prior behavior) broke real, non-E2E OpenAI calls: a Proxy-wrapped
+  nested resource (e.g. client.chat.completions) invokes its methods
+  with `this` bound to the Proxy, not the real SDK object, and the
+  openai SDK's own resource classes rely on `this.#privateField`
+  internally - private class fields are keyed by exact object
+  identity, so accessing them through a Proxy throws "Cannot read
+  private member from an object whose class did not declare it" even
+  though the Proxy transparently forwards every property read. This
+  surfaced as every real (non-E2E) resume upload failing at the first
+  client.chat.completions.create() call, in every environment, because
+  the wrapping was applied even when isE2eAiModeActive() was false.
+
+  Returning the original client object directly when E2E mode is
+  inactive removes the Proxy indirection entirely for that case -
+  restoring the real SDK object's identity for every method call, and
+  with it the behavior that was always intended for non-E2E runtime.
+  E2E mode's blocking behavior (recursively proxying every nested
+  namespace so ANY method call throws REAL_OPENAI_CALL_BLOCKED_IN_E2E)
+  is unchanged for the case where isE2eAiModeActive() is true.
 */
 export function wrapOpenAiClientForE2eSafety<T extends object>(client: T): T {
+  if (!isE2eAiModeActive()) {
+    return client;
+  }
   return new Proxy(client, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);

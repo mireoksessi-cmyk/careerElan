@@ -16,6 +16,9 @@ function check(label: string, actual: unknown, expected: unknown) {
   if (ok) pass++;
   else fail++;
 }
+function checkTrue(label: string, actual: boolean) {
+  check(label, actual, true);
+}
 function checkThrows(label: string, fn: () => unknown, expectedMessageSubstring: string) {
   try {
     fn();
@@ -75,6 +78,56 @@ withEnv({ [E2E_MODE_ENV_VAR]: "1", NEXT_PUBLIC_SUPABASE_URL: "https://abcdefgh.s
   );
 });
 
+// ==================== E1: NON-E2E object identity - wrapping must be a true no-op, not merely equivalent behavior ====================
+withEnv({ [E2E_MODE_ENV_VAR]: undefined }, () => {
+  const client = { responses: { create: async () => "x" } };
+  const wrapped = wrapOpenAiClientForE2eSafety(client);
+  check("E1. wrapOpenAiClientForE2eSafety(client) returns the EXACT SAME object identity when E2E mode is inactive (wrapped === client)", wrapped === client, true);
+});
+
+// ==================== E2: NON-E2E private-class-field regression - the exact mechanism that broke real resume uploads ====================
+withEnv({ [E2E_MODE_ENV_VAR]: undefined }, () => {
+  /*
+    Reproduces the openai SDK's own shape: a top-level client object
+    whose nested resources (client.chat.completions, mirroring
+    client.chat.completions.create() in resumeAnalysisCore.ts) are
+    real class instances relying on a private field via `this` inside
+    a method. Before the fix, wrapping this in the recursive Proxy
+    (applied unconditionally, even outside E2E mode) rebound `this` to
+    a Proxy at each nesting level, and accessing #secret through that
+    Proxy threw "Cannot read private member from an object whose class
+    did not declare it" - the exact error observed in production
+    server logs for real resume uploads.
+  */
+  class FakeCompletions {
+    #secret = "real-value";
+    create() {
+      return this.#secret;
+    }
+  }
+  class FakeChat {
+    completions = new FakeCompletions();
+  }
+  class FakeOpenAiClient {
+    chat = new FakeChat();
+  }
+  const fakeClient = new FakeOpenAiClient();
+  const wrapped = wrapOpenAiClientForE2eSafety(fakeClient);
+
+  let threw = false;
+  let result: unknown;
+  try {
+    result = wrapped.chat.completions.create();
+  } catch (error) {
+    threw = true;
+    console.log("FAIL", "E2. wrapped.chat.completions.create() should not throw outside E2E mode", "threw:", error instanceof Error ? error.message : String(error));
+    fail++;
+  }
+  if (!threw) {
+    check("E2. wrapped.chat.completions.create() returns the private field's real value outside E2E mode (private-field access survives wrapping)", result, "real-value");
+  }
+});
+
 // ==================== F: wrapped client throws REAL_OPENAI_CALL_BLOCKED_IN_E2E on ANY method call while E2E mode is active, instead of ever reaching the real implementation ====================
 withEnv({ [E2E_MODE_ENV_VAR]: "1", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", URL: undefined, SITE_ID: undefined, NETLIFY: undefined }, () => {
   let realImplementationCalled = false;
@@ -95,6 +148,29 @@ withEnv({ [E2E_MODE_ENV_VAR]: "1", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:5
   check("F. the real underlying implementation was NEVER invoked", realImplementationCalled, false);
 });
 
+// ==================== F2: E2E mode also still blocks the exact private-field-bearing shape used by resumeAnalysisCore, proving the fix did not weaken E2E safety ====================
+withEnv({ [E2E_MODE_ENV_VAR]: "1", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", URL: undefined, SITE_ID: undefined, NETLIFY: undefined }, () => {
+  class FakeCompletions {
+    #secret = "real-value";
+    create() {
+      return this.#secret;
+    }
+  }
+  class FakeChat {
+    completions = new FakeCompletions();
+  }
+  class FakeOpenAiClient {
+    chat = new FakeChat();
+  }
+  const fakeClient = new FakeOpenAiClient();
+  const wrapped = wrapOpenAiClientForE2eSafety(fakeClient);
+  checkThrows(
+    "F2. wrapped.chat.completions.create() while E2E mode is active still throws REAL_OPENAI_CALL_BLOCKED_IN_E2E, never reaching the private field",
+    () => wrapped.chat.completions.create(),
+    "REAL_OPENAI_CALL_BLOCKED_IN_E2E"
+  );
+});
+
 // ==================== G: async main to confirm case E's async pass-through actually resolved correctly (no throw, real value returned) ====================
 async function main() {
   await withEnvAsync({ [E2E_MODE_ENV_VAR]: undefined }, async () => {
@@ -102,6 +178,7 @@ async function main() {
     const wrapped = wrapOpenAiClientForE2eSafety(realish);
     const result = await wrapped.responses.create("hello");
     check("G. wrapped client, E2E mode INACTIVE: real async implementation result passes through unchanged", result, "real-call:hello");
+    check("G2. wrapped client, E2E mode INACTIVE: object identity preserved for the async-shaped client too", wrapped === realish, true);
   });
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
