@@ -359,6 +359,17 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [inlineTemplates, setInlineTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
   const [inlineSelectedTemplateId, setInlineSelectedTemplateId] = useState<string | null>(null);
   const [inlineTemplateError, setInlineTemplateError] = useState<string | null>(null);
+  /*
+    True ONLY once the user has clicked a card for THIS resume (set in
+    selectInlineTemplate on a successful PUT) - deliberately separate
+    from inlineTemplateStatus===`"ready`", which also becomes true when
+    a returning users existing account-level default is auto-applied
+    for preview convenience (see the Returning-user branch below) with
+    no click for this resume at all. Completion gating below reads this
+    flag, never the status, so an auto-applied default can never
+    silently satisfy choose-a-template-first.
+  */
+  const [inlineTemplateExplicitlySelected, setInlineTemplateExplicitlySelected] = useState(false);
 
   async function loadInlineTemplateList() {
     const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
@@ -375,6 +386,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
     setInlineTemplateStatus("checking");
     setInlineTemplateError(null);
     setInlineSelectedTemplateId(null);
+    setInlineTemplateExplicitlySelected(false);
     setCanonicalPreviewVersionId(null);
     /*
       Phase 6I.6.39 bugfix - the mount-only resolve-template effect above
@@ -395,8 +407,20 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
     setCanonicalPreviewTemplateId(null);
     try {
       const configRes = await fetch("/api/internal/canonical-generate-package/config");
-      const configData = configRes.ok ? await configRes.json() : { generateEnabled: false, templateSelectorEnabled: false };
-      if (!configData.generateEnabled || !configData.templateSelectorEnabled) {
+      const configData = configRes.ok ? await configRes.json() : { templateSelectorEnabled: false };
+      /*
+        Only templateSelectorEnabled gates template selection/preview -
+        matches Dashboards own identical check (app/dashboard/page.tsx:
+        `"if (!configData.templateSelectorEnabled) return;`"), which never
+        requires generateEnabled either. Template choice and Generate
+        Package eligibility are independent product surfaces (none of
+        the routes this flow calls - import-resume, templates, resume-
+        preview, template-preference - read generateEnabled server-side
+        at all); requiring it here was an accidental coupling that hid
+        all 4 template cards behind Generate Packages own canary flag,
+        even with templateSelectorEnabled=true.
+      */
+      if (!configData.templateSelectorEnabled) {
         setInlineTemplateStatus("not-applicable");
         return;
       }
@@ -463,6 +487,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
       }
       setInlineSelectedTemplateId(data.defaultTemplateId);
       setInlineTemplateStatus("ready");
+      setInlineTemplateExplicitlySelected(true);
       // Keep the existing Phase 6I.3 Career Memory preview state in
       // sync immediately, so "Continue to Preview" (renderFullResumePreview)
       // shows the just-selected canonical template without waiting for
@@ -475,7 +500,15 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
     }
   }
 
-  const inlineTemplateBlocksContinue = inlineTemplateStatus !== "not-applicable" && inlineTemplateStatus !== "ready";
+  /*
+    Gates on an EXPLICIT selection for THIS resume, not merely
+    inlineTemplateStatus==="ready" - a returning users existing
+    account-level default gets auto-applied for preview convenience
+    (see the Returning-user branch in runInlineCanonicalFlow above)
+    without the user ever clicking a card for this resume, and that
+    auto-applied preview must not silently satisfy "choose a template".
+  */
+  const inlineTemplateBlocksContinue = inlineTemplateStatus !== "not-applicable" && !inlineTemplateExplicitlySelected;
 
   /*
     Phase 6I.6.8 - Manual ("build" mode) Step 9 template selection. A
@@ -2841,6 +2874,16 @@ return;
                   disabled={inlineTemplateStatus === "saving"}
                   livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
                 />
+                {inlineSelectedTemplateId ? (
+                  <p className="mt-4 text-sm font-bold text-slate-900">
+                    Applied template: <span className="text-blue-600">{inlineTemplates.find((t) => t.id === inlineSelectedTemplateId)?.name ?? inlineSelectedTemplateId}</span>
+                  </p>
+                ) : (
+                  <p className="mt-4 text-sm font-semibold text-slate-500">Choose a template to continue.</p>
+                )}
+                {inlineSelectedTemplateId && !inlineTemplateExplicitlySelected && (
+                  <p className="mt-1 text-xs text-slate-500">Click a template above to confirm it for this resume and continue.</p>
+                )}
               </div>
             )}
           </div>
@@ -3539,7 +3582,12 @@ return;
     </p>
   </div>
 
-  <Button variant="primary" onClick={saveMemory}>
+  <Button
+    variant="primary"
+    onClick={saveMemory}
+    disabled={mode === "import" && importStage === "parsed" && inlineTemplateBlocksContinue}
+    title={mode === "import" && importStage === "parsed" && inlineTemplateBlocksContinue ? "Choose a template for your resume before saving." : undefined}
+  >
     Save Memory
   </Button>
 </header>

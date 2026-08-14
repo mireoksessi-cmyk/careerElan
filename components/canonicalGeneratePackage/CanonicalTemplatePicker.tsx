@@ -65,7 +65,7 @@ export type CanonicalTemplatePickerProps = {
 
 export default function CanonicalTemplatePicker({ templates, selectedTemplateId, onSelect, disabled = false, livePreviewUrl }: CanonicalTemplatePickerProps) {
   return (
-    <div role="radiogroup" aria-label="Choose a resume template" className="grid justify-center gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
+    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto" style={{ gridTemplateColumns: `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
       {templates.map((template) => {
         const isSelected = selectedTemplateId === template.id;
         return (

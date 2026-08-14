@@ -66,12 +66,15 @@ import {
   adminClient,
   createSyntheticE2eUser,
   cleanupSyntheticE2eUser,
+  seedCanonicalResumeForUser,
   type E2eTestUser,
 } from "../helpers/testUser";
 import { loginViaUi } from "../helpers/uiActions";
 
 const PERSON_A_PDF = path.join(__dirname, "..", "..", "fixtures", "resumes", "e2e-progress-preview-person-a.pdf");
 const PERSON_B_PDF = path.join(__dirname, "..", "..", "fixtures", "resumes", "e2e-progress-preview-person-b.pdf");
+const GATING_STANDARD_PDF = path.join(__dirname, "..", "..", "fixtures", "resumes", "standard-pdf-resume.pdf");
+const GATING_CANVA_PDF = path.join(__dirname, "..", "..", "fixtures", "resumes", "canva-pdf-resume.pdf");
 
 let user: E2eTestUser;
 
@@ -411,5 +414,152 @@ test.describe("Career Memory preview shows the just-uploaded resume (Phase 6I.6.
     expect(resumes).toHaveLength(2);
     expect(resumes![0].file_name).toBe("e2e-progress-preview-person-a.pdf");
     expect(resumes![1].file_name).toBe("e2e-progress-preview-person-b.pdf");
+  });
+});
+
+/*
+  DPE Phase2 task - Career Memory post-upload template-selection UX/state
+  contract (commit 341754f's follow-up). Two focused specs, both using
+  the real E2E fake-AI backend (CAREER_ELAN_E2E=1, see globalSetup.ts) -
+  zero real OpenAI calls, matching every other spec in this suite.
+
+  K5 proves the full CTA-gating contract end to end: no explicit
+  selection -> Save Memory/Continue to Preview/Continue to Dashboard all
+  disabled; after an explicit click -> all three enabled, the selected
+  card shows "Selected", "Applied template: <Name>" appears, and the
+  LEFT live-preview iframe's src updates to the matching templateId;
+  switching templates updates all three in lockstep with no stale state.
+
+  K6 proves the Part K regression this task's own instructions called
+  "critical": a returning user's existing account-level default
+  (career_profiles.default_template_id) gets auto-applied to a NEWLY
+  uploaded resume's preview for convenience, but that auto-apply must
+  NOT count as an explicit selection for gating purposes - the CTAs must
+  stay disabled, and the "confirm this template" hint must render, until
+  the user actually clicks a card for THIS resume. Without the
+  inlineTemplateExplicitlySelected fix, a hidden auto-default would
+  silently re-enable the buttons.
+*/
+test.describe("Career Memory template-selection gating (DPE Phase2 task)", () => {
+  test("K5. Post-upload template picker: 4 cards, CTA gating, selection feedback, preview refresh for all 4 templates", async ({ page }) => {
+    test.setTimeout(90_000);
+    const admin = adminClient();
+    const userK5 = await createSyntheticE2eUser(admin, "gating-k5");
+
+    try {
+      await loginViaUi(page, userK5);
+      await openUploadDropzone(page);
+
+      const fileInput = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+      await fileInput.setInputFiles(GATING_STANDARD_PDF);
+      await expect(page.getByText("Resume analyzed successfully.")).toBeVisible({ timeout: 45_000 });
+
+      // 4 canonical template cards render.
+      const cards = page.locator('[role="radio"]');
+      await expect(cards).toHaveCount(4, { timeout: 10_000 });
+      await expect(page.getByText("Professional ATS", { exact: true })).toBeVisible();
+      await expect(page.getByText("Executive Minimal", { exact: true })).toBeVisible();
+      await expect(page.getByText("Modern Sidebar", { exact: true })).toBeVisible();
+      await expect(page.getByText("Creative Timeline", { exact: true })).toBeVisible();
+
+      // No explicit selection yet -> all 3 completion CTAs disabled.
+      const saveMemoryBtn = page.getByRole("button", { name: "Save Memory" });
+      const continuePreviewBtn = page.getByRole("button", { name: "Continue to Preview" });
+      const continueDashboardBtn = page.getByRole("button", { name: "Continue to Dashboard" });
+      await expect(saveMemoryBtn).toBeDisabled();
+      await expect(continuePreviewBtn).toBeDisabled();
+      await expect(continueDashboardBtn).toBeDisabled();
+      await expect(page.getByText("Choose a template to continue.")).toBeVisible();
+
+      // Explicit selection: Modern Sidebar.
+      await cards.nth(2).click();
+      await expect(page.getByText(/Applied template:\s*Modern Sidebar/)).toBeVisible({ timeout: 10_000 });
+      await expect(cards.nth(2)).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByText("Selected", { exact: true })).toBeVisible();
+
+      // All 3 CTAs now enabled.
+      await expect(saveMemoryBtn).toBeEnabled();
+      await expect(continuePreviewBtn).toBeEnabled();
+      await expect(continueDashboardBtn).toBeEnabled();
+
+      const mainPreview = page.locator('iframe[title="Canonical resume preview"]');
+      await expect(mainPreview).toHaveAttribute("src", /templateId=modern-sidebar/, { timeout: 10_000 });
+
+      // Switching templates updates label/selected-state/preview with no
+      // staleness, and does not re-disable the CTAs (Part I + Part H).
+      const templateOrder = [
+        { index: 0, id: "professional-ats", name: "Professional ATS" },
+        { index: 1, id: "executive-minimal", name: "Executive Minimal" },
+        { index: 3, id: "creative-timeline", name: "Creative Timeline" },
+      ];
+      for (const t of templateOrder) {
+        await cards.nth(t.index).click();
+        await expect(mainPreview).toHaveAttribute("src", new RegExp(`templateId=${t.id}`), { timeout: 10_000 });
+        await expect(cards.nth(t.index)).toHaveAttribute("aria-checked", "true");
+        await expect(saveMemoryBtn).toBeEnabled();
+        await expect(continuePreviewBtn).toBeEnabled();
+        await expect(continueDashboardBtn).toBeEnabled();
+      }
+    } finally {
+      await cleanupSyntheticE2eUser(admin, userK5.userId);
+    }
+  });
+
+  test("K6. Auto-applied account default does NOT satisfy explicit-selection gating for a newly uploaded resume", async ({ page }) => {
+    test.setTimeout(90_000);
+    const admin = adminClient();
+    const userK6 = await createSyntheticE2eUser(admin, "gating-k6");
+
+    try {
+      // Seed a FIRST resume + real canonical import (establishes a
+      // canonical profile), then set the account-level default the same
+      // way a returning user's prior explicit choice would have -
+      // directly on career_profiles.default_template_id (the exact
+      // column GET /template-preference reads with no `source` field,
+      // per that route's own header comment).
+      await seedCanonicalResumeForUser(admin, userK6, "professional-ats");
+      const { error: profileUpdateError } = await admin
+        .from("career_profiles")
+        .update({ default_template_id: "creative-timeline" })
+        .eq("user_id", userK6.userId);
+      expect(profileUpdateError).toBeNull();
+
+      await loginViaUi(page, userK6);
+      await openUploadDropzone(page);
+
+      const fileInput = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+      await fileInput.setInputFiles(GATING_CANVA_PDF);
+      await expect(page.getByText("Resume analyzed successfully.")).toBeVisible({ timeout: 45_000 });
+
+      const cards = page.locator('[role="radio"]');
+      await expect(cards).toHaveCount(4, { timeout: 10_000 });
+
+      // The account default was auto-applied for PREVIEW convenience
+      // (label shows it, the matching card shows selected) - but this
+      // must NOT be an explicit selection for THIS resume.
+      await expect(page.getByText(/Applied template:\s*Creative Timeline/)).toBeVisible({ timeout: 10_000 });
+      await expect(cards.nth(3)).toHaveAttribute("aria-checked", "true");
+
+      const saveMemoryBtn = page.getByRole("button", { name: "Save Memory" });
+      const continuePreviewBtn = page.getByRole("button", { name: "Continue to Preview" });
+      const continueDashboardBtn = page.getByRole("button", { name: "Continue to Dashboard" });
+
+      // Critical assertion: still disabled despite the auto-applied
+      // default. A hidden auto-default silently re-enabling these would
+      // be exactly the regression this task's Part K guards against.
+      await expect(saveMemoryBtn).toBeDisabled();
+      await expect(continuePreviewBtn).toBeDisabled();
+      await expect(continueDashboardBtn).toBeDisabled();
+      await expect(page.getByText("Click a template above to confirm it for this resume and continue.")).toBeVisible();
+
+      // Only an actual click for THIS resume unlocks the CTAs.
+      await cards.nth(3).click();
+      await expect(saveMemoryBtn).toBeEnabled();
+      await expect(continuePreviewBtn).toBeEnabled();
+      await expect(continueDashboardBtn).toBeEnabled();
+      await expect(page.getByText("Click a template above to confirm it for this resume and continue.")).not.toBeVisible();
+    } finally {
+      await cleanupSyntheticE2eUser(admin, userK6.userId);
+    }
   });
 });
