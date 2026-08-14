@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { checkRateLimit } from "@/lib/security/rateLimiter";
 
 export async function POST(request: Request) {
   try {
@@ -31,6 +32,31 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Login ID is required." },
         { status: 400 }
+      );
+    }
+
+    /*
+      Unauthenticated, account-enumeration-sensitive lookup - rate limit
+      before touching Supabase so an abusive caller cannot use this route
+      to probe an unbounded number of login ids. This endpoint runs
+      strictly pre-authentication (it exists to resolve a login id into
+      an email before the password step), so there is never a session to
+      check here - every caller is rate-limited on the guest/IP bucket.
+    */
+    const rateLimitResult = await checkRateLimit("login-by-id", {
+      userId: null,
+      requestHeaders: request.headers,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again shortly." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimitResult.retryAfterSeconds),
+          },
+        }
       );
     }
 

@@ -25,7 +25,8 @@ export type RateLimitedEndpoint =
   | "analyze-job"
   | "analyze-job-url"
   | "career-insight"
-  | "search-jobs";
+  | "search-jobs"
+  | "login-by-id";
 
 export const RATE_LIMIT_WINDOW_SECONDS = 600; // 10 minutes
 
@@ -37,4 +38,15 @@ export const RATE_LIMITS: Record<
   "analyze-job-url": { guest: 10, user: 30 },
   "career-insight": { guest: 10, user: 30 },
   "search-jobs": { guest: 10, user: 30 },
+  // Unauthenticated, account-enumeration-sensitive lookup - kept far
+  // stricter than the AI/search endpoints above, which cost real
+  // OpenAI/RapidAPI spend and only see logged-in-leaning traffic. This
+  // route is always called by an anonymous visitor on the login screen,
+  // so a tight guest bucket directly bounds how many login ids a single
+  // caller can probe per window. The "user" value is structurally
+  // required by the Record<> shape but not practically reachable - this
+  // route never resolves a session - so it is set equally conservative
+  // rather than left to invite a future authenticated caller to get a
+  // looser limit than intended.
+  "login-by-id": { guest: 5, user: 5 },
 };
