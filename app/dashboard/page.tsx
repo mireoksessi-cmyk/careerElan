@@ -2206,12 +2206,14 @@ useEffect(() => {
 
     /*
       패키지 수:
-      AI Usage 위젯(get_generate_package_usage RPC)과 동일한 기준 -
-      generation_status='failed'인 행만 제외. pending/processing/
-      succeeded, 그리고 AI 생성이 아닌 quick-apply 행(null)은 그대로 포함.
+      Job Tracker(loadApplications())가 표시하는 것과 동일한 "추적 가능한
+      애플리케이션" 정의를 사용 - generation_status가 null(비-AI quick-apply
+      행) 또는 succeeded인 행만 포함. pending/failed 생성 시도는 아직 실제
+      콘텐츠가 없는 미완료 항목이므로 제외하여 Dashboard/Analytics/Job
+      Tracker 세 화면이 항상 같은 수를 표시하도록 함.
     */
     const packageRows = normalizedRows.filter(
-      (row) => row.generation_status !== "failed"
+      (row) => row.generation_status == null || row.generation_status === "succeeded"
     );
 
     /*

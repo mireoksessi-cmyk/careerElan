@@ -1493,6 +1493,7 @@ export default function PasteJobPage() {
     });
     setSelectedPreview("resume");
     setGenerated(true);
+    setShowDefaultApplication(false);
     setApplicationId(result.applicationId || null);
     setGenerationPhase("succeeded");
     setGenerationErrorInfo(null);
@@ -3989,7 +3990,7 @@ async function downloadDocx() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="text-xl font-extrabold">Generated Application Package</h2>
-                      {generated && (
+                      {generated && !showDefaultApplication && (
                         <span className="rounded-full bg-purple-50 px-3 py-1 text-xs font-bold text-purple-700">
                           AI-tailored
                         </span>
@@ -4241,9 +4242,11 @@ async function downloadDocx() {
                 Your Generated Application Package
               </h3>
 
-              <span className="rounded-full bg-purple-50 px-3 py-1 text-[11px] font-bold text-purple-700">
-                AI-tailored
-              </span>
+              {!showDefaultApplication && (
+                <span className="rounded-full bg-purple-50 px-3 py-1 text-[11px] font-bold text-purple-700">
+                  AI-tailored
+                </span>
+              )}
             </div>
 
             <p className="mt-1 text-xs font-semibold text-slate-400">
