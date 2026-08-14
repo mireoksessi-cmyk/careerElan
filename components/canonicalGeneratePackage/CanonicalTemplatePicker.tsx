@@ -86,10 +86,9 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
                 <iframe
                   src={livePreviewUrl(template.id)}
                   title={`${template.name} live preview`}
-                  loading="lazy"
                   scrolling="no"
                   className="pointer-events-none absolute left-0 top-0 origin-top-left border-0"
-                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(${THUMBNAIL_SCALE})` }}
+                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(${THUMBNAIL_SCALE})`, willChange: "transform" }}
                 />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
