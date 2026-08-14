@@ -6,6 +6,8 @@ import {
   COVER_LETTER_PARSE_MODEL,
 } from "../config/aiModels";
 import { classifyGenerationError } from "./shared";
+import { isE2eAiModeActive, wrapOpenAiClientForE2eSafety } from "../testing/e2eAiIsolation";
+import { buildE2eCoverLetterAnalysisFields } from "../testing/e2eFakeResponses";
 import { logOperationalEvent, elapsedMs } from "../observability/logger";
 import { withOpenAiTelemetry } from "../openai/telemetry";
 import {
@@ -38,10 +40,12 @@ const MAX_OCR_PAGES = 5;
   imported inside the try block rather than as top-level imports).
 */
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  maxRetries: 0,
-});
+const client = wrapOpenAiClientForE2eSafety(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    maxRetries: 0,
+  })
+);
 
 const OPENAI_CALL_TIMEOUT_MS = 120_000;
 
@@ -349,6 +353,36 @@ export async function runCoverLetterAnalysis(coverLetterId: string): Promise<voi
     }
 
     coverLetterText = normalizeParagraph(coverLetterText);
+
+    /*
+      Phase 6I.6.39 - E2E AI isolation: real text extraction/validation
+      above still runs unchanged - only the 3 sequential OpenAI calls
+      below (OCR cleanup, field extraction, verification) are replaced
+      with one deterministic synthetic result when isE2eAiModeActive(),
+      mirroring resumeAnalysisCore.ts's own E2E branch exactly. Before
+      this, coverLetterAnalysisCore.ts had NO E2E short-circuit at all -
+      every Cover Letter analysis (including under CAREER_ELAN_E2E=1)
+      made 2 real OpenAI calls, unlike every other AI call site in this
+      codebase. Confirmed via a real stack trace from
+      e2e/openaiNetworkWatch.cjs pointing at OpenAI.makeRequest called
+      from runCoverLetterAnalysis.
+    */
+    if (isE2eAiModeActive()) {
+      const parsed = buildE2eCoverLetterAnalysisFields();
+      await setStage(coverLetterId, userId, "verifying");
+      const finalData = { ...parsed, originalText: coverLetterText };
+      const { error: e2eCompleteError } = await supabaseAdmin.rpc("complete_cover_letter_analysis", {
+        p_cover_letter_id: coverLetterId,
+        p_user_id: userId,
+        p_parsed_data: finalData,
+        p_original_text: coverLetterText,
+      });
+      if (e2eCompleteError) {
+        logSafeError(e2eCompleteError, { requestId: coverLetterId, route: "documentAnalysis/coverLetterAnalysisCore#e2e-complete", userId });
+      }
+      logOperationalEvent({ domain: "upload", event: "cover_letter_analysis_succeeded", userId, coverLetterId, latencyMs: elapsedMs(startedAt) });
+      return;
+    }
 
     await setStage(coverLetterId, userId, "reconstructing_text");
 

@@ -88,6 +88,28 @@ export function buildE2eResumeAnalysisFields(): Record<string, unknown> {
 }
 
 /*
+  Phase 6I.6.39 - mirrors buildE2eResumeAnalysisFields() above for the
+  Cover Letter upload/analysis worker (coverLetterAnalysisCore.ts).
+  Shape traced directly from that file's own `finalData` object (the
+  exact fields complete_cover_letter_analysis persists) - recipient/
+  company/jobTitle/greeting/body/closing/signature/tone, plus
+  originalText added by the caller the same way
+  buildE2eResumeAnalysisFields()'s caller adds it.
+*/
+export function buildE2eCoverLetterAnalysisFields(): Record<string, unknown> {
+  return {
+    recipient: "Hiring Manager",
+    company: E2E_EMPLOYER_NAME,
+    jobTitle: E2E_JOB_TITLE,
+    greeting: "Dear Hiring Manager,",
+    body: `${E2E_COVER_MARKER} deterministic synthetic cover letter body for E2E testing.`,
+    closing: "Sincerely,",
+    signature: E2E_CANDIDATE_NAME,
+    tone: "Professional",
+  };
+}
+
+/*
   Phase 6I.6.35 Part A.6 follow-up - closing a real gap this task's own
   network-boundary instrumentation found: app/api/recommend-jobs/
   route.ts, app/api/career-insight/route.ts, app/api/analytics-summary/
