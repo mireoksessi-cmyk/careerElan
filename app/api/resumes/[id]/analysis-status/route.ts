@@ -31,7 +31,7 @@ export async function GET(
 
   const { data: row, error } = await supabase
     .from("resumes")
-    .select("id, analysis_status, analysis_error_code, analysis_error_summary, parsed_data")
+    .select("id, analysis_status, analysis_stage, analysis_error_code, analysis_error_summary, parsed_data")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -60,5 +60,6 @@ export async function GET(
   return NextResponse.json({
     status: row.analysis_status || "pending",
     resumeId: row.id,
+    stage: row.analysis_stage || null,
   });
 }

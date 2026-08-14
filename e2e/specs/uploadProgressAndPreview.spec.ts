@@ -1,0 +1,290 @@
+/*
+  Phase 6I.6.39 - two focused regression specs added alongside the
+  Resume Upload OpenAI Proxy fix (lib/testing/e2eAiIsolation.ts):
+
+  1. Progress test - proves the Resume/Cover Letter upload progress bar
+     no longer starts (and freezes) at 60%. Before this phase,
+     app/career-memory/page.tsx hardcoded setUploadProgress(60) right
+     before dispatching /api/analyze-resume, and the analysis-status
+     polling loop never advanced the value again until the terminal
+     100 on success - so the bar effectively "started" at 60% and sat
+     there for the entire (often multi-minute, in real non-E2E usage)
+     AI analysis. The fix renumbers the client-only steps to start at
+     10% and wires the real backend `analysis_stage` column (already
+     written by runResumeAnalysis's own setStage() calls) through the
+     analysis-status route into a genuine mid-flight progress bump.
+
+     Budgets below are generous (test-level 120s, sampling window 45s)
+     because this E2E harness's real per-request latency (auth, page
+     navigation, Storage upload, the claim+poll cycle) runs noticeably
+     longer than a bare 60s default test timeout comfortably covers -
+     confirmed by a real run that hit Playwright's own 60s test-timeout
+     kill mid-poll despite the app itself behaving correctly.
+
+  2. Preview test - proves Career Memory's Live Resume Preview shows
+     the resume that was JUST uploaded, not a stale earlier one.
+
+     IMPORTANT scope note (found while building this spec): the
+     Career Memory upload flow's "Live Resume Preview" only renders
+     the CANONICAL iframe (gated by canonicalPreviewStatus==="canonical",
+     itself gated by the CANONICAL_GENERATE_ENABLED env flag - see
+     docs/canonical-canary-plan.md) when that flag/canary stage makes
+     canonical reachable. This local .env.local does NOT set
+     CANONICAL_GENERATE_ENABLED, so in THIS environment the preview
+     falls through to the LEGACY path, renderUploadedOriginalPreview()
+     (app/career-memory/page.tsx ~line 2515), an iframe titled
+     "Uploaded resume preview" pointing at a fresh
+     URL.createObjectURL(file) blob - a completely different code path
+     from the canonical one. K3 below verifies the legacy path (the
+     one actually reachable in this environment) by asserting the
+     iframe's blob src changes across uploads and cross-checking the
+     real DB rows - not by reading rendered PDF text, since a browser's
+     native PDF viewer's text layer isn't a reliable Playwright target.
+
+     Separately (root-cause investigation, not covered by this iframe-
+     src check since it requires canonical to be reachable): the mount-
+     only resolve-template effect (page.tsx ~line 306, runs once per
+     `user`, never re-fires on a new upload) can leave
+     canonicalPreviewStatus="canonical" with an OLDER resume's
+     canonicalPreviewTemplateId from before this session's upload. If
+     runInlineCanonicalFlow then hits its not-applicable/import-error/
+     catch branch without resetting them, the stale canonical preview
+     would render instead of the just-uploaded resume - this is fixed
+     by resetting canonicalPreviewStatus to "loading" and
+     canonicalPreviewTemplateId to null at the very start of
+     runInlineCanonicalFlow (page.tsx ~line 394-395), so a safe fallback
+     (the legacy original-file preview) shows during re-resolution
+     instead of a stale canonical one, whichever branch it ends up in.
+
+  Runs entirely in E2E fake-AI mode (globalSetup.ts's fixed
+  CAREER_ELAN_E2E=1 server) - zero real OpenAI calls, matching every
+  other spec in this suite.
+*/
+import { test, expect } from "@playwright/test";
+import path from "path";
+import {
+  adminClient,
+  createSyntheticE2eUser,
+  cleanupSyntheticE2eUser,
+  type E2eTestUser,
+} from "../helpers/testUser";
+import { loginViaUi } from "../helpers/uiActions";
+
+const PERSON_A_PDF = path.join(__dirname, "..", "..", "fixtures", "resumes", "e2e-progress-preview-person-a.pdf");
+const PERSON_B_PDF = path.join(__dirname, "..", "..", "fixtures", "resumes", "e2e-progress-preview-person-b.pdf");
+
+let user: E2eTestUser;
+
+test.beforeAll(async () => {
+  const admin = adminClient();
+  user = await createSyntheticE2eUser(admin, "progresspreview");
+});
+
+test.afterAll(async () => {
+  const admin = adminClient();
+  await cleanupSyntheticE2eUser(admin, user.userId);
+});
+
+async function openUploadDropzone(page: import("@playwright/test").Page) {
+  await page.goto("/career-memory");
+  const importCard = page.getByRole("button", { name: /Import Your Resume/ });
+  if (await importCard.isVisible().catch(() => false)) {
+    await importCard.click();
+  }
+  await expect(page.getByRole("button", { name: "Browse Files" }).first()).toBeVisible({ timeout: 10_000 });
+}
+
+/*
+  Samples the visible "{progress}%" text (ParsingStatus's own render,
+  career-memory/page.tsx) every 150ms for up to `maxMs`, stopping early
+  once the success text appears. Returns every distinct percentage
+  observed, in the order first seen - a real, no-guessing trace of
+  what a user's eyes would actually see.
+*/
+async function samplePercentSequence(page: import("@playwright/test").Page, maxMs: number, successText: string): Promise<number[]> {
+  const seen: number[] = [];
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    /*
+      Explicit short timeout is required here - Playwright's default
+      actionTimeout is unset (0 = unbounded) in this project's config,
+      so once the app moves past ParsingStatus (no more "N%" text node
+      in the DOM at all, e.g. right after success), an untimed
+      textContent() on a zero-match locator hangs until the OUTER test
+      timeout kills the whole browser context, not until this .catch()
+      - which silently ate the real symptom the first two times this
+      spec was run and made it look like a slow/stuck app instead of a
+      test bug.
+    */
+    const text = await page.locator("text=/^\\d+%$/").first().textContent({ timeout: 500 }).catch(() => null);
+    if (text) {
+      const value = parseInt(text.replace("%", ""), 10);
+      if (!Number.isNaN(value) && (seen.length === 0 || seen[seen.length - 1] !== value)) {
+        seen.push(value);
+      }
+    }
+    if (await page.getByText(successText).isVisible().catch(() => false)) {
+      break;
+    }
+    await page.waitForTimeout(150);
+  }
+  return seen;
+}
+
+test.describe("truthful upload progress (Phase 6I.6.39)", () => {
+  test("K1. Resume upload progress begins low, never shows 60%, reaches 100% only on success", async ({ page }) => {
+    test.setTimeout(120_000);
+    await loginViaUi(page, user);
+    await openUploadDropzone(page);
+
+    const fileInput = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+    await fileInput.setInputFiles(PERSON_A_PDF);
+
+    const sequence = await samplePercentSequence(page, 45_000, "Resume analyzed successfully.");
+    await expect(page.getByText("Resume analyzed successfully.")).toBeVisible({ timeout: 20_000 });
+
+    expect(sequence.length).toBeGreaterThan(0);
+    // Begins within the real pre-analysis client stages (10/20/30/40/45 -
+    // see RESUME_STAGE_PROGRESS's own comment in page.tsx), never at the
+    // old broken 60% value. The 150ms sampling granularity can miss the
+    // very first (briefest) tick, so this checks the whole legitimate
+    // pre-flight range rather than pinning to the literal first value.
+    expect(sequence[0]).toBeLessThanOrEqual(45);
+    expect(sequence).not.toContain(60);
+    // Monotonic, never regresses.
+    for (let i = 1; i < sequence.length; i++) {
+      expect(sequence[i]).toBeGreaterThanOrEqual(sequence[i - 1]);
+    }
+    // 100 only ever appears last, paired with the real success state
+    // (already asserted above) - never appears mid-sequence.
+    const hundredIndex = sequence.indexOf(100);
+    if (hundredIndex !== -1) {
+      expect(hundredIndex).toBe(sequence.length - 1);
+    }
+  });
+
+  test("K2. Cover Letter upload progress begins low, never shows 60%, reaches 100% only on success", async ({ page }) => {
+    test.setTimeout(120_000);
+    await loginViaUi(page, user);
+    await page.goto("/career-memory");
+    const coverLetterCard = page.getByRole("button", { name: /Cover Letter/ });
+    if (await coverLetterCard.isVisible().catch(() => false)) {
+      await coverLetterCard.click();
+    }
+    const fileInput = page.locator('input[type="file"][accept=".pdf,.docx,.txt"]').first();
+    await expect(fileInput).toBeAttached({ timeout: 10_000 });
+
+    await fileInput.setInputFiles({
+      name: "e2e-progress-cover-letter.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from(
+        "Dear Hiring Manager,\n\nI am writing to express my interest in this role. " +
+          "My background in project coordination and cross-team communication " +
+          "makes me a strong fit for your growing team, and I would welcome the " +
+          "opportunity to discuss how I can contribute. Over the past several years " +
+          "I have coordinated cross-functional projects, managed vendor relationships, " +
+          "and delivered measurable improvements to team workflows and communication " +
+          "practices. I am confident these skills would translate well to this role, " +
+          "and I would welcome the chance to discuss my background further.\n\n" +
+          "Sincerely,\nTest Applicant"
+      ),
+    });
+
+    const sequence = await samplePercentSequence(page, 45_000, "Cover Letter analyzed successfully.");
+    await expect(page.getByText("Cover Letter analyzed successfully.")).toBeVisible({ timeout: 20_000 });
+
+    expect(sequence.length).toBeGreaterThan(0);
+    // Same sampling-granularity reasoning as K1 above (cover letter's own
+    // pre-analysis steps are 10/20/45 - see the setCoverLetterUploadProgress
+    // call sites in page.tsx).
+    expect(sequence[0]).toBeLessThanOrEqual(45);
+    expect(sequence).not.toContain(60);
+    for (let i = 1; i < sequence.length; i++) {
+      expect(sequence[i]).toBeGreaterThanOrEqual(sequence[i - 1]);
+    }
+    const hundredIndex = sequence.indexOf(100);
+    if (hundredIndex !== -1) {
+      expect(hundredIndex).toBe(sequence.length - 1);
+    }
+  });
+});
+
+test.describe("Career Memory preview shows the just-uploaded resume (Phase 6I.6.39)", () => {
+  /*
+    Dedicated user, separate from K1/K2's shared `user` above - K3
+    uploads PERSON_A_PDF itself (as its own "resume A" step), and the
+    resumes table's content_hash unique constraint rejects a second
+    upload of byte-identical content for the same user. Reusing K1's
+    user here previously made K3 flaky depending on run order/isolation
+    (passed only when K1 hadn't successfully persisted its own upload of
+    the same fixture yet).
+  */
+  let userK3: E2eTestUser;
+
+  test.beforeAll(async () => {
+    const admin = adminClient();
+    userK3 = await createSyntheticE2eUser(admin, "progresspreview-k3");
+  });
+
+  test.afterAll(async () => {
+    const admin = adminClient();
+    await cleanupSyntheticE2eUser(admin, userK3.userId);
+  });
+
+  test("K3. Uploading Resume B after Resume A immediately previews B, not A, in both Career Memory and Dashboard", async ({ page }) => {
+    test.setTimeout(120_000);
+    await loginViaUi(page, userK3);
+    await openUploadDropzone(page);
+
+    // 1. Upload Resume A, confirm it analyzed successfully, capture the
+    // legacy original-file preview iframe's blob src (the path actually
+    // reachable in this environment - see file header for why).
+    const fileInputA = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+    await fileInputA.setInputFiles(PERSON_A_PDF);
+    await expect(page.getByText("Resume analyzed successfully.")).toBeVisible({ timeout: 45_000 });
+
+    const previewIframe = page.locator('iframe[title="Uploaded resume preview"]');
+    await expect(previewIframe).toBeVisible({ timeout: 15_000 });
+    const srcAfterA = await previewIframe.getAttribute("src");
+    expect(srcAfterA).toBeTruthy();
+    expect(srcAfterA).toMatch(/^blob:/);
+
+    // 2. Navigate away and back (Career Memory remounts, exercising the
+    // real mount-only resolve-template effect too, not just the
+    // upload-time state).
+    await page.goto("/dashboard");
+    await openUploadDropzone(page);
+
+    // 3. Upload Resume B - a second, clearly distinguishable resume.
+    const fileInputB = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+    await fileInputB.setInputFiles(PERSON_B_PDF);
+    await expect(page.getByText("Resume analyzed successfully.")).toBeVisible({ timeout: 45_000 });
+
+    // 4. The preview iframe must now point at a DIFFERENT blob (this
+    // upload's own object URL, never A's) - the exact user-visible
+    // symptom from the bug report ("still shows the previous resume").
+    await expect(previewIframe).toBeVisible({ timeout: 15_000 });
+    const srcAfterB = await previewIframe.getAttribute("src");
+    expect(srcAfterB).toBeTruthy();
+    expect(srcAfterB).toMatch(/^blob:/);
+    expect(srcAfterB).not.toBe(srcAfterA);
+
+    // 5. Dashboard must agree - both surfaces resolve the same current
+    // resume file name.
+    await page.goto("/dashboard");
+    await expect(page.getByText("e2e-progress-preview-person-b.pdf")).toBeVisible({ timeout: 10_000 });
+
+    // 6. Cross-check against the real DB rows: two distinct resumes now
+    // exist for this user, and the second (B) is the one just imported.
+    const admin = adminClient();
+    const { data: resumes } = await admin
+      .from("resumes")
+      .select("id, file_name")
+      .eq("user_id", userK3.userId)
+      .eq("source_type", "uploaded")
+      .order("created_at", { ascending: true });
+    expect(resumes).toHaveLength(2);
+    expect(resumes![0].file_name).toBe("e2e-progress-preview-person-a.pdf");
+    expect(resumes![1].file_name).toBe("e2e-progress-preview-person-b.pdf");
+  });
+});

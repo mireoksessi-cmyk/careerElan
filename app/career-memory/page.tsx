@@ -290,6 +290,18 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   */
   const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"loading" | "legacy" | "selection-required" | "canonical">("loading");
   const [canonicalPreviewTemplateId, setCanonicalPreviewTemplateId] = useState<string | null>(null);
+  /*
+    Phase 6I.6.39 bugfix - captured from import-resume's own response
+    right after THIS upload's import (see runInlineCanonicalFlow below),
+    then threaded onto the uploaded-resume preview iframe src exactly
+    like manualCanonicalVersionId already is for the Manual flow (see
+    that state's own comment). Without it, the preview route falls back
+    to career_memory.selected_resume_id (a column Dashboard's picker
+    owns, not this upload flow), so a user who had previously selected
+    an older resume via Dashboard would see THAT resume's content here
+    immediately after uploading a brand new one.
+  */
+  const [canonicalPreviewVersionId, setCanonicalPreviewVersionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -363,6 +375,24 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
     setInlineTemplateStatus("checking");
     setInlineTemplateError(null);
     setInlineSelectedTemplateId(null);
+    setCanonicalPreviewVersionId(null);
+    /*
+      Phase 6I.6.39 bugfix - the mount-only resolve-template effect above
+      (line ~306) can leave canonicalPreviewStatus="canonical" with an
+      OLDER resume's canonicalPreviewTemplateId from before this upload
+      (it only re-runs when user changes, never on a new upload). If
+      this flow then hits the not-applicable/import-error/catch branch
+      below without resetting them, renderLiveResumePreviewContent()'s
+      canonicalPreviewStatus==="canonical" check still fires with the
+      stale templateId and a null versionId, and the preview route falls
+      back server-side to career_memory.selected_resume_id - showing
+      whatever resume Dashboard had selected before, not this upload.
+      Resetting to "loading" here is safe: renderLiveResumePreviewContent
+      falls through "loading" straight to the just-uploaded original-file
+      preview (isUploadedResumePreview), never a stale canonical one.
+    */
+    setCanonicalPreviewStatus("loading");
+    setCanonicalPreviewTemplateId(null);
     try {
       const configRes = await fetch("/api/internal/canonical-generate-package/config");
       const configData = configRes.ok ? await configRes.json() : { generateEnabled: false, templateSelectorEnabled: false };
@@ -380,12 +410,13 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resumeId }),
       });
+      const importData = await importRes.json().catch(() => null);
       if (!importRes.ok) {
-        const importData = await importRes.json().catch(() => null);
         setInlineTemplateError(importData?.error?.message || "Could not prepare this resume for canonical templates.");
         setInlineTemplateStatus("import-error");
         return;
       }
+      setCanonicalPreviewVersionId(importData?.versionId || null);
 
       // Phase 6I.5 - refresh preview identity explicitly right after a
       // successful import, instead of relying on the mount-only
@@ -1494,7 +1525,7 @@ if (!user) {
     */
     setImportStage("parsing");
     setImportMessage("Checking your file");
-    setUploadProgress(5);
+    setUploadProgress(10);
 
     const contentHash = await computeFileContentHash(file);
 
@@ -1512,7 +1543,7 @@ if (!user) {
       storage upload in the common, non-racing case.
     */
     setImportMessage("Checking your resume limit");
-    setUploadProgress(15);
+    setUploadProgress(20);
 
     const { data: existingResumes, error: countError } =
       await supabase
@@ -1707,7 +1738,7 @@ return;
       수행하며, 이 요청의 실행 위치와 수명만 바뀐다.
     */
     setImportMessage("Extracting text and analyzing with AI");
-    setUploadProgress(60);
+    setUploadProgress(45);
 
     // [RESUME_TRACE] instrumentation-only.
     resumeFetchStartTime = performance.now();
@@ -1889,6 +1920,23 @@ return;
   }
 
   /*
+    Real backend milestones written by runResumeAnalysis's own setStage()
+    calls (lib/documentAnalysis/resumeAnalysisCore.ts) - surfaced via the
+    analysis-status route's `stage` field. Maps each real stage to a
+    percentage strictly between the client's pre-dispatch value (45, set
+    right before the /api/analyze-resume fetch) and the terminal 100 set
+    on success, so the progress bar reflects genuine backend progress
+    during the multi-minute AI analysis instead of freezing at a single
+    value for the whole wait.
+  */
+  const RESUME_STAGE_PROGRESS: Record<string, number> = {
+    downloading_file: 52,
+    extracting_text: 62,
+    reconstructing_text: 74,
+    extracting_fields: 86,
+    verifying: 95,
+  };
+  /*
     /api/resumes/[id]/analysis-status를 주기적으로 확인한다. 서버가 이미
     수행 중인(또는 곧 수행할) runResumeAnalysis의 결과만 읽으며, 분석/
     디자인 생성 자체의 순서나 내용은 전혀 바꾸지 않는다.
@@ -1960,7 +2008,12 @@ return;
         return;
       }
 
-      // pending/processing - 계속 polling.
+      // pending/processing - real stage milestone, if any, bumps the
+      // progress bar (never regresses); then keeps polling.
+      const stageValue = statusResult.stage ? RESUME_STAGE_PROGRESS[statusResult.stage] : undefined;
+      if (stageValue) {
+        setUploadProgress((prev) => Math.max(prev, stageValue));
+      }
       pollResumeAnalysisStatus(resumeId, pollStartedAt);
     }, RESUME_POLL_INTERVAL_MS);
   }
@@ -2183,6 +2236,10 @@ setCoverLetterUploadError("");
   let insertedCoverLetterId = "";
 
   try {
+    setCoverLetterImportStage("parsing");
+    setCoverLetterImportMessage("Checking your file");
+    setCoverLetterUploadProgress(10);
+
     const { count, error: countError } =
       await supabase
         .from("cover_letters")
@@ -2247,7 +2304,7 @@ return;
     */
     setCoverLetterImportStage("parsing");
     setCoverLetterImportMessage("Saving to your account");
-    setCoverLetterUploadProgress(15);
+    setCoverLetterUploadProgress(20);
 
     const {
       data: coverLetterData,
@@ -2324,7 +2381,7 @@ return;
     setCoverLetterImportMessage(
       "Career Élan is analyzing your cover letter..."
     );
-    setCoverLetterUploadProgress(60);
+    setCoverLetterUploadProgress(45);
 
     const analyzeResponse = await fetch("/api/analyze-cover-letter", {
       method: "POST",
@@ -2564,8 +2621,8 @@ return;
     return (
       <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
         <iframe
-          key={canonicalPreviewTemplateId}
-          src={`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=html`}
+          key={`${canonicalPreviewTemplateId}:${canonicalPreviewVersionId ?? ""}`}
+          src={`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=html${canonicalPreviewVersionId ? `&canonicalVersionId=${canonicalPreviewVersionId}` : ""}`}
           title="Canonical resume preview"
           className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
         />
