@@ -82,75 +82,76 @@ export function LoginManager({
   async function refresh() {
     setLoading(true);
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    if (!session) {
-      setUser(null);
-      setProfile(null);
-      setCareerMemory(null);
-      setResumes([]);
-      setCoverLetters([]);
-      setHasResumeData(false);
+      if (!session) {
+        setUser(null);
+        setProfile(null);
+        setCareerMemory(null);
+        setResumes([]);
+        setCoverLetters([]);
+        setHasResumeData(false);
+        return;
+      }
+
+      const currentUser = session.user;
+
+      setUser(currentUser);
+
+      const [{ data: profile }, { data: careerMemory }, { data: resumes }, { data: coverLetters }] =
+        await Promise.all([
+          supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", currentUser.id)
+            .maybeSingle(),
+
+          supabase
+            .from("career_memory")
+            .select("*")
+            .eq("user_id", currentUser.id)
+            .maybeSingle(),
+
+          supabase
+            .from("resumes")
+            .select("*")
+            .eq("user_id", currentUser.id)
+            .order("created_at", {
+              ascending: false,
+            }),
+
+          supabase
+            .from("cover_letters")
+            .select("*")
+            .eq("user_id", currentUser.id)
+            .order("created_at", {
+              ascending: false,
+            }),
+        ]);
+
+      setProfile(profile);
+
+      setCareerMemory(careerMemory);
+
+      setResumes(resumes ?? []);
+
+      setCoverLetters(coverLetters ?? []);
+
+      /*
+        직접 작성(career_memory 필수 항목 완료) 또는
+        업로드(resumes 행 존재) 둘 중 하나라도 되어 있으면
+        이력서 데이터가 있는 것으로 간주한다.
+      */
+      setHasResumeData(
+        Boolean(careerMemory?.required_completed) ||
+          (resumes ?? []).length > 0
+      );
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const currentUser = session.user;
-
-    setUser(currentUser);
-
-    const [{ data: profile }, { data: careerMemory }, { data: resumes }, { data: coverLetters }] =
-      await Promise.all([
-        supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", currentUser.id)
-          .maybeSingle(),
-
-        supabase
-          .from("career_memory")
-          .select("*")
-          .eq("user_id", currentUser.id)
-          .maybeSingle(),
-
-        supabase
-          .from("resumes")
-          .select("*")
-          .eq("user_id", currentUser.id)
-          .order("created_at", {
-            ascending: false,
-          }),
-
-        supabase
-          .from("cover_letters")
-          .select("*")
-          .eq("user_id", currentUser.id)
-          .order("created_at", {
-            ascending: false,
-          }),
-      ]);
-
-    setProfile(profile);
-
-    setCareerMemory(careerMemory);
-
-    setResumes(resumes ?? []);
-
-    setCoverLetters(coverLetters ?? []);
-
-    /*
-      직접 작성(career_memory 필수 항목 완료) 또는
-      업로드(resumes 행 존재) 둘 중 하나라도 되어 있으면
-      이력서 데이터가 있는 것으로 간주한다.
-    */
-    setHasResumeData(
-      Boolean(careerMemory?.required_completed) ||
-        (resumes ?? []).length > 0
-    );
-
-    setLoading(false);
   }
 
   return (

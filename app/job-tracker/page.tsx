@@ -68,68 +68,67 @@ const [filterStatus, setFilterStatus] =
   async function loadApplications() {
   setLoading(true);
 
- 
+  try {
+    if (!user) {
+      return;
+    }
 
-  if (!user) {
-    setLoading(false);
-    return;
-  }
-
-  /*
-    An AI package generation attempt gets its applications row the moment
-    it's claimed (generation_status "pending"), before OpenAI has run -
-    exclude "pending" and "failed" attempts here so an incomplete/failed
-    generation never appears as a tracked application. generation_status
-    is null for both "succeeded" rows (already excluded from this filter
-    by matching neither pending nor failed) and the non-AI "Apply with
-    Saved Resume" path, which never sets generation_status at all.
-  */
-  const { data, error } = await supabase
-    .from("applications")
-    .select("*")
-    .eq("user_id", user.id)
     /*
-      Explicit "is null OR succeeded" rather than a negated .in() -
-      generation_status IS NULL fails a plain `NOT (col IN (...))` under
-      standard SQL three-valued logic, which would have silently hidden
-      every legacy row and every "Apply with Saved Resume" row (neither
-      ever sets generation_status) instead of just excluding
-      pending/failed AI attempts.
+      An AI package generation attempt gets its applications row the moment
+      it's claimed (generation_status "pending"), before OpenAI has run -
+      exclude "pending" and "failed" attempts here so an incomplete/failed
+      generation never appears as a tracked application. generation_status
+      is null for both "succeeded" rows (already excluded from this filter
+      by matching neither pending nor failed) and the non-AI "Apply with
+      Saved Resume" path, which never sets generation_status at all.
     */
-    .or("generation_status.is.null,generation_status.eq.succeeded")
-    .order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("user_id", user.id)
+      /*
+        Explicit "is null OR succeeded" rather than a negated .in() -
+        generation_status IS NULL fails a plain `NOT (col IN (...))` under
+        standard SQL three-valued logic, which would have silently hidden
+        every legacy row and every "Apply with Saved Resume" row (neither
+        ever sets generation_status) instead of just excluding
+        pending/failed AI attempts.
+      */
+      .or("generation_status.is.null,generation_status.eq.succeeded")
+      .order("created_at", { ascending: false });
 
-  console.log("DATA =", data);
-  console.log("ERROR =", error);
+    console.log("DATA =", data);
+    console.log("ERROR =", error);
 
-  if (error) {
-    console.error(error);
-    toast.error(error.message);
+    if (error) {
+      console.error(error);
+      toast.error(error.message);
+      return;
+    }
+
+    /*
+      Apply the same deterministic contact-stripping used at generation-save
+      time here too, at read-time - this is the single point all of
+      JobDetail, Copy, and downloadPackage() read cover_letter_text through
+      (selectedApplication is always sourced from this applications array),
+      so a legacy pre-fix package displays cleanly here without ever
+      rewriting the stored DB row.
+    */
+    const cleaned = (data ?? []).map((application) =>
+      application.cover_letter_text
+        ? {
+            ...application,
+            cover_letter_text: stripCoverLetterContactBlock(
+              application.cover_letter_text
+            ),
+          }
+        : application
+    );
+
+    setApplications(cleaned);
+  } finally {
     setLoading(false);
-    return;
   }
-
-  /*
-    Apply the same deterministic contact-stripping used at generation-save
-    time here too, at read-time - this is the single point all of
-    JobDetail, Copy, and downloadPackage() read cover_letter_text through
-    (selectedApplication is always sourced from this applications array),
-    so a legacy pre-fix package displays cleanly here without ever
-    rewriting the stored DB row.
-  */
-  const cleaned = (data ?? []).map((application) =>
-    application.cover_letter_text
-      ? {
-          ...application,
-          cover_letter_text: stripCoverLetterContactBlock(
-            application.cover_letter_text
-          ),
-        }
-      : application
-  );
-
-  setApplications(cleaned);
-  setLoading(false);
 }
  async function saveNotes() {
   if (!selectedApplication || !user) return;

@@ -248,26 +248,48 @@ useEffect(() => {
       })
     );
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options,
+      });
 
-    if (error) {
+      if (error) {
+        console.log(
+          JSON.stringify({
+            event: "oauth_sign_in_request_failed",
+            provider,
+            errorName: error.name || "Unknown",
+            errorMessage:
+              typeof error.message === "string"
+                ? error.message.slice(0, 200)
+                : "Unknown error",
+            browserOrigin: window.location.origin,
+          })
+        );
+
+        setMessage(error.message);
+        setLoading(false);
+      }
+    } catch (thrownError: any) {
       console.log(
         JSON.stringify({
           event: "oauth_sign_in_request_failed",
           provider,
-          errorName: error.name || "Unknown",
+          errorName: thrownError?.name || "Unknown",
           errorMessage:
-            typeof error.message === "string"
-              ? error.message.slice(0, 200)
+            typeof thrownError?.message === "string"
+              ? thrownError.message.slice(0, 200)
               : "Unknown error",
           browserOrigin: window.location.origin,
         })
       );
 
-      setMessage(error.message);
+      setMessage(
+        typeof thrownError?.message === "string"
+          ? thrownError.message
+          : "Unable to sign in. Please try again."
+      );
       setLoading(false);
     }
   }
