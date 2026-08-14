@@ -94,7 +94,7 @@ function HomePageBody() {
               onClick={() => openAuth("signup")}
               className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-extrabold text-white shadow-xl shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700"
             >
-              Get Started
+              Sign Up
             </button>
           </div>
         )}
@@ -116,7 +116,7 @@ function HomePageBody() {
           {/* 왼쪽 */}
           <div className="max-w-[540px]">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-blue-100/90 px-4 py-2 text-xs font-extrabold text-blue-700 ring-1 ring-blue-200">
-              ✦ AI-Powered Career Operating System
+              🇨🇦 Built for job seekers in Canada
             </div>
 
             <h1 className="text-[44px] font-black leading-[0.98] tracking-[-0.05em] text-slate-950 sm:text-[56px] lg:text-[66px] xl:text-[72px]">
