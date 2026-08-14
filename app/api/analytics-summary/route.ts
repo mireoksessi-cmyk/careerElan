@@ -37,10 +37,15 @@ function normalizeStatus(status: unknown): string {
   ai_insight.matches/mismatch fields for matched/missing skills) - this
   is the actual data the prompt below is built from, computed here from
   the caller's own public.applications rows instead of trusted from the
-  request body. Applications are sorted by (created_at desc, id asc) -
-  matching today's display order, with id as a deterministic tiebreaker
-  so the derived arrays (and therefore the hash) never depend on
-  incidental timestamp collisions or query-return order.
+  request body. The caller is expected to already have filtered those
+  rows to the same tracked-application population as the Analytics
+  page's own "Total Applications" definition (generation_status == null
+  || generation_status === "succeeded") before calling this function -
+  this function itself does not re-check generation_status. Applications
+  are sorted by (created_at desc, id asc) - matching today's display
+  order, with id as a deterministic tiebreaker so the derived arrays
+  (and therefore the hash) never depend on incidental timestamp
+  collisions or query-return order.
 */
 type ApplicationAiInsight = {
   matches?: {
@@ -156,7 +161,7 @@ export async function POST(req: Request) {
     const { data: applications, error: applicationsError } =
       await supabase
         .from("applications")
-        .select("id, job_title, status, created_at, ai_insight")
+        .select("id, job_title, status, created_at, ai_insight, generation_status")
         .eq("user_id", user.id);
 
     if (applicationsError) {
@@ -174,8 +179,22 @@ export async function POST(req: Request) {
       );
     }
 
+    /*
+      Only rows the Analytics page's own "Total Applications" definition
+      would count are allowed into the AI Career Coach's input - matches
+      app/analytics/page.tsx's total filter exactly, so this route can
+      never disagree with what the user sees on screen. pending/failed
+      generation attempts have no real resume/cover-letter content yet
+      and are excluded, same as there.
+    */
+    const trackedApplications = (applications ?? []).filter(
+      (application) =>
+        application.generation_status == null ||
+        application.generation_status === "succeeded"
+    );
+
     const input = computeAnalyticsInput(
-      applications ?? []
+      trackedApplications
     );
 
     if (input.total === 0) {
