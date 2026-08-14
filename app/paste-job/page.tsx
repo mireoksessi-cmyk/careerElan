@@ -3032,9 +3032,38 @@ async function downloadDocx() {
     create one here and remember its id, same as the generate path does.
   */
   if (applicationId) {
+    /*
+      Data-integrity fix (Saved Resume metadata): when this row is
+      currently in "Apply with Saved Resume" mode (showDefaultApplication),
+      apply the SAME Saved Resume metadata semantics the INSERT branch
+      below already establishes for a brand-new row - resume_id/
+      cover_letter_id/resume_template_id from savedApplicationMaterial,
+      status = "saved", generation_status = null. Without this, a row
+      that previously had a real AI generation succeed keeps claiming
+      generation_status = "succeeded" even after its resume_text/
+      cover_letter_text have been silently replaced with Saved Resume
+      content. The AI-generated save path (showDefaultApplication false)
+      is completely unaffected - it still updates with sharedFields alone.
+    */
     const { error } = await supabase
       .from("applications")
-      .update(sharedFields)
+      .update(
+        showDefaultApplication
+          ? {
+              ...sharedFields,
+              status: "saved",
+              resume_id:
+                savedApplicationMaterial?.resume.id ?? null,
+              cover_letter_id:
+                savedApplicationMaterial?.coverLetter.id ?? null,
+              resume_template_id:
+                savedApplicationMaterial?.resume.sourceType === "career_memory"
+                  ? normalizeResumeTemplateId(savedApplicationMaterial.resume.resumeTemplateId)
+                  : null,
+              generation_status: null,
+            }
+          : sharedFields
+      )
       .eq("id", applicationId)
       .eq("user_id", user.id);
 
