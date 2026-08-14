@@ -2061,7 +2061,7 @@ useEffect(() => {
   function getCurrentJobText() {
     if (activeMode === "url") return jobUrl.trim();
     if (activeMode === "description") return jobDescription.trim();
-    if (activeMode === "file") return fileText.trim() || selectedFileName.trim();
+    if (activeMode === "file") return fileText.trim();
     return "";
   }
 
@@ -2732,10 +2732,37 @@ async function loadSelectedApplicationMaterials() {
       return;
     }
 
-    setFileText(file.name);
-    setMessage(
-      "Ready to analyze your new job posting. Click Analyze Uploaded File to update the page. For PDF/DOCX/image extraction, connect server-side parsing later."
-    );
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      setFileText("");
+      setMessage("Extracting text from your PDF...");
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/extract-job-pdf", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || typeof data.text !== "string") {
+          setMessage(data.error || "We couldn't process this PDF. Please try again.");
+          return;
+        }
+
+        setFileText(data.text);
+        setMessage("Ready to analyze your new job posting. Click Analyze Uploaded File to update the page.");
+      } catch {
+        setMessage("We couldn't reach the server to process this PDF. Please check your connection and try again.");
+      }
+
+      return;
+    }
+
+    setFileText("");
+    setMessage("Please upload a TXT or PDF file.");
   }
 
   function copyPreviewText() {
@@ -3438,7 +3465,7 @@ async function downloadDocx() {
                         Upload a job posting
                       </h3>
                       <p className="mt-2 text-sm text-slate-500">
-                        Upload TXT, PDF, DOCX, PNG, JPG, or JPEG.
+                        Upload TXT or PDF.
                       </p>
 
                       <Button variant="primary" className="mt-6" onClick={() => fileInputRef.current?.click()}>
@@ -3464,7 +3491,7 @@ async function downloadDocx() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".txt,.pdf,.docx,.png,.jpg,.jpeg"
+                    accept=".txt,.pdf"
                     className="hidden"
                     onChange={handleFileUpload}
                   />
