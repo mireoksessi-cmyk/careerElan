@@ -309,14 +309,8 @@ export default function CareerAssistant() {
 
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-extrabold">
-                  Career Élan Assistant
+                  Career Élan Help
                 </h2>
-
-                <div className="mt-1 flex items-center gap-2 text-sm text-blue-100">
-                  <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
-
-                  <span>Online</span>
-                </div>
               </div>
             </div>
 
@@ -361,7 +355,7 @@ export default function CareerAssistant() {
                 </div>
 
                 <p className="mt-2 text-xs text-slate-400">
-                  Career Élan Support
+                  Career Élan Help
                 </p>
               </div>
             </div>
