@@ -40,8 +40,9 @@ type DisplayJob = {
   mode: string;
   category: string;
   match?: number;
-  matched: string[];
-  missing: string[];
+  relevantExperience: string;
+  keyRequirements: string[];
+  thingsToCheck: string[];
   posted: string;
   url?: string;
   logo?: string;
@@ -118,6 +119,102 @@ function formatPosted(posted: string) {
   });
 }
 
+/*
+  Trust/integrity fix: these three helpers describe the JOB POSTING itself
+  (title/description/location text already returned by /api/search-jobs),
+  never the user - Career Memory skills/experience/education are not read
+  here, and none of this is AI-generated. Purely deterministic keyword
+  inspection of the posting text, same lightweight pattern the previous
+  matched/missing fields used, just reframed so the labels never claim a
+  personal comparison that was never actually performed.
+*/
+function deriveRelevantExperience(job: SearchJob): string {
+  const description = job.description?.toLowerCase() || "";
+  const title = job.title?.toLowerCase() || "";
+
+  const yearsMatch = description.match(/\b(\d+)\+?\s*(?:years?|yrs?)\b/);
+  if (yearsMatch) {
+    return `${yearsMatch[1]}+ years of experience mentioned in the posting`;
+  }
+
+  if (title.includes("admin")) {
+    return "Administrative or office support experience may be relevant for this role";
+  }
+
+  if (description.includes("customer")) {
+    return "Customer-facing or service experience may be relevant for this role";
+  }
+
+  return "Review the posting for experience requirements";
+}
+
+function deriveKeyRequirements(job: SearchJob): string[] {
+  const description = job.description?.toLowerCase() || "";
+  const title = job.title?.toLowerCase() || "";
+  const requirements: string[] = [];
+
+  if (description.includes("customer")) {
+    requirements.push("Customer service");
+  }
+
+  if (/microsoft office|excel|word|powerpoint/.test(description)) {
+    requirements.push("Microsoft Office proficiency mentioned");
+  }
+
+  if (description.includes("communication")) {
+    requirements.push("Communication skills mentioned");
+  }
+
+  if (title.includes("admin") || description.includes("administrative")) {
+    requirements.push("Administrative support");
+  }
+
+  if (description.includes("legal")) {
+    requirements.push("Legal support experience mentioned");
+  }
+
+  return requirements.length > 0
+    ? requirements.slice(0, 3)
+    : ["Review the full posting for specific requirements"];
+}
+
+function deriveThingsToCheck(job: SearchJob): string[] {
+  const description = job.description?.toLowerCase() || "";
+  const checks: string[] = [];
+
+  if (description.includes("french")) {
+    checks.push("French is mentioned in the posting");
+  }
+
+  if (description.includes("experience")) {
+    checks.push("Check the experience requirement");
+  }
+
+  if (
+    description.includes("driver") ||
+    description.includes("licence") ||
+    description.includes("license")
+  ) {
+    checks.push("Driver's licence may be required");
+  }
+
+  if (description.includes("hybrid")) {
+    checks.push("Hybrid work arrangement listed");
+  } else if (description.includes("remote")) {
+    checks.push("Remote work arrangement listed");
+  } else if (description.includes("on-site") || description.includes("onsite")) {
+    checks.push("On-site work arrangement listed");
+  }
+
+  if (description.includes("certif")) {
+    checks.push("Certification may be mentioned in the posting");
+  }
+
+  return checks.length > 0
+    ? checks.slice(0, 4)
+    : ["Review the full posting for details to verify"];
+}
+
 function convertApiJob(job: SearchJob, hasCareerMemory: boolean): DisplayJob {
   return {
     id: job.id,
@@ -128,28 +225,9 @@ function convertApiJob(job: SearchJob, hasCareerMemory: boolean): DisplayJob {
     mode: job.type?.toLowerCase().includes("remote") ? "Remote" : "On-site / Hybrid",
     category: job.category || "General",
     match: job.match,
-    matched: hasCareerMemory
-  ? [
-      job.title?.toLowerCase().includes("admin")
-        ? "Administrative experience"
-        : "Relevant job title",
-      job.description?.toLowerCase().includes("customer")
-        ? "Customer service"
-        : "Company posting",
-      job.location ? "Canada-based role" : "Location available",
-    ]
-  : ["Upload resume or complete Career Memory for AI match"],
-
-missing: hasCareerMemory
-  ? [
-      job.description?.toLowerCase().includes("french")
-        ? "French may be required"
-        : "Review full posting",
-      job.description?.toLowerCase().includes("experience")
-        ? "Check experience requirement"
-        : "Confirm job details",
-    ]
-  : ["No resume analyzed yet"],
+    relevantExperience: deriveRelevantExperience(job),
+    keyRequirements: deriveKeyRequirements(job),
+    thingsToCheck: deriveThingsToCheck(job),
     posted: formatPosted(job.posted),
     url: job.url,
     logo: job.logo,
@@ -688,15 +766,24 @@ setCategory(state.category || "All");
 
                   <div className="mt-4">
                     <h4 className="text-[11px] font-extrabold text-slate-700">
-                      Why this matches you
+                      Relevant Experience
+                    </h4>
+                    <p className="mt-2 text-[11px] font-semibold text-slate-600">
+                      {job.relevantExperience}
+                    </p>
+                  </div>
+
+                  <div className="mt-3">
+                    <h4 className="text-[11px] font-extrabold text-slate-700">
+                      Key Requirements
                     </h4>
                     <div className="mt-2 space-y-1">
-                      {job.matched.slice(0, 3).map((item) => (
+                      {job.keyRequirements.map((item) => (
                         <p
                           key={item}
-                          className="text-[11px] font-semibold text-green-700"
+                          className="text-[11px] font-semibold text-blue-700"
                         >
-                          ✓ {item}
+                          • {item}
                         </p>
                       ))}
                     </div>
@@ -704,15 +791,15 @@ setCategory(state.category || "All");
 
                   <div className="mt-3">
                     <h4 className="text-[11px] font-extrabold text-slate-700">
-                      Missing
+                      Things to Check
                     </h4>
                     <div className="mt-2 space-y-1">
-                      {job.missing.slice(0, 2).map((item) => (
+                      {job.thingsToCheck.map((item) => (
                         <p
                           key={item}
-                          className="text-[11px] font-semibold text-red-500"
+                          className="text-[11px] font-semibold text-amber-600"
                         >
-                          × {item}
+                          • {item}
                         </p>
                       ))}
                     </div>
