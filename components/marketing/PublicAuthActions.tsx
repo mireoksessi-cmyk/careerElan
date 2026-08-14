@@ -306,7 +306,17 @@ useEffect(() => {
   setMessage("");
 
   try {
-    const lookupResponse = await fetch(
+    /*
+      Security fix (Auth Priority-1): /api/login-by-id now performs the
+      actual sign-in server-side (loginId -> email resolution and the
+      supabase.auth.signInWithPassword() call both happen on the server)
+      and returns only session tokens, never the account's email address.
+      The browser hydrates its normal Supabase session from those tokens
+      via setSession() below - same end state as before (a normal
+      cookie-backed session), just without the email ever reaching
+      browser JS.
+    */
+    const loginResponse = await fetch(
       "/api/login-by-id",
       {
         method: "POST",
@@ -314,47 +324,36 @@ useEffect(() => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          purpose: "login",
           loginId: cleanLoginId,
+          password: loginPassword,
         }),
       }
     );
 
-    const lookupData = await lookupResponse.json();
-console.log("LOOKUP STATUS =", lookupResponse.status);
-console.log("LOOKUP DATA =", lookupData);
-    if (!lookupResponse.ok || !lookupData.email) {
+    const loginResult = await loginResponse.json();
+
+    if (!loginResponse.ok || !loginResult.session) {
       setMessage(
-        lookupData.error ||
+        loginResult.error ||
           "Invalid ID or password."
       );
       return;
     }
 
-    const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({
-        email: lookupData.email,
-        password: loginPassword,
+    const { data: sessionData, error: setSessionError } =
+      await supabase.auth.setSession({
+        access_token: loginResult.session.access_token,
+        refresh_token: loginResult.session.refresh_token,
       });
 
-    if (authError) {
-      console.error("AUTH LOGIN ERROR =", authError);
-
-      if (
-        authError.message
-          .toLowerCase()
-          .includes("email not confirmed")
-      ) {
-        setMessage(
-          "Please verify your email before logging in."
-        );
-      } else {
-        setMessage("Invalid ID or password.");
-      }
-
+    if (setSessionError) {
+      console.error("SET SESSION ERROR =", setSessionError);
+      setMessage("Unable to sign in. Please try again.");
       return;
     }
 
-    if (!authData.user) {
+    if (!sessionData.user) {
       setMessage("Unable to load your account.");
       return;
     }
@@ -363,7 +362,7 @@ console.log("LOOKUP DATA =", lookupData);
       await supabase
         .from("career_memory")
         .select("required_completed")
-        .eq("user_id", authData.user.id)
+        .eq("user_id", sessionData.user.id)
         .maybeSingle();
 
 
@@ -391,7 +390,6 @@ console.log("LOOKUP DATA =", lookupData);
     setLoading(false);
   }
 }
-
   async function handleEmailSignup() {
   const cleanFullName = fullName.trim();
   const cleanPhone = phone.trim();
@@ -521,27 +519,41 @@ async function resendConfirmationEmail() {
   setLoading(true);
   setMessage("");
 
-  const { error } = await supabase.auth.resend({
-    type: "signup",
-    email,
-    options: {
-      emailRedirectTo: `${window.location.origin}/auth/callback`,
-    },
-  });
+  /*
+    Reliability fix (Auth Priority-1): this call previously had no
+    try/catch, so a rejected/thrown promise (network error, blocked
+    request, etc.) skipped setLoading(false) entirely and left the whole
+    auth modal permanently disabled - every other handler in this file
+    already used try/catch/finally for exactly this reason.
+  */
+  try {
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
 
-  setLoading(false);
+    if (error) {
+      console.error("RESEND ERROR =", error);
+      setMessage(error.message);
+      return;
+    }
 
-  if (error) {
+    setMessage(
+      "Verification email sent again. Please check your inbox and spam folder."
+    );
+  } catch (error) {
     console.error("RESEND ERROR =", error);
-    setMessage(error.message);
-    return;
-  }
 
-  setMessage(
-    "Verification email sent again. Please check your inbox and spam folder."
-  );
-}
-async function handleForgotPassword() {
+    setMessage(
+      "Unable to resend the verification email. Please try again."
+    );
+  } finally {
+    setLoading(false);
+  }
+}async function handleForgotPassword() {
   const cleanLoginId = loginEmail.trim();
 
   if (!cleanLoginId) {
@@ -553,7 +565,17 @@ async function handleForgotPassword() {
   setMessage("");
 
   try {
-    const lookupResponse = await fetch(
+    /*
+      Security fix (Auth Priority-1): the id -> email lookup AND the
+      actual supabase.auth.resetPasswordForEmail() dispatch now both
+      happen server-side inside /api/login-by-id (purpose: "reset") -
+      this call returns the exact same generic message and the exact
+      same 200 status whether or not cleanLoginId matches a real
+      account, so the browser can no longer distinguish "this id
+      exists" from "this id doesn't exist" the way the old two-step
+      (fetch email, then branch on it client-side) flow could.
+    */
+    const response = await fetch(
       "/api/login-by-id",
       {
         method: "POST",
@@ -561,61 +583,25 @@ async function handleForgotPassword() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          purpose: "reset",
           loginId: cleanLoginId,
         }),
       }
     );
 
-    const lookupData =
-      await lookupResponse.json();
+    const result = await response.json();
 
-    if (!lookupResponse.ok) {
+    if (!response.ok) {
       setMessage(
-        lookupData.error ||
+        result.error ||
           "Unable to send the password reset email."
       );
       return;
     }
 
-    /*
-      The lookup above only resolves loginId -> email (the same helper
-      regular login uses) - it never sends anything itself. The actual
-      reset email comes from Supabase Auth's own resetPasswordForEmail().
-
-      redirectTo points at /auth/callback (not straight at "/") because
-      this project's Supabase client is createBrowserClient() from
-      @supabase/ssr, which does NOT auto-exchange a PKCE ?code= param on
-      the client - only /auth/callback's server route does that (via
-      exchangeCodeForSession()). Landing directly on "/" with a bare
-      ?code= would leave the user permanently unauthenticated, no session
-      ever created, no PASSWORD_RECOVERY event ever fired. The `next`
-      param tells the callback route to redirect to ?resetPassword=true
-      after establishing the session, instead of its OAuth-flow default
-      of /dashboard.
-    */
-    const { error: resetError } =
-      await supabase.auth.resetPasswordForEmail(
-        lookupData.email,
-        {
-          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/?resetPassword=true")}`,
-        }
-      );
-
-    if (resetError) {
-      console.error(
-        "PASSWORD RESET EMAIL ERROR =",
-        resetError
-      );
-
-      setMessage(
-        "Unable to send the password reset email."
-      );
-      return;
-    }
-
     setMessage(
-      lookupData.message ||
-        "If an account exists for this ID, a password reset email has been sent."
+      result.message ||
+        "If an account exists for this ID, password reset instructions have been sent."
     );
   } catch (error) {
     console.error(
@@ -629,8 +615,7 @@ async function handleForgotPassword() {
   } finally {
     setLoading(false);
   }
-}
-async function handleUpdatePassword() {
+}async function handleUpdatePassword() {
   if (newPassword.length < 8) {
     setMessage(
       "Password must contain at least 8 characters."
