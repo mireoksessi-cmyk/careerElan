@@ -422,6 +422,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
       */
       if (!configData.templateSelectorEnabled) {
         setInlineTemplateStatus("not-applicable");
+        setUploadProgress(100);
         return;
       }
 
@@ -438,6 +439,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
       if (!importRes.ok) {
         setInlineTemplateError(importData?.error?.message || "Could not prepare this resume for canonical templates.");
         setInlineTemplateStatus("import-error");
+        setUploadProgress(100);
         return;
       }
       setCanonicalPreviewVersionId(importData?.versionId || null);
@@ -458,15 +460,18 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
         setCanonicalPreviewTemplateId(prefData.defaultTemplateId);
         setCanonicalPreviewStatus("canonical");
         setInlineTemplateStatus("ready");
+        setUploadProgress(100);
       } else {
         // First-time canonical user - no default to fall back to, a
         // real selection is required before Continue unlocks.
         setCanonicalPreviewStatus("selection-required");
         setInlineTemplateStatus("selecting");
+        setUploadProgress(100);
       }
     } catch {
       setInlineTemplateError("Could not prepare this resume for canonical templates.");
       setInlineTemplateStatus("import-error");
+      setUploadProgress(100);
     }
   }
 
@@ -509,6 +514,29 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
     auto-applied preview must not silently satisfy "choose a template".
   */
   const inlineTemplateBlocksContinue = inlineTemplateStatus !== "not-applicable" && !inlineTemplateExplicitlySelected;
+
+  /*
+    DPE Phase2 loading-transition task - the post-upload result screen
+    (renderInlineWorkspace, with the Live Resume Preview + 4 template
+    cards) must not reveal itself until BOTH resume analysis AND
+    template-picker resolution have finished. importStage flips to
+    "parsed" the moment analysis succeeds, well before
+    runInlineCanonicalFlow (fired right alongside it) has resolved
+    inlineTemplateStatus out of its two in-flight states - revealing the
+    workspace at that point let the LEFT panel fall through to the raw/
+    original-file preview (renderLiveResumePreviewContent has no
+    explicit "loading" branch, so canonicalPreviewStatus==="loading"
+    silently matches the same fallback as no canonical support at all)
+    while the RIGHT panel was still showing "Preparing...". Gating on
+    NOT "checking"/"importing" (rather than an explicit allow-list of
+    terminal states) means every real exit path of runInlineCanonicalFlow
+    - not-applicable, import-error, selecting, ready, and the saving
+    state reached only after ready - counts as ready without needing to
+    be enumerated here, and the condition can never get permanently
+    stuck since the surrounding try/catch guarantees one of those
+    terminal states is always eventually reached.
+  */
+  const isResumeImportResultReady = importStage === "parsed" && inlineTemplateStatus !== "checking" && inlineTemplateStatus !== "importing";
 
   /*
     Phase 6I.6.8 - Manual ("build" mode) Step 9 template selection. A
@@ -1561,7 +1589,13 @@ function continueUploadedDashboard() {
       resumeSource: "uploaded",
     }));
 
-    setUploadProgress(100);
+    // Analysis itself is fully done here, but the post-upload screen
+    // must not reveal until runInlineCanonicalFlow (fired right after
+    // this) also resolves - so this caps progress at 95, matching the
+    // real backend "verifying" milestone, rather than jumping straight
+    // to 100. Math.max guards against a real backend stage value that
+    // already reached (or exceeded) 95 via the polling path.
+    setUploadProgress((prev) => Math.max(prev, 95));
     setImportStage("parsed");
     setImportMessage("Resume analyzed successfully.");
   }
@@ -3631,6 +3665,22 @@ return;
 
     {importStage === "preview" ? (
       renderFullResumePreview()
+    ) : importStage === "parsed" && !isResumeImportResultReady ? (
+      /*
+        DPE Phase2 loading-transition task - analysis finished
+        (importStage is already "parsed") but the template picker has
+        not resolved yet - keep the branded loading panel visible
+        (with truthful "preparing" copy, never repeating the analyzing
+        message) instead of revealing renderInlineWorkspace(), so the
+        raw/original preview can never flash ahead of the template
+        picker being ready.
+      */
+      <ParsingStatus
+        stage="parsed"
+        requiredCount={requiredCount}
+        progress={uploadProgress}
+        phase="preparing"
+      />
     ) : importStage === "parsed" ? (
       renderInlineWorkspace()
     ) : (
@@ -4282,18 +4332,35 @@ function ParsingStatus({
   requiredCount,
   progress,
   type = "resume",
+  phase,
 }: {
   stage: ImportStage;
   requiredCount: number;
   progress: number;
   type?: "resume" | "coverLetter";
+  /*
+    DPE Phase2 loading-transition task - optional override of the
+    stage-derived phase, used only by the resume-import bridging screen
+    (importStage==="parsed" but the template picker has not resolved
+    yet). Omitted by every other caller (Cover Letter import, and the
+    resume flow's own pre-"parsed" render), which keeps their existing
+    two-state (analyzing/done) behavior byte-for-byte unchanged.
+    "preparing" keeps the spinner (work is still genuinely in flight)
+    but swaps in truthful copy - analysis itself already succeeded, so
+    repeating "analyzing your resume" would be a lie; the 6 milestone
+    Steps below are already real analysis outcomes, so they show done.
+  */
+  phase?: "analyzing" | "preparing" | "done";
 }) {
+  const effectivePhase = phase ?? (stage === "parsing" ? "analyzing" : "done");
+  const spinning = effectivePhase !== "done";
+  const stepsDone = effectivePhase !== "analyzing";
   return (
     <div className="mt-6 rounded-3xl border border-blue-100 bg-white p-8 shadow-sm">
 
       <div className="flex flex-col items-center">
 
-        {stage === "parsing" ? (
+        {spinning ? (
           <div className="h-24 w-24 rounded-full border-[8px] border-blue-200 border-t-blue-600 animate-spin" />
         ) : (
           <div className="flex h-24 w-24 items-center justify-center rounded-full bg-green-100 text-5xl">
@@ -4302,10 +4369,12 @@ function ParsingStatus({
         )}
 
         <h2 className="mt-8 text-3xl font-extrabold text-slate-900">
-          {stage === "parsing"
+          {effectivePhase === "analyzing"
   ? (type === "resume"
       ? "Career Élan is analyzing your resume"
       : "Career Élan is analyzing your cover letter")
+  : effectivePhase === "preparing"
+  ? "Preparing your resume templates"
   : (type === "resume"
       ? "Resume analyzed successfully"
       : "Cover Letter analyzed successfully")}
@@ -4314,10 +4383,12 @@ function ParsingStatus({
            {progress}%
         </p>
         <p className="mt-3 text-center text-slate-500 max-w-xl">
-          {stage === "parsing"
+          {effectivePhase === "analyzing"
   ? (type === "resume"
       ? "Extracting your experience, education, skills and building your Career Memory."
       : "Extracting your cover letter and identifying its sections.")
+  : effectivePhase === "preparing"
+  ? "Setting up your design options before showing your Career Memory."
   : (type === "resume"
       ? "Your Career Memory has been created successfully."
       : "Your cover letter has been imported successfully.")}
@@ -4326,33 +4397,33 @@ function ParsingStatus({
         <div className="mt-10 w-full max-w-xl space-y-4">
 
           <Step
-            done={stage !== "parsing"}
+            done={stepsDone}
             title="Reading document"
           />
 
           <Step
-            done={stage !== "parsing"}
+            done={stepsDone}
             title="Extracting text"
           />
 
           <Step
-            loading={stage === "parsing"}
-            done={stage !== "parsing"}
+            loading={!stepsDone}
+            done={stepsDone}
             title="Understanding experience"
           />
 
           <Step
-            done={stage !== "parsing"}
+            done={stepsDone}
             title="Identifying skills"
           />
 
           <Step
-            done={stage !== "parsing"}
+            done={stepsDone}
             title="Parsing education"
           />
 
           <Step
-            done={stage !== "parsing"}
+            done={stepsDone}
             title="Building Career Memory"
           />
 

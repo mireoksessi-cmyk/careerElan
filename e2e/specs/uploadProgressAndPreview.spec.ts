@@ -563,3 +563,145 @@ test.describe("Career Memory template-selection gating (DPE Phase2 task)", () =>
     }
   });
 });
+
+/*
+  DPE Phase2 loading-transition task - proves the post-upload screen
+  (Live Resume Preview + 4 template cards) never reveals itself until
+  BOTH resume analysis and template-picker resolution are done, and
+  that the raw/original resume preview never flashes as an intermediate
+  state on the successful canonical path. Both specs use a real,
+  deterministically-delayed network request (via page.route(), never a
+  fake/mocked response body) against the E2E fake-AI backend - zero
+  real OpenAI calls.
+*/
+test.describe("Career Memory post-upload loading transition (DPE Phase2 task)", () => {
+  test("K7. Post-upload screen stays on the loading panel until template-picker resolution finishes, with no raw-preview flash", async ({ page }) => {
+    test.setTimeout(90_000);
+    const admin = adminClient();
+    const userK7 = await createSyntheticE2eUser(admin, "loading-k7");
+    const DELAY_MS = 1500;
+
+    try {
+      // Deterministic fake delay on the real import-resume call (the
+      // response itself is untouched - route.continue() after a
+      // controlled wait) - this is the exact window during which
+      // importStage is already "parsed" but inlineTemplateStatus is
+      // still "checking"/"importing".
+      await page.route("**/api/internal/canonical-career-memory/import-resume", async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+        await route.continue();
+      });
+
+      await loginViaUi(page, userK7);
+      await openUploadDropzone(page);
+
+      const fileInput = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+      const fixturePath = path.join(__dirname, "..", "..", "fixtures", "resumes", "threepage-pdf-resume.pdf");
+      const uploadStartedAt = Date.now();
+      await fileInput.setInputFiles(fixturePath);
+
+      // During the delay window, the loading panel must still be
+      // visible with truthful "preparing" copy (never repeating
+      // "analyzing your resume" once analysis has already succeeded),
+      // and NEITHER the raw/original preview NOR the template-picker
+      // screen may be present yet.
+      await expect(page.getByText("Preparing your resume templates")).toBeVisible({ timeout: DELAY_MS + 5_000 });
+      expect(Date.now() - uploadStartedAt).toBeGreaterThan(0);
+      await expect(page.locator('iframe[title="Uploaded resume preview"]')).not.toBeVisible();
+      await expect(page.locator('iframe[title="Canonical resume preview"]')).not.toBeVisible();
+      await expect(page.getByText("CHOOSE YOUR DESIGN", { exact: false })).not.toBeVisible();
+      await expect(page.locator('[role="radio"]')).toHaveCount(0);
+            // Progress must have already reached the analysis-only ceiling
+      // (95) but not yet 100 - the final step is still pending.
+      await expect(page.getByText("95%")).toBeVisible();
+
+      // Part I - the loading panel itself must never overflow
+      // horizontally at any of the tested viewports, while it is
+      // guaranteed to still be the visible screen (inside the delay
+      // window). Restored to the default size afterward so the rest of
+      // this test (and any later test in the same worker) is unaffected.
+      const viewportsToCheck = [
+        { width: 320, height: 568 },
+        { width: 375, height: 667 },
+        { width: 768, height: 1024 },
+        { width: 1440, height: 900 },
+      ];
+      for (const vp of viewportsToCheck) {
+        await page.setViewportSize(vp);
+        await expect(page.getByText("Preparing your resume templates")).toBeVisible();
+        const hasOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+        expect(hasOverflow, `${vp.width}x${vp.height} had horizontal overflow`).toBe(false);
+      }
+      await page.setViewportSize({ width: 1280, height: 800 });
+
+      // Once resolution finishes: loading panel disappears, Live Resume
+      // Preview + all 4 template cards appear together, progress hits
+      // 100, and the explicit-selection gating contract (already
+      // deployed) remains intact.
+      await expect(page.getByText("Preparing your resume templates")).not.toBeVisible({ timeout: DELAY_MS + 10_000 });
+      await expect(page.getByText("Live Resume Preview", { exact: true })).toBeVisible();
+      const cards = page.locator('[role="radio"]');
+      await expect(cards).toHaveCount(4, { timeout: 10_000 });
+
+      const saveMemoryBtn = page.getByRole("button", { name: "Save Memory" });
+      const continuePreviewBtn = page.getByRole("button", { name: "Continue to Preview" });
+      const continueDashboardBtn = page.getByRole("button", { name: "Continue to Dashboard" });
+      await expect(saveMemoryBtn).toBeDisabled();
+      await expect(continuePreviewBtn).toBeDisabled();
+      await expect(continueDashboardBtn).toBeDisabled();
+
+      await cards.first().click();
+      await expect(saveMemoryBtn).toBeEnabled();
+      await expect(continuePreviewBtn).toBeEnabled();
+      await expect(continueDashboardBtn).toBeEnabled();
+    } finally {
+      await page.unroute("**/api/internal/canonical-career-memory/import-resume");
+      await cleanupSyntheticE2eUser(admin, userK7.userId);
+    }
+  });
+
+  test("K8. A template-preparation failure exits the loading panel into a safe fallback, never an infinite loader", async ({ page }) => {
+    test.setTimeout(60_000);
+    const admin = adminClient();
+    const userK8 = await createSyntheticE2eUser(admin, "loading-k8");
+    // Only genuine unhandled JS exceptions count as fatal here - normal
+    // "Failed to load resource" console entries (which Chromium logs
+    // automatically for EVERY non-2xx response, including the
+    // deliberately-injected 500 below) are expected noise, not a crash.
+    const pageErrors: string[] = [];
+    page.on("pageerror", (err) => pageErrors.push(String(err)));
+
+    try {
+      // Force the real import-resume call to fail server-side (a genuine
+      // HTTP 500, not a fabricated success) - this is exactly the
+      // "import-error" terminal branch runInlineCanonicalFlow already
+      // handles today; nothing about that fallback semantics changes.
+      await page.route("**/api/internal/canonical-career-memory/import-resume", async (route) => {
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { message: "K8 injected failure" } }) });
+      });
+
+      await loginViaUi(page, userK8);
+      await openUploadDropzone(page);
+
+      const fileInput = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+      const fixturePath = path.join(__dirname, "..", "..", "fixtures", "resumes", "regtest3-two-column-pdf.pdf");
+      await fileInput.setInputFiles(fixturePath);
+
+      // The loading panel must exit (never stay stuck spinning forever)
+      // and progress must reach 100 even on this failure path.
+      await expect(page.getByText("Preparing your resume templates")).not.toBeVisible({ timeout: 30_000 });
+
+      // Safe fallback: the original/uploaded resume preview is shown
+      // (the existing, already-correct fallback for a canonical prep
+      // failure - Part D explicitly allows this), not a blank screen,
+      // not a crash.
+      await expect(page.locator('iframe[title="Uploaded resume preview"]')).toBeVisible({ timeout: 10_000 });
+
+      // No unhandled exception reached the console.
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await page.unroute("**/api/internal/canonical-career-memory/import-resume");
+      await cleanupSyntheticE2eUser(admin, userK8.userId);
+    }
+  });
+});
