@@ -1446,6 +1446,33 @@ function continueUploadedDashboard() {
   async function processResumeFile(file: File) {
   setResumeUploadError("");
 
+  /*
+    Real backend milestones written by runResumeAnalysis's own setStage()
+    calls (lib/documentAnalysis/resumeAnalysisCore.ts) - surfaced via the
+    analysis-status route's `stage` field. Maps each real stage to a
+    percentage strictly between the client's pre-dispatch value (45, set
+    right before the /api/analyze-resume fetch) and the terminal 100 set
+    on success, so the progress bar reflects genuine backend progress
+    during the multi-minute AI analysis instead of freezing at a single
+    value for the whole wait.
+
+    Declared here, at the very top of processResumeFile(), rather than
+    further down near pollResumeAnalysisStatus() - the accepted===true
+    path below returns before ever reaching a later declaration site, and
+    since this is a const, that early return would leave it permanently
+    uninitialized (TDZ) for pollResumeAnalysisStatus()'s own closure,
+    which executes asynchronously afterward and throws ReferenceError the
+    first time it reads RESUME_STAGE_PROGRESS[statusResult.stage] on a
+    real (non-terminal) analysis-status poll response.
+  */
+  const RESUME_STAGE_PROGRESS: Record<string, number> = {
+    downloading_file: 52,
+    extracting_text: 62,
+    reconstructing_text: 74,
+    extracting_fields: 86,
+    verifying: 95,
+  };
+
   // Client-side check is UX-only (Part AD) - the same rules are
   // authoritatively re-enforced server-side in resumeAnalysisCore.ts via
   // this same shared module, including a real magic-byte signature check
@@ -1919,23 +1946,6 @@ return;
     );
   }
 
-  /*
-    Real backend milestones written by runResumeAnalysis's own setStage()
-    calls (lib/documentAnalysis/resumeAnalysisCore.ts) - surfaced via the
-    analysis-status route's `stage` field. Maps each real stage to a
-    percentage strictly between the client's pre-dispatch value (45, set
-    right before the /api/analyze-resume fetch) and the terminal 100 set
-    on success, so the progress bar reflects genuine backend progress
-    during the multi-minute AI analysis instead of freezing at a single
-    value for the whole wait.
-  */
-  const RESUME_STAGE_PROGRESS: Record<string, number> = {
-    downloading_file: 52,
-    extracting_text: 62,
-    reconstructing_text: 74,
-    extracting_fields: 86,
-    verifying: 95,
-  };
   /*
     /api/resumes/[id]/analysis-status를 주기적으로 확인한다. 서버가 이미
     수행 중인(또는 곧 수행할) runResumeAnalysis의 결과만 읽으며, 분석/

@@ -163,6 +163,131 @@ test.describe("truthful upload progress (Phase 6I.6.39)", () => {
     }
   });
 
+  /*
+    K4 - directly reproduces the commit-0812547 TDZ regression
+    (app/career-memory/page.tsx: `const RESUME_STAGE_PROGRESS` was
+    declared AFTER the early-return call site of
+    pollResumeAnalysisStatus(), so any poll tick that observed a
+    non-null `stage` before "succeeded" threw "Cannot access
+    'RESUME_STAGE_PROGRESS' before initialization" and silently killed
+    the poll loop - freezing the UI at 45% forever with no visible
+    error).
+
+    K1 above runs against the E2E fake-AI backend, which still performs
+    every real setStage() transition (resumeAnalysisCore.ts calls
+    downloading_file/extracting_text/verifying even when
+    isE2eAiModeActive() short-circuits the 3 OpenAI calls) but completes
+    all of them so fast that the 2s poll interval almost always observes
+    "succeeded" on its very first tick, without ever reading a non-null
+    `stage` on a "pending"/"processing" response - so K1 cannot catch
+    this regression class.
+
+    To reproduce deterministically without a real (slow, billed) OpenAI
+    call, this test leaves the real upload/dispatch
+    (POST /api/analyze-resume) and the real E2E fake-AI backend
+    completely unmocked, and only intercepts the client's own
+    analysis-status GET polls to script the exact sequence a real,
+    multi-second analysis reliably produces: two intermediate
+    non-null-stage responses, then succeeded.
+  */
+  test("K4. Resume upload polling survives intermediate non-null analysis stages without crashing (TDZ regression guard)", async ({ page }) => {
+    test.setTimeout(60_000);
+    const admin = adminClient();
+    const userK4 = await createSyntheticE2eUser(admin, "progresspreview-k4");
+
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        consoleErrors.push(msg.text());
+      }
+    });
+
+    try {
+      await loginViaUi(page, userK4);
+      await openUploadDropzone(page);
+
+      let pollCount = 0;
+      await page.route("**/api/resumes/*/analysis-status", async (route) => {
+        pollCount += 1;
+        const url = route.request().url();
+        const match = url.match(/\/api\/resumes\/([^/]+)\/analysis-status/);
+        const resumeId = match ? match[1] : "unknown";
+
+        if (pollCount === 1) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ status: "processing", resumeId, stage: "downloading_file" }),
+          });
+        } else if (pollCount === 2) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ status: "processing", resumeId, stage: "extracting_text" }),
+          });
+        } else {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              status: "succeeded",
+              resumeId,
+              data: { originalText: "K4 scripted analysis text." },
+            }),
+          });
+        }
+      });
+
+      const fileInput = page.locator('input[type="file"][accept=".pdf,.docx"]').first();
+      await fileInput.setInputFiles(PERSON_A_PDF);
+
+      const sequence = await samplePercentSequence(page, 30_000, "Resume analyzed successfully.");
+      await expect(page.getByText("Resume analyzed successfully.")).toBeVisible({ timeout: 20_000 });
+
+      // The exact regression: this ReferenceError killed the poll loop
+      // silently. It must never appear again.
+      const tdzErrors = consoleErrors.filter((text) =>
+        text.includes("Cannot access 'RESUME_STAGE_PROGRESS' before initialization")
+      );
+      expect(tdzErrors).toEqual([]);
+
+      const referenceErrors = consoleErrors.filter(
+        (text) => text.includes("ReferenceError") || text.toLowerCase().includes("unhandledpromiserejection")
+      );
+      expect(referenceErrors).toEqual([]);
+
+      // Polling must have survived past the two scripted intermediate
+      // (non-null-stage) ticks to reach the scripted succeeded response -
+      // proves the loop did not die on the first one.
+      expect(pollCount).toBeGreaterThanOrEqual(3);
+
+      // Progress must have actually advanced past the pre-dispatch 45%
+      // (i.e. RESUME_STAGE_PROGRESS was read successfully at least once,
+      // proving the fix - this is the exact read that used to throw)
+      // and must never regress. No manual navigation is used to discover
+      // success (only page.getByText above, no page.goto("/dashboard")).
+      expect(sequence.some((v) => v > 45)).toBe(true);
+      for (let i = 1; i < sequence.length; i++) {
+        expect(sequence[i]).toBeGreaterThanOrEqual(sequence[i - 1]);
+      }
+      // 100 only ever appears last when the 150ms sampler catches it -
+      // same lenient check as K1 above, since the success text can (and
+      // did, in a real run) render in the same tick the bar hits 100,
+      // before the next sample fires. applyResumeAnalysisResult() sets
+      // progress to 100 synchronously in the same branch that shows
+      // "Resume analyzed successfully." (already asserted above), so that
+      // assertion is the authoritative proof of reaching 100 at the
+      // application-state level even on a sample that missed the frame.
+      const hundredIndex = sequence.indexOf(100);
+      if (hundredIndex !== -1) {
+        expect(hundredIndex).toBe(sequence.length - 1);
+      }
+    } finally {
+      await page.unroute("**/api/resumes/*/analysis-status");
+      await cleanupSyntheticE2eUser(admin, userK4.userId);
+    }
+  });
+
   test("K2. Cover Letter upload progress begins low, never shows 60%, reaches 100% only on success", async ({ page }) => {
     test.setTimeout(120_000);
     await loginViaUi(page, user);
