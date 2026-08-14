@@ -422,7 +422,7 @@ setCategory(state.category || "All");
                 Find Jobs in Career Élan
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-               Search jobs across Canada, the United States, the United Kingdom, and Australia.
+               Find jobs across Canada.
               </p>
             </div>
 

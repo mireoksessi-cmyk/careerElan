@@ -10,7 +10,6 @@ import {
   BrainCircuit,
   Building2,
   LayoutTemplate,
-  ShieldCheck,
   UserCheck,
   ListChecks,
   MapPin,
@@ -73,14 +72,10 @@ const FEATURES: Feature[] = [
       "Present your experience with professional, ATS-friendly resume designs.",
   },
   {
-    icon: ShieldCheck,
-    title: "Human Score",
-    description: "Keep your application natural, credible, and authentically you.",
-  },
-  {
     icon: UserCheck,
     title: "AI Recruiter Simulation",
     description: "Get feedback from a recruiter's perspective before you apply.",
+    comingSoon: true,
   },
   {
     icon: ListChecks,

@@ -190,7 +190,7 @@ function HomePageBody() {
               </h3>
 
               <span className="shrink-0 rounded-full bg-green-50 px-4 py-2 text-xs font-black text-green-700">
-                ATS Match 96%
+                ATS Match 95%
               </span>
             </div>
 
@@ -351,7 +351,7 @@ function HomePageBody() {
       <section className="w-full bg-white px-5 py-4 sm:px-8 lg:px-10 xl:px-12">
         <div className="mx-auto mb-3 flex max-w-[1440px] items-center gap-6 text-center text-xs font-black uppercase tracking-widest text-slate-500">
           <div className="h-px flex-1 bg-slate-200" />
-          <span>Trusted by job seekers worldwide</span>
+          <span>Built for job seekers in Canada</span>
           <div className="h-px flex-1 bg-slate-200" />
         </div>
         <div className="mx-auto grid max-w-[1440px] gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-100 md:grid-cols-5">
@@ -369,7 +369,7 @@ function HomePageBody() {
 
       <section className="w-full bg-white px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
         <div className="mx-auto grid max-w-[1440px] items-center gap-6 rounded-3xl bg-slate-50/70 p-5 md:grid-cols-3">
-          <Benefit title="More Accurate" body="AI matches your profile with job requirements more accurately." badge="98% ATS Match" icon="◎" />
+          <Benefit title="More Accurate" body="AI matches your profile with job requirements more accurately." badge="95% ATS Match" icon="◎" />
           <div className="rounded-[2rem] bg-blue-600 p-8 text-center text-white shadow-2xl shadow-blue-200 xl:p-9">
             <p className="mx-auto mb-3 w-fit rounded-full bg-white px-4 py-1.5 text-xs font-black text-blue-700">Most Loved Feature</p>
             <p className="text-base font-black">Save Average</p>
@@ -396,7 +396,7 @@ function HomePageBody() {
           </div>
 
           <aside className="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-100">
-            <OptimizationItem title="ATS Optimized" body="Formatted and written to pass ATS systems with a high match rate." badge="98%" />
+            <OptimizationItem title="ATS Optimized" body="Formatted and written to pass ATS systems with a high match rate." badge="95%" />
             <OptimizationItem title="Human-Like Writing" body="Natural, professional, and persuasive writing that sounds like you." badge="98%" />
             <OptimizationItem title="Job-Specific Tailoring" body="Every document is customized to the job description and company culture." />
             <OptimizationItem title="Recruiter Approved" body="Designed to catch the eye of recruiters and hiring managers." />
@@ -448,10 +448,9 @@ function HomePageBody() {
         <h2 className="text-center text-2xl font-black text-slate-950">Why Career Élan is Different</h2>
         <div className="mx-auto mt-7 grid max-w-[1440px] gap-4 md:grid-cols-3 xl:grid-cols-6">
           <SmallFeature icon="💡" title="Explain WHY" body="See exactly why AI added or changed each section." />
-          <SmallFeature icon="♙" title="AI Recruiter Simulation" body="Get AI feedback like a real recruiter before you apply." />
+          <SmallFeature icon="♙" title="AI Recruiter Simulation (Coming Soon)" body="Get AI feedback like a real recruiter before you apply." />
           <SmallFeature icon="🧠" title="Career Memory" body="AI learns from your applications and improves results." />
           <SmallFeature icon="🌐" title="Built for Canada" body="Tailored for the Canadian job market with ATS-friendly resumes, local formatting, and employer expectations." />
-          <SmallFeature icon="🛡️" title="Human Score" body="We ensure your documents sound 100% natural." />
           <SmallFeature icon="🚀" title="Auto Apply (Coming Soon)" body="Apply to jobs automatically with one click." />
         </div>
       </section>
@@ -467,27 +466,10 @@ function HomePageBody() {
       </section>
 
       <section className="w-full bg-white px-5 pt-4 sm:px-8 lg:px-10 xl:px-12">
-        <div className="mx-auto grid max-w-[1440px] gap-6 rounded-t-3xl bg-blue-600 p-8 text-white md:grid-cols-3">
-          <div>
-            <p className="text-sm font-black text-blue-100">Be Part of Something Big</p>
-            <h2 className="mt-2 text-3xl font-black tracking-[-0.04em]">Join Our Launch Community!</h2>
-            <p className="mt-3 text-sm leading-6 text-blue-50">We&apos;re building the future of job applications — and you can help shape it.</p>
-            <button type="button" onClick={() => openAuth("signup")} className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-700">Get Started →</button>
-            <p className="mt-3 text-xs font-bold text-blue-100"> · Be among the first 100 users</p>
-          </div>
-          <div className="rounded-2xl bg-white/10 p-6">
-            <p className="text-4xl">👥</p>
-            <p className="mt-4 text-xl font-black">Our First 100 Members</p>
-            <p className="mt-2 text-sm leading-6 text-blue-50">Get early access, exclusive updates, and special perks.</p>
-          </div>
-          <div className="rounded-2xl bg-white/10 p-6">
-            <p className="text-xl font-black">Help Us Build the Best</p>
-            <ul className="mt-4 space-y-2 text-sm font-bold text-blue-50">
-              <li>✓ Share feedback that shapes our product</li>
-              <li>✓ Get early access to new features</li>
-              <li>✓ Become a founding member</li>
-            </ul>
-          </div>
+        <div className="mx-auto max-w-[1440px] rounded-t-3xl bg-blue-600 p-8 text-white">
+          <h2 className="max-w-2xl text-3xl font-black tracking-[-0.04em]">Your next opportunity starts with a stronger application.</h2>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-blue-50">Build your Career Memory, tailor your application, and stay organized throughout your job search.</p>
+          <button type="button" onClick={() => openAuth("signup")} className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-700">Get Started &#8594;</button>
         </div>
       </section>
 
@@ -539,7 +521,7 @@ function MiniLetter() {
 function ResumePreview({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="group relative h-[460px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left text-[10px] leading-4 text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
-      <div className="flex items-start justify-between gap-3"><p className="font-black text-slate-950">AI-Optimized Resume</p><span className="rounded-full bg-green-50 px-3 py-1 text-[10px] font-black text-green-700">ATS Match 98%</span></div>
+      <div className="flex items-start justify-between gap-3"><p className="font-black text-slate-950">AI-Optimized Resume</p><span className="rounded-full bg-green-50 px-3 py-1 text-[10px] font-black text-green-700">ATS Match 95%</span></div>
       <div className="mt-4">
         <p className="text-2xl font-black leading-none text-slate-950">ALEX CARTER</p>
         <p className="mt-1 font-black text-blue-600">Marketing Coordinator</p>
