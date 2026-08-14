@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { openCareerAssistant } from "@/components/chatbot/CareerAssistant";
 
 interface HeaderProps {
   title: string;
@@ -53,11 +54,12 @@ async function loadProfile() {
 
       <div className="flex items-center gap-4">
 
-        <button aria-label="Notifications" className="rounded-full bg-white p-3 shadow-sm">
-          🔔
-        </button>
-
-        <button aria-label="Open chat" className="rounded-full bg-white p-3 shadow-sm">
+        <button
+          type="button"
+          onClick={openCareerAssistant}
+          aria-label="Open chat"
+          className="rounded-full bg-white p-3 shadow-sm"
+        >
           💬
         </button>
 

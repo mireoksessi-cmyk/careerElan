@@ -6,6 +6,7 @@ import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import MobileNav from "@/components/job-layout/MobileNav";
 import { Card } from "@/components/ui/Card";
+import { openCareerAssistant } from "@/components/chatbot/CareerAssistant";
 
 const menuItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
@@ -76,8 +77,14 @@ export default function CreatePackagePage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <button aria-label="Notifications" className="rounded-full bg-white p-3 shadow-sm">🔔</button>
-              <button aria-label="Open chat" className="rounded-full bg-white p-3 shadow-sm">💬</button>
+              <button
+                type="button"
+                onClick={openCareerAssistant}
+                aria-label="Open chat"
+                className="rounded-full bg-white p-3 shadow-sm"
+              >
+                💬
+              </button>
               <a
                 href="/settings"
                 className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white"

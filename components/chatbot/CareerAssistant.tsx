@@ -1,7 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CareerAssistantButton from "./CareerAssistantButton";
+
+/*
+  Priority-2A dead-control fix: the dashboard/header (chat) buttons live in
+  separate component trees from this singleton (mounted once in
+  app/layout.tsx), so they cannot reach its `open` state directly without
+  a new context/provider. A window event is the narrowest way to let them
+  open this SAME existing widget/state - no duplicate instance, no new
+  provider, no network request.
+*/
+const OPEN_HELP_EVENT = "career-elan:open-help";
+
+export function openCareerAssistant() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(OPEN_HELP_EVENT));
+}
 
 type HelpTopic = {
   id: string;
@@ -287,6 +302,15 @@ export default function CareerAssistant() {
     setOpen(false);
     setSelectedTopic(null);
   }
+
+  useEffect(() => {
+    function handleOpenRequest() {
+      setOpen(true);
+    }
+
+    window.addEventListener(OPEN_HELP_EVENT, handleOpenRequest);
+    return () => window.removeEventListener(OPEN_HELP_EVENT, handleOpenRequest);
+  }, []);
 
   return (
     <>

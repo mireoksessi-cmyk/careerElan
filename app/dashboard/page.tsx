@@ -27,6 +27,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { openCareerAssistant } from "@/components/chatbot/CareerAssistant";
 
 const FREE_PACKAGE_LIMIT = 3;
 const menuItems = [
@@ -2746,15 +2747,15 @@ if (!user) {
               </p>
             </div>
 
-            <input
-              type="text"
-              placeholder="Search jobs, packages..."
-              className="w-80 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-
             <div className="flex items-center gap-4">
-              <button aria-label="Notifications" className="rounded-full bg-white p-3 shadow-sm">🔔</button>
-              <button aria-label="Open chat" className="rounded-full bg-white p-3 shadow-sm">💬</button>
+              <button
+                type="button"
+                onClick={openCareerAssistant}
+                aria-label="Open chat"
+                className="rounded-full bg-white p-3 shadow-sm"
+              >
+                💬
+              </button>
 
               <a href="/settings" className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-blue-50">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
