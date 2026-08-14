@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 816 1056" role="img" aria-label="Creative Timeline template preview">
+  <rect x="0" y="0" width="816" height="1056" fill="#ffffff"/>
+
+  <!-- Sidebar column, ~30% width, dark plum -->
+  <rect x="0" y="0" width="245" height="1056" fill="#332742"/>
+
+  <!-- Identity masthead in sidebar -->
+  <circle cx="52" cy="90" r="30" fill="#d1603d"/>
+  <text x="28" y="150" font-family="'Trebuchet MS', 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" fill="#f2ecf7">YOUR NAME</text>
+  <rect x="28" y="160" width="160" height="6" fill="#d9cfe0" opacity="0.85"/>
+  <text x="28" y="192" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="10" letter-spacing="1" opacity="0.8" fill="#f2ecf7">CONTACT</text>
+  <rect x="28" y="204" width="140" height="5" fill="#c9bdd6"/>
+  <rect x="28" y="218" width="120" height="5" fill="#c9bdd6"/>
+  <rect x="28" y="232" width="150" height="5" fill="#c9bdd6"/>
+  <rect x="28" y="246" width="110" height="5" fill="#c9bdd6"/>
+
+  <!-- Sidebar: SKILLS -->
+  <text x="28" y="288" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="11" letter-spacing="1" opacity="0.9" fill="#f2ecf7">SKILLS</text>
+  <rect x="28" y="300" width="170" height="6" fill="#c9bdd6"/>
+  <rect x="28" y="314" width="150" height="6" fill="#c9bdd6"/>
+  <rect x="28" y="328" width="180" height="6" fill="#c9bdd6"/>
+  <rect x="28" y="342" width="140" height="6" fill="#c9bdd6"/>
+
+  <!-- Sidebar: LANGUAGES -->
+  <text x="28" y="382" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="11" letter-spacing="1" opacity="0.9" fill="#f2ecf7">LANGUAGES</text>
+  <rect x="28" y="394" width="140" height="6" fill="#c9bdd6"/>
+  <rect x="28" y="408" width="110" height="6" fill="#c9bdd6"/>
+
+  <!-- Main column: Profile (natural case, not uppercase) -->
+  <text x="293" y="90" font-family="'Trebuchet MS', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" fill="#d1603d">Profile</text>
+  <rect x="293" y="102" width="475" height="7" fill="#555555"/>
+  <rect x="293" y="116" width="475" height="7" fill="#555555"/>
+  <rect x="293" y="130" width="320" height="7" fill="#555555"/>
+
+  <!-- Work Experience: vertical timeline line + coral node dots -->
+  <text x="293" y="170" font-family="'Trebuchet MS', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" fill="#d1603d">Work Experience</text>
+  <line x1="303" y1="186" x2="303" y2="324" stroke="#e2dbe8" stroke-width="3"/>
+
+  <circle cx="303" cy="190" r="7" fill="#d1603d" stroke="#ffffff" stroke-width="2"/>
+  <rect x="315" y="186" width="200" height="9" fill="#232323"/>
+  <rect x="700" y="186" width="68" height="9" fill="#8a8a8a"/>
+  <rect x="315" y="201" width="180" height="7" fill="#d1603d"/>
+  <rect x="315" y="216" width="440" height="6" fill="#585858"/>
+  <rect x="315" y="230" width="400" height="6" fill="#585858"/>
+
+  <circle cx="303" cy="270" r="7" fill="#d1603d" stroke="#ffffff" stroke-width="2"/>
+  <rect x="315" y="266" width="190" height="9" fill="#232323"/>
+  <rect x="700" y="266" width="68" height="9" fill="#8a8a8a"/>
+  <rect x="315" y="281" width="170" height="7" fill="#d1603d"/>
+  <rect x="315" y="296" width="430" height="6" fill="#585858"/>
+  <rect x="315" y="310" width="380" height="6" fill="#585858"/>
+
+  <!-- Education: timeline continues -->
+  <text x="293" y="360" font-family="'Trebuchet MS', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" fill="#d1603d">Education</text>
+  <line x1="303" y1="376" x2="303" y2="410" stroke="#e2dbe8" stroke-width="3"/>
+  <circle cx="303" cy="380" r="7" fill="#d1603d" stroke="#ffffff" stroke-width="2"/>
+  <rect x="315" y="376" width="240" height="9" fill="#232323"/>
+  <rect x="700" y="376" width="68" height="9" fill="#8a8a8a"/>
+  <rect x="315" y="391" width="260" height="7" fill="#585858"/>
+
+  <!-- Projects: plain, no timeline -->
+  <text x="293" y="446" font-family="'Trebuchet MS', 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" fill="#d1603d">Projects</text>
+  <rect x="293" y="458" width="200" height="8" fill="#232323"/>
+  <rect x="700" y="458" width="68" height="8" fill="#8a8a8a"/>
+  <rect x="293" y="473" width="440" height="6" fill="#585858"/>
+  <rect x="293" y="487" width="400" height="6" fill="#585858"/>
+</svg>

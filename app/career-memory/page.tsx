@@ -9,6 +9,7 @@ import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import CareerMemoryTemplatePreview from "@/components/resume/CareerMemoryTemplatePreview";
 import CanonicalTemplatePicker from "@/components/canonicalGeneratePackage/CanonicalTemplatePicker";
+import { ALL_TEMPLATE_CAPABILITIES } from "@/lib/resumeTemplates/registry/templateMetadata";
 import { useToast } from "@/components/ui/ToastProvider";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -558,6 +559,17 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [manualTemplateStatus, setManualTemplateStatus] = useState<"idle" | "not-applicable" | "importing" | "import-error" | "selecting" | "saving-template" | "ready">("idle");
   const [manualTemplates, setManualTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
   const [manualSelectedTemplateId, setManualSelectedTemplateId] = useState<string | null>(null);
+  /*
+    Phase Step9-gate - true ONLY once the user has clicked a card for
+    THIS manual Step 9 flow (set in selectManualTemplate on a
+    successful PUT), mirroring inlineTemplateExplicitlySelected's exact
+    rationale above: a restored/auto-applied previous default
+    (manualSelectedTemplateId set from runManualCanonicalFlow's own
+    previousVersionSource==="manual" branch) must never silently count
+    as a fresh confirmation. Reset to false at the start of every
+    runManualCanonicalFlow() call (i.e. every time Step 9 is entered).
+  */
+  const [manualTemplateExplicitlySelected, setManualTemplateExplicitlySelected] = useState(false);
   const [manualTemplateError, setManualTemplateError] = useState<string | null>(null);
   const [manualPreviousVersionSource, setManualPreviousVersionSource] = useState<"none" | "manual" | "uploaded" | null>(null);
   /*
@@ -575,6 +587,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   async function runManualCanonicalFlow() {
     setManualTemplateStatus("importing");
     setManualTemplateError(null);
+    setManualTemplateExplicitlySelected(false);
     try {
       // Same canary/feature-flag gate the uploaded-resume flow's own
       // runInlineCanonicalFlow() already checks - a Manual resume must
@@ -641,6 +654,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
       setManualSelectedTemplateId(data.defaultTemplateId);
       setManualPreviousVersionSource("manual");
       setManualTemplateStatus("ready");
+      setManualTemplateExplicitlySelected(true);
     } catch {
       setManualTemplateError("Could not save your template selection.");
       setManualTemplateStatus("selecting");
@@ -650,16 +664,23 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   useEffect(() => {
     if (mode !== "build") return;
     if (currentStep !== steps.length - 1) return;
+    if (!canUseService()) return;
     runManualCanonicalFlow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, currentStep]);
 
   const manualCanonicalSelectionRequired = manualTemplateStatus !== "not-applicable" && manualTemplateStatus !== "idle";
+  /*
+    Phase Step9-gate - gates on an EXPLICIT selection made during THIS
+    visit to Step 9, mirroring inlineTemplateBlocksContinue exactly (see
+    its own header comment above): a restored/auto-applied previous
+    default must never silently satisfy "choose a template".
+  */
+  const manualTemplateBlocksContinue = manualCanonicalSelectionRequired && !(manualTemplateStatus === "ready" && manualTemplateExplicitlySelected);
   const manualSaveDisabled =
     mode === "build" &&
     currentStep === steps.length - 1 &&
-    manualCanonicalSelectionRequired &&
-    !(manualTemplateStatus === "ready" && manualSelectedTemplateId !== null);
+    (!canUseService() || manualTemplateBlocksContinue);
 
   /*
     Revokes the previous object URL whenever a new file is uploaded (the
@@ -1279,6 +1300,21 @@ return true;
   }
 
   async function continueToDashboard() {
+  /*
+    Phase Step9-gate Part D/L - defense-in-depth, never relying solely
+    on the disabled buttons above. Gate 1 re-checks the exact same
+    required-section completeness the buttons already gate on. Gate 2
+    is scoped to the Manual Step 9 review screen only (isReviewStep) -
+    the same explicit-selection requirement selectManualTemplate/
+    manualTemplateBlocksContinue already enforce visually, enforced
+    again here so a raw call to this function can never bypass it.
+  */
+  if (!canUseService()) {
+    return;
+  }
+  if (isReviewStep && manualTemplateBlocksContinue) {
+    return;
+  }
   const saved = await persistMemory();
 
   if (!saved) {
@@ -1384,7 +1420,11 @@ function continueUploadedDashboard() {
     canonicalTemplatePreferenceService.ts's validateTemplateId() call)
     before "Finish Memory" may complete.
   */
-  if (mode === "build" && manualTemplateStatus !== "not-applicable" && manualTemplateStatus !== "idle" && !(manualTemplateStatus === "ready" && manualSelectedTemplateId !== null)) {
+  if (mode === "build" && !canUseService()) {
+    return;
+  }
+
+  if (mode === "build" && manualTemplateBlocksContinue) {
     return;
   }
 
@@ -2799,6 +2839,37 @@ return;
     Manual resume that has real canonical content.
   */
   function renderManualTemplateReview() {
+    /*
+      Phase Step9-gate Part E/F - required sections incomplete. Must
+      show ONLY the four static canonical template examples, never any
+      user-data preview (current/uploaded/canonical/built-from-fields).
+      Checked first, unconditionally, ahead of every other
+      manualTemplateStatus branch below - so a stale status left over
+      from an earlier complete visit can never leak a real preview
+      here. No canonical import is triggered for this branch (the
+      mount effect above already skips runManualCanonicalFlow() while
+      canUseService() is false) - ALL_TEMPLATE_CAPABILITIES is pure
+      static registry data, and no livePreviewUrl is passed to
+      CanonicalTemplatePicker, so it falls back to each template's own
+      previewAsset (the four approved static SVGs).
+    */
+    if (!canUseService()) {
+      return (
+        <div className="mt-6">
+          <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose a resume template</p>
+          <h3 className="mt-1 text-xl font-black text-slate-950">Required</h3>
+          <p className="mt-2 text-sm text-slate-600">Recommended: choose the template that best fits your experience and target roles. Complete Personal Information, Experience, and Skills above to preview your own resume in each design - for now, here are the four available templates.</p>
+          <div className="mt-4">
+            <CanonicalTemplatePicker
+              templates={ALL_TEMPLATE_CAPABILITIES}
+              selectedTemplateId={null}
+              onSelect={() => {}}
+              disabled
+            />
+          </div>
+        </div>
+      );
+    }
     if (manualTemplateStatus === "not-applicable") {
       // Canonical templates are not enabled for this user (Stage 1
       // canary off) - fall back to the exact pre-existing legacy Step 9
@@ -2966,6 +3037,15 @@ return;
 
   function renderRequiredBanner() {
   const unlocked = canUseService();
+  /*
+    Phase Step9-gate Part C/K - this banner's button is the global
+    Continue-to-Dashboard call to action (rendered above every step,
+    not only Step 9). Once required sections are complete, add the
+    Manual Step 9 explicit-template-selection requirement as a second
+    gate - only relevant while actually on that review screen.
+  */
+  const templateSelectionPending = isReviewStep && manualTemplateBlocksContinue;
+  const dashboardDisabled = !unlocked || templateSelectionPending;
 
   return (
     <Card padding="sm" className="mb-6">
@@ -2988,16 +3068,18 @@ return;
         <button
           type="button"
          onClick={continueToDashboard}
-          
+          disabled={dashboardDisabled}
           className={`rounded-xl px-5 py-3 font-bold transition ${
-            unlocked
+            !dashboardDisabled
               ? "bg-blue-600 text-white hover:bg-blue-700"
               : "cursor-not-allowed bg-slate-100 text-slate-400"
           }`}
         >
-          {unlocked
-            ? "Continue to Dashboard →"
-            : `Complete Required Sections (${requiredCount}/3)`}
+          {!unlocked
+            ? `Complete Required Sections (${requiredCount}/3)`
+            : templateSelectionPending
+            ? "Select a Template to Continue"
+            : "Continue to Dashboard →"}
         </button>
       </div>
 
@@ -4026,7 +4108,7 @@ return;
               type="button"
               onClick={handleSaveAndContinue}
               disabled={manualSaveDisabled}
-              title={manualSaveDisabled ? "Select a resume template above before finishing." : undefined}
+              title={manualSaveDisabled ? (!canUseService() ? "Complete the required sections above before finishing." : "Select a resume template above before finishing.") : undefined}
               className={`rounded-xl px-6 py-3 font-bold text-white ${manualSaveDisabled ? "cursor-not-allowed bg-slate-300" : "bg-blue-600"}`}
             >
               {currentStep === steps.length - 1

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 816 1056" role="img" aria-label="Modern Sidebar template preview">
+  <rect x="0" y="0" width="816" height="1056" fill="#ffffff"/>
+
+  <!-- Sidebar column, ~30% width, dark forest-green -->
+  <rect x="0" y="0" width="245" height="1056" fill="#1f2a24"/>
+
+  <!-- Identity masthead in sidebar -->
+  <circle cx="52" cy="90" r="30" fill="#3d5a44"/>
+  <text x="28" y="150" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="20" font-weight="700" fill="#eef1ee">YOUR NAME</text>
+  <rect x="28" y="160" width="160" height="6" fill="#cdd6cf" opacity="0.85"/>
+  <rect x="28" y="190" width="140" height="5" fill="#b7c2b9"/>
+  <rect x="28" y="204" width="120" height="5" fill="#b7c2b9"/>
+  <rect x="28" y="218" width="150" height="5" fill="#b7c2b9"/>
+  <rect x="28" y="232" width="110" height="5" fill="#b7c2b9"/>
+
+  <!-- Sidebar: SKILLS -->
+  <text x="28" y="274" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="11" letter-spacing="1" opacity="0.9" fill="#eef1ee">SKILLS</text>
+  <rect x="28" y="286" width="180" height="6" fill="#b7c2b9"/>
+  <rect x="28" y="300" width="150" height="6" fill="#b7c2b9"/>
+  <rect x="28" y="314" width="170" height="6" fill="#b7c2b9"/>
+  <rect x="28" y="328" width="140" height="6" fill="#b7c2b9"/>
+
+  <!-- Sidebar: LANGUAGES -->
+  <text x="28" y="368" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="11" letter-spacing="1" opacity="0.9" fill="#eef1ee">LANGUAGES</text>
+  <rect x="28" y="380" width="140" height="6" fill="#b7c2b9"/>
+  <rect x="28" y="394" width="110" height="6" fill="#b7c2b9"/>
+
+  <!-- Main column, right, white -->
+  <text x="293" y="90" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1" fill="#2f5233">PROFILE</text>
+  <rect x="293" y="102" width="475" height="7" fill="#555555"/>
+  <rect x="293" y="116" width="475" height="7" fill="#555555"/>
+  <rect x="293" y="130" width="320" height="7" fill="#555555"/>
+
+  <text x="293" y="170" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1" fill="#2f5233">EXPERIENCE</text>
+  <rect x="293" y="182" width="220" height="9" fill="#232323"/>
+  <rect x="698" y="182" width="70" height="9" fill="#8a8a8a"/>
+  <rect x="293" y="197" width="200" height="7" fill="#2f5233"/>
+  <rect x="293" y="212" width="475" height="6" fill="#585858"/>
+  <rect x="293" y="226" width="440" height="6" fill="#585858"/>
+  <rect x="293" y="240" width="380" height="6" fill="#585858"/>
+
+  <rect x="293" y="266" width="200" height="9" fill="#232323"/>
+  <rect x="698" y="266" width="70" height="9" fill="#8a8a8a"/>
+  <rect x="293" y="281" width="180" height="7" fill="#2f5233"/>
+  <rect x="293" y="296" width="475" height="6" fill="#585858"/>
+  <rect x="293" y="310" width="420" height="6" fill="#585858"/>
+
+  <text x="293" y="366" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1" fill="#2f5233">EDUCATION</text>
+  <rect x="293" y="378" width="260" height="9" fill="#232323"/>
+  <rect x="698" y="378" width="70" height="9" fill="#8a8a8a"/>
+  <rect x="293" y="393" width="220" height="7" fill="#585858"/>
+
+  <text x="293" y="440" font-family="'Segoe UI', Calibri, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1" fill="#2f5233">CERTIFICATIONS</text>
+  <rect x="293" y="452" width="400" height="7" fill="#585858"/>
+  <rect x="293" y="466" width="300" height="7" fill="#585858"/>
+</svg>

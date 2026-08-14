@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 816 1056" role="img" aria-label="Executive Minimal template preview">
+  <rect x="0" y="0" width="816" height="1056" fill="#fdfcf9"/>
+
+  <!-- Centered header -->
+  <text x="408" y="110" text-anchor="middle" font-family="Garamond, Georgia, 'Times New Roman', serif" font-size="36" font-weight="700" fill="#161412">YOUR NAME</text>
+  <text x="408" y="136" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" font-weight="600" fill="#7a5a2e">Executive Headline</text>
+  <text x="408" y="156" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#5a564f">City, ST  &#183;  (000) 000-0000  &#183;  email@example.com</text>
+
+  <!-- Optional metric-highlight grid (neutral placeholders, no invented statistics) -->
+  <rect x="280" y="182" width="40" height="14" fill="#7a5a2e" opacity="0.85"/>
+  <rect x="275" y="202" width="50" height="5" fill="#8a8579"/>
+  <rect x="388" y="182" width="40" height="14" fill="#7a5a2e" opacity="0.85"/>
+  <rect x="383" y="202" width="50" height="5" fill="#8a8579"/>
+  <rect x="496" y="182" width="40" height="14" fill="#7a5a2e" opacity="0.85"/>
+  <rect x="491" y="202" width="50" height="5" fill="#8a8579"/>
+
+  <!-- EXECUTIVE SUMMARY -->
+  <text x="56" y="250" font-family="Garamond, Georgia, serif" font-size="13" letter-spacing="1" fill="#161412">EXECUTIVE SUMMARY</text>
+  <line x1="56" y1="258" x2="760" y2="258" stroke="#d8d2c4" stroke-width="1"/>
+  <rect x="56" y="270" width="704" height="7" fill="#5a564f"/>
+  <rect x="56" y="284" width="704" height="7" fill="#5a564f"/>
+  <rect x="56" y="298" width="540" height="7" fill="#5a564f"/>
+
+  <!-- CORE COMPETENCIES -->
+  <text x="56" y="336" font-family="Garamond, Georgia, serif" font-size="13" letter-spacing="1" fill="#161412">CORE COMPETENCIES</text>
+  <line x1="56" y1="344" x2="760" y2="344" stroke="#d8d2c4" stroke-width="1"/>
+  <rect x="56" y="356" width="704" height="7" fill="#5a564f"/>
+  <rect x="56" y="370" width="600" height="7" fill="#5a564f"/>
+
+  <!-- PROFESSIONAL EXPERIENCE -->
+  <text x="56" y="406" font-family="Garamond, Georgia, serif" font-size="13" letter-spacing="1" fill="#161412">PROFESSIONAL EXPERIENCE</text>
+  <line x1="56" y1="414" x2="760" y2="414" stroke="#d8d2c4" stroke-width="1"/>
+
+  <rect x="56" y="430" width="300" height="9" fill="#161412"/>
+  <rect x="674" y="430" width="90" height="9" fill="#8a8579"/>
+  <rect x="56" y="445" width="150" height="6" fill="#5a564f"/>
+  <rect x="56" y="458" width="704" height="6" fill="#5a564f"/>
+  <rect x="56" y="472" width="660" height="6" fill="#5a564f"/>
+  <rect x="56" y="486" width="520" height="6" fill="#5a564f"/>
+
+  <rect x="56" y="508" width="280" height="9" fill="#161412"/>
+  <rect x="674" y="508" width="90" height="9" fill="#8a8579"/>
+  <rect x="56" y="523" width="150" height="6" fill="#5a564f"/>
+  <rect x="56" y="536" width="704" height="6" fill="#5a564f"/>
+  <rect x="56" y="550" width="600" height="6" fill="#5a564f"/>
+
+  <!-- EDUCATION -->
+  <text x="56" y="606" font-family="Garamond, Georgia, serif" font-size="13" letter-spacing="1" fill="#161412">EDUCATION</text>
+  <line x1="56" y1="614" x2="760" y2="614" stroke="#d8d2c4" stroke-width="1"/>
+  <rect x="56" y="630" width="260" height="9" fill="#161412"/>
+  <rect x="674" y="630" width="90" height="9" fill="#8a8579"/>
+  <rect x="56" y="645" width="300" height="7" fill="#5a564f"/>
+</svg>
