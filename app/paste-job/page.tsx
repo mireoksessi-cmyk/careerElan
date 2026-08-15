@@ -1403,10 +1403,19 @@ export default function PasteJobPage() {
     so it can always be stopped - on unmount, on a new Generate click, on
     retry, or when the tracked applicationId changes - without ever
     leaving two pollers running at once. recoveryAttemptedRef guards the
-    refresh-recovery effect to run at most once per page load.
+    refresh-recovery effect to run at most once per page load. isMountedRef
+    guards beginPolling() itself against the narrower gap where this
+    component unmounts while the initial Generate POST is still awaiting a
+    response - by the time that late response resolves, isMountedRef.current
+    is already false, so beginPolling() returns immediately without ever
+    creating a poller, writing the sessionStorage recovery entry, or
+    mutating state for a component instance that no longer exists. It does
+    not, and must not, cancel the already-accepted server-side generation
+    itself - only this client instance's own further involvement with it.
   */
   const pollerRef = useRef<PollerHandle | null>(null);
   const recoveryAttemptedRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   /*
     Stale-worker recovery (app/api/generate-package/route.ts is the
@@ -1483,6 +1492,7 @@ export default function PasteJobPage() {
     } & Partial<JobContext>
   ) {
     clearGiveUpTimer();
+    isGeneratingRef.current = false;
     setPackageData({
       resume: result.resume,
       coverLetter: result.coverLetter,
@@ -1509,6 +1519,7 @@ export default function PasteJobPage() {
     result: { code: string | null; message: string } & Partial<JobContext>
   ) {
     clearGiveUpTimer();
+    isGeneratingRef.current = false;
     setGenerationPhase("failed");
     setGenerationErrorInfo({
       code: result.code || undefined,
@@ -1805,6 +1816,8 @@ export default function PasteJobPage() {
     generationRequestId: string | null,
     options: { persist: boolean; immediate: boolean }
   ) {
+    if (!isMountedRef.current) return;
+
     stopPolling();
     clearGiveUpTimer();
     autoRetryAttemptedRef.current = false;
@@ -1845,12 +1858,14 @@ export default function PasteJobPage() {
       },
       onInvalid: () => {
         pollerRef.current = null;
+        isGeneratingRef.current = false;
         clearActiveGeneration(window.sessionStorage);
         setGenerationPhase("idle");
         setProgressInfo(null);
       },
       onUnauthorized: () => {
         pollerRef.current = null;
+        isGeneratingRef.current = false;
         setGenerationPhase("failed");
         setGenerationErrorInfo({
           message: "Your session may have expired. Please sign in again.",
@@ -1858,6 +1873,7 @@ export default function PasteJobPage() {
       },
       onTimeout: () => {
         pollerRef.current = null;
+        isGeneratingRef.current = false;
         setGenerationPhase("poll_timeout");
         setMessage(
           "Your package is still being generated. Please try checking again shortly."
@@ -2026,6 +2042,7 @@ useEffect(() => {
 */
 useEffect(() => {
   return () => {
+    isMountedRef.current = false;
     stopPolling();
   };
 }, []);
@@ -2530,6 +2547,8 @@ async function loadSelectedApplicationMaterials() {
     );
   }
 
+  const isGeneratingRef = useRef(false);
+
   async function handleGeneratePackage() {
   if (!hasResumeData) {
     toast.warning(
@@ -2569,6 +2588,24 @@ async function loadSelectedApplicationMaterials() {
   if (isGenerationActive(generationPhase)) {
     return;
   }
+
+  /*
+    Second, synchronous layer of the same protection: generationPhase is
+    React state, so it only becomes visible to a later invocation once a
+    render has actually committed - two clicks landing before that commit
+    can both read the same stale "idle" value above. isGeneratingRef is a
+    plain ref, set synchronously right here (before any await), so a
+    same-tick second invocation sees the value the first one just wrote,
+    with no render cycle required in between. Stays true through the
+    "processing" hand-off to polling (released instead by
+    applySucceededResult()/applyFailedResult() and beginPolling()'s
+    onInvalid/onUnauthorized/onTimeout callbacks, wherever this attempt
+    actually reaches a terminal state) and on every error path below.
+  */
+  if (isGeneratingRef.current) {
+    return;
+  }
+  isGeneratingRef.current = true;
 
   // A retry after failure/timeout starts clean: drop any leftover poller
   // from a prior attempt before beginning this one.
@@ -2687,6 +2724,7 @@ async function loadSelectedApplicationMaterials() {
       error
     );
 
+    isGeneratingRef.current = false;
     setGenerationPhase("idle");
 
     /*
