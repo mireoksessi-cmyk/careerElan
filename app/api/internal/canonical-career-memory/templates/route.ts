@@ -12,14 +12,15 @@
 */
 import { NextResponse } from "next/server";
 import { isNetlifyRuntime } from "@/lib/generatePackage/backgroundTarget";
-import { ensureTemplatesRegistered } from "@/lib/resumeTemplates/registry/bootstrap";
-import { listTemplates } from "@/lib/resumeTemplates/registry/templateRegistry";
-import { buildCapabilityMatrix } from "@/lib/resumeTemplates/engine/templateCapabilities";
 
 export async function GET() {
   if (isNetlifyRuntime()) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
+
+  const { ensureTemplatesRegistered } = await import("@/lib/resumeTemplates/registry/bootstrap");
+  const { listTemplates } = await import("@/lib/resumeTemplates/registry/templateRegistry");
+  const { buildCapabilityMatrix } = await import("@/lib/resumeTemplates/engine/templateCapabilities");
 
   ensureTemplatesRegistered();
   return NextResponse.json({ templates: listTemplates(), capabilityMatrix: buildCapabilityMatrix() });
