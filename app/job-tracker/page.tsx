@@ -158,10 +158,29 @@ loadApplications();
 async function saveStatus() {
   if (!selectedApplication || !user) return;
 
+  /*
+    Email Notifications Phase 1: record the authoritative "entered
+    Applied state" timestamp the first time status becomes "Applied" -
+    never overwritten by a later no-op re-save of "Applied", and never
+    reset if the application later leaves and re-enters Applied (the
+    existing historical timestamp is preserved, per the approved
+    "records the timestamp once" behavior). applications.applied_date is
+    NOT this timestamp - see the migration's own header comment for why
+    that column (set once at package-creation time) is unsuitable.
+  */
+  const isFirstApplied =
+    status === "Applied" && !selectedApplication.status_applied_at;
+  const statusAppliedAt = isFirstApplied
+    ? new Date().toISOString()
+    : null;
+
   const { error } = await supabase
     .from("applications")
     .update({
       status,
+      ...(statusAppliedAt
+        ? { status_applied_at: statusAppliedAt }
+        : {}),
     })
     .eq("id", selectedApplication.id)
     .eq("user_id", user.id);
@@ -175,6 +194,9 @@ async function saveStatus() {
   const updatedApplication = {
     ...selectedApplication,
     status,
+    ...(statusAppliedAt
+      ? { status_applied_at: statusAppliedAt }
+      : {}),
   };
 
   setSelectedApplication(
