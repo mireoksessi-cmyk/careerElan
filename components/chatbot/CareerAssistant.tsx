@@ -478,9 +478,6 @@ export default function CareerAssistant() {
 </div>
                     </div>
                   </div>
-
-                  {/* 세부 문의 카드를 나중에 이곳에 추가 */}
-                  <div className="mt-5 min-h-[260px] rounded-2xl border border-dashed border-slate-200 bg-slate-50" />
                 </div>
               </div>
             )}
