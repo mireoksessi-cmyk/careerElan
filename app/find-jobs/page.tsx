@@ -38,7 +38,7 @@ type DisplayJob = {
   location: string;
   type: string;
   mode: string;
-  category: string;
+  categories: string[];
   match?: number;
   relevantExperience: string;
   keyRequirements: string[];
@@ -104,6 +104,34 @@ const countryNameByCode: Record<string, keyof typeof provinces> = {
   CA: "Canada",
   
 };
+
+/*
+  Find Jobs category taxonomy (V1) - fixed ids/display names, must stay in
+  sync with the identical list in app/api/search-jobs/route.ts. Order here
+  is also the dropdown's display order ("All Jobs" first).
+*/
+const JOB_CATEGORIES: { id: string; display: string }[] = [
+  { id: "business-finance-admin", display: "Business, Finance & Administration" },
+  { id: "legal", display: "Legal" },
+  { id: "customer-retail-sales", display: "Customer Service, Retail & Sales" },
+  { id: "technology-it", display: "Technology & IT" },
+  { id: "engineering", display: "Engineering" },
+  { id: "science-research", display: "Science & Research" },
+  { id: "healthcare", display: "Healthcare" },
+  { id: "education-social-community", display: "Education & Social/Community Services" },
+  { id: "skilled-trades-construction", display: "Skilled Trades & Construction" },
+  { id: "manufacturing-production", display: "Manufacturing & Production" },
+  { id: "transportation-logistics", display: "Transportation & Logistics" },
+  { id: "agriculture-forestry-fishing", display: "Agriculture, Forestry & Fishing" },
+  { id: "natural-resources-mining", display: "Natural Resources & Mining" },
+  { id: "hospitality-food-service", display: "Hospitality & Food Service" },
+  { id: "security-cleaning-general-labour", display: "Security, Cleaning & General Labour" },
+  { id: "arts-culture-recreation", display: "Arts, Culture & Recreation" },
+];
+
+const JOB_CATEGORY_DISPLAY_BY_ID: Record<string, string> = Object.fromEntries(
+  JOB_CATEGORIES.map((cat) => [cat.id, cat.display])
+);
 
 
 
@@ -223,7 +251,7 @@ function convertApiJob(job: SearchJob, hasCareerMemory: boolean): DisplayJob {
     location: job.location,
     type: job.type,
     mode: job.type?.toLowerCase().includes("remote") ? "Remote" : "On-site / Hybrid",
-    category: job.category || "General",
+    categories: job.categories ?? [],
     match: job.match,
     relevantExperience: deriveRelevantExperience(job),
     keyRequirements: deriveKeyRequirements(job),
@@ -352,6 +380,7 @@ setCategory(state.category || "All");
   state: province === "All" ? "" : province,
   city: city === "All" ? "" : city,
   jobType: jobType === "All" ? "" : jobType,
+  category: category === "All" ? "" : category,
   page: nextPage,
 });
 
@@ -644,11 +673,12 @@ setCategory(state.category || "All");
 }}
                 className="w-full min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:col-span-2"
               >
-                <option>All</option>
-                <option>Administration</option>
-                <option>Legal</option>
-                <option>Office</option>
-                <option>Customer Service</option>
+                <option value="All">All Jobs</option>
+                {JOB_CATEGORIES.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.display}
+                  </option>
+                ))}
               </select>
 
               <Button
@@ -759,9 +789,14 @@ setCategory(state.category || "All");
                     <span className="min-w-0 max-w-full break-words rounded-full bg-blue-50 px-3 py-1 text-[10px] font-bold text-blue-600">
                       {job.type}
                     </span>
-                    <span className="min-w-0 max-w-full break-words rounded-full bg-slate-50 px-3 py-1 text-[10px] font-bold text-slate-500">
-                      {job.category}
-                    </span>
+                    {job.categories.slice(0, 2).map((categoryId) => (
+                      <span
+                        key={categoryId}
+                        className="min-w-0 max-w-full break-words rounded-full bg-slate-50 px-3 py-1 text-[10px] font-bold text-slate-500"
+                      >
+                        {JOB_CATEGORY_DISPLAY_BY_ID[categoryId] || categoryId}
+                      </span>
+                    ))}
                   </div>
 
                   <div className="mt-4">

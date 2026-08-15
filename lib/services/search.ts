@@ -5,6 +5,7 @@ export type SearchJob = {
   location: string;
   type: string;
   category: string;
+  categories: string[];
   description: string;
   url: string;
   posted: string;
@@ -27,6 +28,7 @@ type SearchJobsParams = {
   state?: string;
   city?: string;
   jobType?: string;
+  category?: string;
   remote?: string;
   datePosted?: string;
   salary?: string;
@@ -39,6 +41,7 @@ export async function searchJobs({
   state,
   city,
   jobType,
+  category,
   remote,
   datePosted,
   salary,
@@ -63,6 +66,10 @@ export async function searchJobs({
 
   if (jobType && jobType !== "All") {
     params.set("jobType", jobType);
+  }
+
+  if (category && category !== "All" && category !== "All Jobs") {
+    params.set("category", category);
   }
 
   if (remote) {
