@@ -20,6 +20,7 @@ export type SearchJobsResponse = {
   count: number;
   page: number;
   source: string;
+  providerPageThrough?: number;
 };
 
 type SearchJobsParams = {
@@ -33,6 +34,7 @@ type SearchJobsParams = {
   datePosted?: string;
   salary?: string;
   page?: number;
+  providerPageAfter?: number;
 };
 
 export async function searchJobs({
@@ -46,6 +48,7 @@ export async function searchJobs({
   datePosted,
   salary,
   page = 1,
+  providerPageAfter,
 }: SearchJobsParams): Promise<SearchJobsResponse> {
   const params = new URLSearchParams();
 
@@ -85,6 +88,10 @@ export async function searchJobs({
   }
 
   params.set("page", page.toString());
+
+  if (providerPageAfter !== undefined) {
+    params.set("providerPageAfter", providerPageAfter.toString());
+  }
 
   const res = await fetch(
     `/api/search-jobs?${params.toString()}`,

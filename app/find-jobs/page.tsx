@@ -289,6 +289,18 @@ const [showCitySuggestions, setShowCitySuggestions] =
   const [isSearching, setIsSearching] = useState(false);
   const [message, setMessage] = useState("");
   const [externalTotalPages, setExternalTotalPages] = useState(1);
+  /*
+    Pagination Enrichment V2 - the ONLY server-authoritative signal this
+    page tracks about pagination: the highest provider page the last
+    successful response actually consumed (route.ts's own
+    providerPageThrough). Used ONLY to build the providerPageAfter hint
+    for a genuine one-step-forward Next click (see handleSearch below) -
+    never for Previous, never for jumping to an arbitrary page number,
+    and never carried into a brand-new search. A missing/stale value here
+    simply means the next request falls back to the server's own exact
+    V1 single-page behavior - never guessed, never invented.
+  */
+  const [providerPageThrough, setProviderPageThrough] = useState<number | null>(null);
 useEffect(() => {
   const trimmedInput = cityInput.trim();
 
@@ -350,6 +362,9 @@ setCategory(state.category || "All");
       setExternalJobs(Array.isArray(state.jobs) ? state.jobs : []);
       setExternalMode(Boolean(state.externalMode));
       setExternalTotalPages(state.externalTotalPages || 1);
+      setProviderPageThrough(
+        typeof state.providerPageThrough === "number" ? state.providerPageThrough : null
+      );
     } catch (error) {
       console.error(error);
       sessionStorage.removeItem("findJobsState");
@@ -374,6 +389,18 @@ setCategory(state.category || "All");
     setMessage("");
 
     try {
+      /*
+        Pagination Enrichment V2 - the providerPageAfter hint is only ever
+        forwarded for a genuine one-step-forward Next click (nextPage is
+        literally the page immediately after the one currently displayed)
+        AND only when the prior response actually returned a hint. Every
+        other navigation - Previous, jumping to a specific page number,
+        or a brand-new Search - intentionally omits it, which makes the
+        server fall back to its own exact V1 single-page behavior for
+        that request (see the pagination design audit's Part P/Q).
+      */
+      const shouldSendHint = nextPage === page + 1 && providerPageThrough !== null;
+
       const data = await searchJobs({
   query: query.trim(),
   country,
@@ -382,16 +409,20 @@ setCategory(state.category || "All");
   jobType: jobType === "All" ? "" : jobType,
   category: category === "All" ? "" : category,
   page: nextPage,
+  providerPageAfter: shouldSendHint ? providerPageThrough! : undefined,
 });
 
       const jobs = data.jobs.map((job) => convertApiJob(job, hasCareerMemory));
 
       const nextTotalPages = jobs.length > 0 ? Math.max(nextPage + 1, 2) : nextPage;
+      const nextProviderPageThrough =
+        typeof data.providerPageThrough === "number" ? data.providerPageThrough : null;
 
       setExternalJobs(jobs);
       setExternalMode(true);
       setPage(nextPage);
       setExternalTotalPages(nextTotalPages);
+      setProviderPageThrough(nextProviderPageThrough);
       setMessage(jobs.length > 0 ? "" : "No jobs found. Try another keyword or location.");
 
       sessionStorage.setItem(
@@ -408,6 +439,7 @@ setCategory(state.category || "All");
     jobs,
     externalMode: true,
     externalTotalPages: nextTotalPages,
+    providerPageThrough: nextProviderPageThrough,
   })
 );
     } catch (error: any) {
@@ -427,6 +459,7 @@ setCategory(state.category || "All");
   setPage(1);
   setMessage("");
   setExternalTotalPages(1);
+  setProviderPageThrough(null);
   sessionStorage.removeItem("findJobsState");
 }
 
@@ -455,6 +488,7 @@ setCategory(state.category || "All");
       jobs: externalJobs,
       externalMode,
       externalTotalPages,
+      providerPageThrough,
     })
   );
 }
@@ -625,6 +659,7 @@ setCategory(state.category || "All");
               setExternalJobs([]);
               setExternalMode(false);
               setMessage("");
+              setProviderPageThrough(null);
               sessionStorage.removeItem(
                 "findJobsState"
               );

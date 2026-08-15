@@ -384,28 +384,101 @@ const searchQuery = parts.join(" ");
 
    
 
-    const url = new URL("https://jsearch.p.rapidapi.com/search-v2");
+    /*
+      Pagination Enrichment V2 - fetchJSearchProviderPage() is the SAME
+      single fetch this route always made, just extracted so it can be
+      called for more than one provider page number within a single
+      request. dedupeNormalizedJobs()/extractRawJobs() are the SAME dedup
+      key (title-company-location) and rawJobs-shape detection V1 always
+      used, only pulled out so they can run once against a single page
+      and, when enrichment triggers, again against the merged
+      [primary, enrichment] array - never a redesign of either.
+    */
+    const resolvedApiKey = apiKey;
+    const fetchJSearchProviderPage = async (providerPage: number) => {
+      const pageUrl = new URL("https://jsearch.p.rapidapi.com/search-v2");
 
-    url.searchParams.set("query", searchQuery);
-    url.searchParams.set("page", page);
-    url.searchParams.set("num_pages", "1");
-    url.searchParams.set(
-  "country",
-  countryCode.toLowerCase()
-);
+      pageUrl.searchParams.set("query", searchQuery);
+      pageUrl.searchParams.set("page", String(providerPage));
+      pageUrl.searchParams.set("num_pages", "1");
+      pageUrl.searchParams.set("country", countryCode.toLowerCase());
 
-    if (datePosted) {
-      url.searchParams.set("date_posted", datePosted);
+      if (datePosted) {
+        pageUrl.searchParams.set("date_posted", datePosted);
+      }
+
+      return fetch(pageUrl.toString(), {
+        method: "GET",
+        headers: {
+          "x-rapidapi-key": resolvedApiKey,
+          "x-rapidapi-host": "jsearch.p.rapidapi.com",
+        },
+        cache: "no-store",
+      });
+    };
+
+    function extractRawJobs(data: any): JSearchJob[] {
+      return Array.isArray(data.data)
+        ? data.data
+        : Array.isArray(data.data?.jobs)
+        ? data.data.jobs
+        : Array.isArray(data.jobs)
+        ? data.jobs
+        : [];
     }
 
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        "x-rapidapi-key": apiKey,
-        "x-rapidapi-host": "jsearch.p.rapidapi.com",
-      },
-      cache: "no-store",
-    });
+    function dedupeNormalizedJobs(rawJobs: JSearchJob[]) {
+      return Array.from(
+        new Map(
+          rawJobs
+            .map(normalizeJob)
+            .map((job: any) => [
+              `${job.title}-${job.company}-${job.location}`.toLowerCase(),
+              job,
+            ])
+        ).values()
+      );
+    }
+
+    /*
+      Pagination Enrichment V2 hint: providerPageAfter is the client's
+      OPTIONAL record of the highest provider page the immediately
+      previous visible UI page actually consumed (this route's own prior
+      response returned it as providerPageThrough). A missing/malformed/
+      out-of-range hint is never guessed around - per spec, that always
+      falls back to the exact V1 single-page behavior for page > 1 (fetch
+      provider page = the requested UI page, no enrichment), so a stale or
+      absent hint can only ever under-enrich, never skip or duplicate
+      results.
+    */
+    function parseProviderPageAfter(raw: string | null): number | null {
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) return null;
+      if (!Number.isInteger(parsed)) return null;
+      if (parsed < 1) return null;
+      if (parsed > 1000) return null;
+      return parsed;
+    }
+
+    const pageNumber = Number(page) || 1;
+    const providerPageAfterHint = parseProviderPageAfter(
+      searchParams.get("providerPageAfter")
+    );
+
+    let providerStart: number;
+    let usedV1Fallback = false;
+
+    if (pageNumber <= 1) {
+      providerStart = 1;
+    } else if (providerPageAfterHint !== null) {
+      providerStart = providerPageAfterHint + 1;
+    } else {
+      providerStart = pageNumber;
+      usedV1Fallback = true;
+    }
+
+    const res = await fetchJSearchProviderPage(providerStart);
 
     if (res.status === 429) {
       return NextResponse.json(
@@ -430,48 +503,59 @@ const searchQuery = parts.join(" ");
     }
 
     const data = await res.json();
+    const primaryRawJobs = extractRawJobs(data);
 
-    const rawJobs = Array.isArray(data.data)
-      ? data.data
-      : Array.isArray(data.data?.jobs)
-      ? data.data.jobs
-      : Array.isArray(data.jobs)
-      ? data.jobs
-      : [];
+    const categoryActive =
+      Boolean(categoryFilter) && categoryFilter !== "All" && categoryFilter !== "All Jobs";
 
-    const jobs = Array.from(
-      new Map(
-        rawJobs
-          .map(normalizeJob)
-          .map((job: any) => [
-            `${job.title}-${job.company}-${job.location}`.toLowerCase(),
-            job,
-          ])
-      ).values()
-    );
+    let jobs = dedupeNormalizedJobs(primaryRawJobs);
+    let filteredJobs = categoryActive
+      ? jobs.filter((job: any) =>
+          Array.isArray(job.categories) && job.categories.includes(categoryFilter)
+        )
+      : jobs;
+    let providerPageThrough = providerStart;
 
     /*
-      V1 category filtering applies only to the currently fetched provider
-      page; pagination enrichment is intentionally deferred (see the
-      taxonomy design audit's pagination analysis - fetching additional
-      provider pages to backfill a sparse category filter is a deliberate
-      V2+ improvement, out of scope here). The category is never appended
-      to the provider "query" string above - it is applied only to the
-      already-normalized/classified results, so the user's own search
-      intent is never rewritten.
+      V1 category filtering applied only to the currently fetched provider
+      page; V2 adds exactly ONE conditional extra provider page when a
+      category is active and the current page's filtered results are
+      sparse (<5) - never more than one, never for "All"/"All Jobs", and
+      never when this request already fell back to V1's single-page
+      behavior above. The category is still never appended to the
+      provider "query" string - only ever applied to the already-
+      normalized/classified results.
     */
-    const filteredJobs =
-      categoryFilter && categoryFilter !== "All" && categoryFilter !== "All Jobs"
-        ? jobs.filter((job: any) =>
+    if (categoryActive && !usedV1Fallback && filteredJobs.length < 5) {
+      try {
+        const enrichRes = await fetchJSearchProviderPage(providerStart + 1);
+
+        if (enrichRes.ok) {
+          const enrichData = await enrichRes.json();
+          const enrichRawJobs = extractRawJobs(enrichData);
+
+          jobs = dedupeNormalizedJobs([...primaryRawJobs, ...enrichRawJobs]);
+          filteredJobs = jobs.filter((job: any) =>
             Array.isArray(job.categories) && job.categories.includes(categoryFilter)
-          )
-        : jobs;
+          );
+          providerPageThrough = providerStart + 1;
+        }
+        // Enrichment fetch returned a non-ok status - fall through and
+        // return the already-successful primary-page results below,
+        // exactly as if enrichment had never been attempted.
+      } catch (enrichError) {
+        console.error(enrichError);
+        // Enrichment fetch failed outright - same graceful degradation:
+        // keep the primary-page results, no user-facing error, no retry.
+      }
+    }
 
     return NextResponse.json({
       jobs: filteredJobs,
       count: filteredJobs.length,
       page: Number(page),
       source: `JSearch ${countryName}`,
+      providerPageThrough,
     });
   } catch (error) {
     console.error(error);
