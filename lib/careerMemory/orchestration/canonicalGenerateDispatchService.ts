@@ -283,6 +283,7 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
       job_type: getFirstText((analysis as { type?: unknown }).type) || null,
       resume_source: resolvedResume.source,
       resume_id: resolvedResume.source === "uploaded" ? resolvedResume.resumeId : null,
+      cover_letter_id: (memory?.selected_cover_letter_id as string | undefined) ?? null,
       canonical_profile_id: canonicalProfileId,
       canonical_resume_version_id: canonicalResumeVersionId,
       generation_input_resume_text: inputResumeText,

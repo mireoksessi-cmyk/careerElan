@@ -701,6 +701,7 @@ export async function POST(req: Request) {
           resolvedResume.source === "uploaded"
             ? resolvedResume.resumeId
             : null,
+        cover_letter_id: memory?.selected_cover_letter_id ?? null,
         /*
           Snapshot of the template active in Career Memory at generation
           time - reuses the `memory` row already fetched above (no extra
