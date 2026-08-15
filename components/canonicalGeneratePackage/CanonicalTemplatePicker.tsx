@@ -61,11 +61,19 @@ export type CanonicalTemplatePickerProps = {
     want the extra request) simply omit this and keep the static asset.
   */
   livePreviewUrl?: (templateId: TemplateId) => string;
+  /*
+    Optional fixed column count override for the outer grid. Omitted
+    (undefined) preserves the original repeat(auto-fit, THUMBNAIL_WIDTH_PX)
+    behavior byte-for-byte for every existing caller (Career Memory Step 9,
+    ApplicationTemplateSwitcher/JobDetail) - only a caller that explicitly
+    passes this opts into a fixed N-column grid instead.
+  */
+  columns?: number;
 };
 
-export default function CanonicalTemplatePicker({ templates, selectedTemplateId, onSelect, disabled = false, livePreviewUrl }: CanonicalTemplatePickerProps) {
+export default function CanonicalTemplatePicker({ templates, selectedTemplateId, onSelect, disabled = false, livePreviewUrl, columns }: CanonicalTemplatePickerProps) {
   return (
-    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto" style={{ gridTemplateColumns: `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
+    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto" style={{ gridTemplateColumns: columns ? `repeat(${columns}, ${THUMBNAIL_WIDTH_PX}px)` : `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
       {templates.map((template) => {
         const isSelected = selectedTemplateId === template.id;
         return (

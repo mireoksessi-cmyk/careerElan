@@ -3149,25 +3149,6 @@ Choose which resume and cover letter will be used when generating your applicati
           )}
         </div>
 
-        {showPicker && (
-          <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
-            <p className="mb-1 text-sm font-bold text-slate-900">
-              Template for <span className="text-blue-700">{resume.file_name}</span>
-            </p>
-            <p className="mb-3 text-xs text-slate-600">
-              Pick one of the 4 Canonical Templates. This is THIS resume&apos;s own template - Dashboard, Paste Job, and packages
-              generated from this resume all use it, and it never changes any other saved resume.
-            </p>
-            {resumeTemplateSaveError && <p className="mb-3 text-xs font-semibold text-red-600">{resumeTemplateSaveError}</p>}
-            <CanonicalTemplatePicker
-              templates={availableTemplates as any}
-              selectedTemplateId={(resolution?.kind === "canonical" ? resolution.templateId : null) as any}
-              onSelect={(templateId) => changeResumeTemplate(resume.id, templateId)}
-              disabled={savingResumeTemplateId === resume.id}
-              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
-            />
-          </div>
-        )}
       </div>
     );
   })}
@@ -3311,6 +3292,33 @@ Generate automatically
   </div>
 ))}
 </div>
+
+{resumes.map((resume: any) => {
+  const resolution = resumeTemplateResolutions[resume.id];
+  const isPickerOpen = templatePickerOpenForResumeId === resume.id;
+  const showPicker = resolution?.kind === "selection-required" || isPickerOpen;
+  if (!showPicker) return null;
+  return (
+    <div key={resume.id} className="md:col-span-2 mt-2 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+      <p className="mb-1 text-sm font-bold text-slate-900">
+        Template for <span className="text-blue-700">{resume.file_name}</span>
+      </p>
+      <p className="mb-3 text-xs text-slate-600">
+        Pick one of the 4 Canonical Templates. This is THIS resume&apos;s own template - Dashboard, Paste Job, and packages
+        generated from this resume all use it, and it never changes any other saved resume.
+      </p>
+      {resumeTemplateSaveError && <p className="mb-3 text-xs font-semibold text-red-600">{resumeTemplateSaveError}</p>}
+      <CanonicalTemplatePicker
+        templates={availableTemplates as any}
+        selectedTemplateId={(resolution?.kind === "canonical" ? resolution.templateId : null) as any}
+        onSelect={(templateId) => changeResumeTemplate(resume.id, templateId)}
+        disabled={savingResumeTemplateId === resume.id}
+        livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+        columns={2}
+      />
+    </div>
+  );
+})}
 
 </div>
 
