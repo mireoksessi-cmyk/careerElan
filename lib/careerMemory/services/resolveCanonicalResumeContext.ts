@@ -68,6 +68,7 @@ import { createCanonicalRuntime } from "../runtime/factory";
 import type { CanonicalResumeRuntime } from "../runtime/types";
 import { supabaseAdmin } from "../../supabaseAdmin";
 import { getCanonicalRuntimeViaServiceRole } from "../orchestration/canonicalMemoryBundleFetch";
+import { assertHasIdentity, assertRuntimeResumeIsRenderable } from "../../resumeTemplates/contracts/validation";
 
 const RESUMES_STORAGE_BUCKET = "resumes";
 
@@ -208,6 +209,13 @@ async function resolveSessionMode(input: SessionModeInput): Promise<ResolveCanon
   if (input.versionId) {
     const row = await repos.resumeVersions.getById(input.versionId);
     if (!row) throw new SelectedResumeUnavailableError("resume-deleted", `Resolved resume version "${input.versionId}" could not be found or is not owned by this user.`);
+    const { resume } = careerResumeVersionRowToRuntime(row);
+    try {
+      assertRuntimeResumeIsRenderable(resume);
+      assertHasIdentity(resume);
+    } catch {
+      throw new SelectedResumeUnavailableError("not-yet-importable", `Resolved resume version "${input.versionId}" does not have enough information to render (missing name/contact details or required sections).`);
+    }
     return { status: "resolved", source: "explicit-version", profileId: row.profile_id, versionId: row.id, sourceDocumentId: row.source_document_id ?? null };
   }
 

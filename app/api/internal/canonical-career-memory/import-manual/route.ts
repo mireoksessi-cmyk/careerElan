@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withCanonicalAuth, type CanonicalRouteContext } from "@/lib/careerMemory/api/routeGuard";
 import { jsonResponse } from "@/lib/careerMemory/api/httpErrorMapping";
-import { NotFoundError } from "@/lib/careerMemory/errors/domainErrors";
+import { NotFoundError, ValidationError } from "@/lib/careerMemory/errors/domainErrors";
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
 import { buildManualCanonicalRuntime, classifyPreviousVersionSource, type ManualCareerMemoryInput } from "@/lib/careerMemory/services/manualResumeRuntimeMapper";
 
@@ -61,6 +61,30 @@ export function makeHandleImportManual() {
       reason: existing ? "user_edit" : "initial",
       parentVersionId: existing?.version.id ?? null,
     });
+
+    /*
+      Creation-bug fix - mirrors lib/resumeTemplates/contracts/validation.ts's
+      own assertHasIdentity() gate (never imported directly: that module
+      belongs to the template/render layer, not this persistence layer).
+      That gate accepts EITHER a non-empty identity.fullName OR a non-empty
+      identity.otherContactLines - but buildManualResumeStructuredModel()
+      always sets otherContactLines to [] (a manual entry has no separate
+      "other contact lines" field), so fullName is the ONLY thing that can
+      ever satisfy it here. hasIdentity inside the mapper is intentionally
+      broader (also true for headline/email/phone/location/linkedin alone,
+      for slotAvailability.identity purposes elsewhere) - checking it here
+      instead of fullName specifically would let a fullName-less runtime
+      through this guard only to still fail the exact same assertHasIdentity()
+      at resume-preview render time. Refusing to persist BEFORE
+      saveCanonicalRuntimeAcknowledgingGap() is what stops a new
+      unrenderable career_resume_versions row from being created at all -
+      previously nothing blocked this, and the row would only fail much
+      later, at render time, as an unlogged HTTP 500. No fake identity is
+      fabricated here; the user must supply a real name first.
+    */
+    if (!runtime.resume.identity?.fullName) {
+      throw new ValidationError(["Add your name in Personal Information before choosing a resume template."]);
+    }
 
     const saveResult = await memoryService.saveCanonicalRuntimeAcknowledgingGap(ctx.userId, {
       runtime,
