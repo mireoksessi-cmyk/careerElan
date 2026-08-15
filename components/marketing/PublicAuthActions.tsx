@@ -460,13 +460,26 @@ useEffect(() => {
     if (error) {
       console.error("SIGNUP ERROR =", error);
 
+      /*
+        I3-3 hardening: a duplicate login id/email must be observationally
+        indistinguishable from a brand-new signup that requires email
+        confirmation - same toast, same message, no redirect, no session -
+        so a pre-auth caller can never use this response to confirm an
+        email is already registered. Supabase itself still refuses to
+        create the duplicate account (unchanged); only the UI outcome
+        shown to the caller no longer reveals why.
+      */
       if (
         error.message
           .toLowerCase()
           .includes("duplicate")
       ) {
+        toast.success(
+          "Your account has been created successfully. Please check your email and verify your account before logging in."
+        );
+
         setMessage(
-          "This login ID or email is already registered."
+          "Verification email sent. Please verify your email to complete account creation."
         );
         return;
       }
@@ -525,24 +538,42 @@ async function resendConfirmationEmail() {
     request, etc.) skipped setLoading(false) entirely and left the whole
     auth modal permanently disabled - every other handler in this file
     already used try/catch/finally for exactly this reason.
+
+    I3-3 hardening: this now calls /api/login-by-id's server-side
+    "resend" purpose instead of supabase.auth.resend() directly - the
+    browser never sees Supabase's own raw error text, and the response
+    is the exact same generic message regardless of whether the email
+    is registered, already confirmed, or unregistered, mirroring the
+    existing "reset" purpose's always-the-same-response pattern.
   */
   try {
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    const response = await fetch(
+      "/api/login-by-id",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          purpose: "resend",
+          email,
+        }),
+      }
+    );
 
-    if (error) {
-      console.error("RESEND ERROR =", error);
-      setMessage(error.message);
+    const result = await response.json();
+
+    if (!response.ok) {
+      setMessage(
+        result.error ||
+          "Unable to resend the verification email. Please try again."
+      );
       return;
     }
 
     setMessage(
-      "Verification email sent again. Please check your inbox and spam folder."
+      result.message ||
+        "If your account needs email verification, a new verification email has been sent."
     );
   } catch (error) {
     console.error("RESEND ERROR =", error);

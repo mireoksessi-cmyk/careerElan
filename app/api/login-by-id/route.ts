@@ -38,6 +38,19 @@ import { checkRateLimit } from "@/lib/security/rateLimiter";
   generic "Invalid ID or password." for purpose "login", unchanged from
   before. Rate limiting, login id normalization, and the server-side-only
   lookup are all unchanged.
+
+  I3-3 hardening (Final Product Closure Audit): two additions, same
+  principle as above - a pre-auth caller must never be able to tell
+  "this account exists but hasn't confirmed its email" apart from
+  "wrong password" / "unknown account" (purpose "login" no longer special-
+  cases the "email not confirmed" Supabase error at all - it now falls
+  through to the exact same generic message/status as every other login
+  failure); and a new purpose "resend" moves verification-email resend
+  fully server-side, dispatching (or silently skipping, for a nonexistent
+  or already-confirmed email) via the service-role client and always
+  returning the exact same generic message, the same way purpose "reset"
+  already does - the raw Supabase error message that the client used to
+  show directly is never returned to the browser, only logged server-side.
 */
 export async function POST(request: Request) {
   try {
@@ -61,37 +74,19 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     const purpose =
-      body.purpose === "reset" ? "reset" : "login";
-
-    const cleanLoginId =
-      typeof body.loginId === "string"
-        ? body.loginId.trim()
-        : "";
-
-    if (!cleanLoginId) {
-      return NextResponse.json(
-        { error: "Login ID is required." },
-        { status: 400 }
-      );
-    }
-
-    const password =
-      typeof body.password === "string" ? body.password : "";
-
-    if (purpose === "login" && !password) {
-      return NextResponse.json(
-        { error: "Password is required." },
-        { status: 400 }
-      );
-    }
+      body.purpose === "reset"
+        ? "reset"
+        : body.purpose === "resend"
+        ? "resend"
+        : "login";
 
     /*
       Unauthenticated, account-enumeration-sensitive lookup - rate limit
       before touching Supabase so an abusive caller cannot use this route
       to probe an unbounded number of login ids. This endpoint runs
-      strictly pre-authentication for BOTH purposes above (login itself
-      still starts from an unauthenticated request), so there is never a
-      session to check here - every caller is rate-limited on the
+      strictly pre-authentication for ALL THREE purposes above (login
+      itself still starts from an unauthenticated request), so there is
+      never a session to check here - every caller is rate-limited on the
       guest/IP bucket.
     */
     const rateLimitResult = await checkRateLimit("login-by-id", {
@@ -121,6 +116,79 @@ export async function POST(request: Request) {
         },
       }
     );
+
+    if (purpose === "resend") {
+      /*
+        I3-3 hardening: resend takes an email directly (the same field
+        the signup form already collects and the only identifier
+        supabase.auth.resend() itself accepts - there is no login id to
+        resolve here, unlike "login"/"reset"). No profiles lookup is
+        needed either: resend() is simply attempted for whatever email
+        was given, and any result (nonexistent email, already-confirmed
+        email, or a genuine dispatch) is discarded from the caller's
+        perspective - the response is always the same generic message,
+        and only a real failure is logged server-side, mirroring purpose
+        "reset"'s own always-the-same-response pattern above.
+      */
+      const cleanEmail =
+        typeof body.email === "string"
+          ? body.email.trim().toLowerCase()
+          : "";
+
+      if (!cleanEmail) {
+        return NextResponse.json(
+          { error: "Email is required." },
+          { status: 400 }
+        );
+      }
+
+      try {
+        const { error: resendError } =
+          await supabaseAdmin.auth.resend({
+            type: "signup",
+            email: cleanEmail,
+          });
+
+        if (resendError) {
+          console.error(
+            "VERIFICATION RESEND DISPATCH ERROR =",
+            resendError
+          );
+        }
+      } catch (resendThrow) {
+        console.error(
+          "VERIFICATION RESEND DISPATCH ERROR =",
+          resendThrow
+        );
+      }
+
+      return NextResponse.json({
+        message:
+          "If your account needs email verification, a new verification email has been sent.",
+      });
+    }
+
+    const cleanLoginId =
+      typeof body.loginId === "string"
+        ? body.loginId.trim()
+        : "";
+
+    if (!cleanLoginId) {
+      return NextResponse.json(
+        { error: "Login ID is required." },
+        { status: 400 }
+      );
+    }
+
+    const password =
+      typeof body.password === "string" ? body.password : "";
+
+    if (purpose === "login" && !password) {
+      return NextResponse.json(
+        { error: "Password is required." },
+        { status: 400 }
+      );
+    }
 
     const { data, error } = await supabaseAdmin
       .from("profiles")
@@ -190,17 +258,16 @@ export async function POST(request: Request) {
     if (authError) {
       console.error("LOGIN AUTH ERROR =", authError);
 
-      if (
-        authError.message
-          .toLowerCase()
-          .includes("email not confirmed")
-      ) {
-        return NextResponse.json(
-          { error: "Please verify your email before logging in." },
-          { status: 401 }
-        );
-      }
-
+      /*
+        I3-3 hardening: this used to special-case Supabase's own
+        "email not confirmed" error message with a distinct response,
+        which let a pre-auth caller confirm "this login id exists and
+        has an unconfirmed email" - now every signInWithPassword()
+        failure (unknown id, wrong password, or unconfirmed email) falls
+        through to this exact same generic message/status. Supabase
+        itself still refuses to sign an unconfirmed account in - only
+        the text shown to the caller no longer distinguishes why.
+      */
       return NextResponse.json(
         { error: "Invalid ID or password." },
         { status: 401 }
