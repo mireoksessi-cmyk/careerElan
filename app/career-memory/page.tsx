@@ -1284,10 +1284,16 @@ return true;
           if (profileRes.status !== 404) {
             const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
             const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
-            setTemplateGateTemplates(templatesData.templates ?? []);
-            setTemplateGateError(null);
-            setTemplateGateBlocking(true);
-            return true;
+            const templateGateCandidates = templatesData.templates ?? [];
+            // Fail-safe: a non-OK response or an empty template list must
+            // never open the blocking gate with nothing selectable in it -
+            // fall through to the existing non-blocking return instead.
+            if (templatesRes.ok && templateGateCandidates.length > 0) {
+              setTemplateGateTemplates(templateGateCandidates);
+              setTemplateGateError(null);
+              setTemplateGateBlocking(true);
+              return true;
+            }
           }
         }
       }
