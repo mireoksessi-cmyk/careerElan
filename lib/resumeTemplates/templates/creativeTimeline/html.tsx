@@ -11,7 +11,7 @@
   engine's missing/invented-text checks.
 */
 import React from "react";
-import { normalizeResume, type NormalizedEducationEntry, type NormalizedExperienceEntry } from "../../shared/contentAdapters";
+import { normalizeResume, type NormalizedEducationEntry, type NormalizedExperienceEntry, experienceHeaderFallbackText, educationHeaderFallbackText } from "../../shared/contentAdapters";
 import { CREATIVE_TIMELINE_COLORS } from "../../shared/colorTokens";
 import { CREATIVE_TIMELINE_FONTS, MIN_SAFE_FONT_SIZE_PT } from "../../shared/typography";
 import { HTML_DENSITY_SPACING, type HtmlSpacingTokens } from "../../shared/spacing";
@@ -88,7 +88,13 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     if (entries.length === 0) continue;
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS[key]);
     entries.forEach((entry, i) => {
-      const body = (
+      const rawFallback = experienceHeaderFallbackText(entry);
+      const body = rawFallback ? (
+        <TimelineItem colors={colors}>
+          <div style={{ fontWeight: 700, color: colors.heading }}>{rawFallback}</div>
+          <ContentItemsView items={entry.items} textColor={colors.text} />
+        </TimelineItem>
+      ) : (
         <TimelineItem colors={colors}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontWeight: 700, color: colors.heading }}>{entry.role}</span>
@@ -108,8 +114,10 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
   if (normalized.education.length > 0) {
     headingsInOrder.push(CREATIVE_TIMELINE_LABELS.education);
     normalized.education.forEach((edu: NormalizedEducationEntry, i) => {
+      const eduFallback = educationHeaderFallbackText(edu);
       const body = (
         <TimelineItem colors={colors}>
+          {eduFallback && <div style={{ fontWeight: 700, color: colors.heading }}>{eduFallback}</div>}
           <div style={{ fontWeight: 700, color: colors.heading }}>{edu.institution || edu.institutions.join(" / ")}</div>
           <div style={{ color: colors.text, fontSize: "0.9em" }}>{edu.credentials.join(", ") || edu.credential}</div>
           {edu.fieldsOfStudy.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.fieldsOfStudy.join(" & ")}</div>}

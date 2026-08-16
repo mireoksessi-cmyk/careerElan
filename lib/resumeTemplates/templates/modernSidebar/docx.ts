@@ -6,7 +6,7 @@
   HTML/PDF sidebar background.
 */
 import { AlignmentType, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType } from "docx";
-import { normalizeResume, type NormalizedExperienceEntry } from "../../shared/contentAdapters";
+import { normalizeResume, type NormalizedExperienceEntry, experienceHeaderFallbackText, educationHeaderFallbackText } from "../../shared/contentAdapters";
 import { MODERN_SIDEBAR_COLORS } from "../../shared/colorTokens";
 import { MODERN_SIDEBAR_FONTS } from "../../shared/typography";
 import { DOCX_DENSITY_SPACING } from "../../shared/spacing";
@@ -49,9 +49,14 @@ export async function renderModernSidebarDocx(context: TemplateRenderContext): P
     if (entries.length === 0) continue;
     mainParagraphs.push(heading(MODERN_SIDEBAR_LABELS[key]));
     for (const entry of entries) {
-      mainParagraphs.push(new Paragraph({ children: [run(entry.role, { bold: true }), run(entry.organization ? `  —  ${entry.organization}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
-      if (entry.location) mainParagraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
-      if (entry.dateRangeText) mainParagraphs.push(new Paragraph({ children: [run(entry.dateRangeText, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+      const rawFallback = experienceHeaderFallbackText(entry);
+      if (rawFallback) {
+        mainParagraphs.push(new Paragraph({ children: [run(rawFallback, { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+      } else {
+        mainParagraphs.push(new Paragraph({ children: [run(entry.role, { bold: true }), run(entry.organization ? `  —  ${entry.organization}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+        if (entry.location) mainParagraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+        if (entry.dateRangeText) mainParagraphs.push(new Paragraph({ children: [run(entry.dateRangeText, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+      }
       mainParagraphs.push(...renderContentItemsToParagraphs(entry.items, contentOpts));
     }
   }
@@ -67,6 +72,11 @@ export async function renderModernSidebarDocx(context: TemplateRenderContext): P
   if (normalized.education.length > 0) {
     mainParagraphs.push(heading(MODERN_SIDEBAR_LABELS.education));
     for (const edu of normalized.education) {
+      const eduFallback = educationHeaderFallbackText(edu);
+      if (eduFallback) {
+        mainParagraphs.push(new Paragraph({ children: [run(eduFallback, { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+        continue;
+      }
       mainParagraphs.push(new Paragraph({ children: [run(edu.institution || edu.institutions.join(" / "), { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
       const creds = edu.credentials.join(", ") || edu.credential;
       mainParagraphs.push(new Paragraph({ children: [run([creds, edu.dateRangeText].filter(Boolean).join(" — "))], spacing: { after: 20 } }));

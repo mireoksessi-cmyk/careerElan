@@ -233,17 +233,27 @@ function renderExperienceLike(block: AssemblyBlock, ctx: BuildContext, blockGapT
   const org = val(("organization" in entry ? entry.organization : "name" in entry ? entry.name : undefined) as StructuredTextValue | undefined);
   const location = "location" in entry ? val(entry.location) : undefined;
   const dateRange = val(entry.dateRangeText);
+  const hasStructuredHeader = Boolean(role || org);
 
   const headerLine1: TextRun[] = [];
-  if (role || org) {
+  if (hasStructuredHeader) {
     const text = [role, org].filter(Boolean).join(role && org ? " — " : "");
     headerLine1.push(run(text, ctx, { bold: true }));
+  } else if (entry.rawHeaderText) {
+    /* Phase 6I.6.42 - mirrors renderEducation's own rawHeaderText
+       fallback below: role/organization could not be confidently
+       split, so show the already-stored rawHeaderText verbatim
+       instead of a blank header. Only fires when both are empty. */
+    headerLine1.push(run(entry.rawHeaderText, ctx, { bold: true }));
   }
   if (headerLine1.length > 0) {
     pushParagraph(ctx, block.id, block.sourceEntryId, headerLine1, { spacingBeforeTwips: blockGapTwips, keepNext: true });
     ctx.entryHeadersWithKeepNext++;
   }
-  const meta = joinContact([location, dateRange]);
+  /* rawHeaderText already embeds any date/location text verbatim, so
+     the separately-extracted meta line is suppressed while showing
+     the fallback above - otherwise the date would render twice. */
+  const meta = hasStructuredHeader ? joinContact([location, dateRange]) : "";
   if (meta.length > 0) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(meta, ctx)], {
       spacingBeforeTwips: headerLine1.length > 0 ? 0 : blockGapTwips,

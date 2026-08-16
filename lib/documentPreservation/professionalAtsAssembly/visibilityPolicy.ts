@@ -71,6 +71,7 @@ export function hasExperienceContent(entries: ExperienceEntry[]): boolean {
 
 function hasEducationEntryContent(e: EducationEntry): boolean {
   return (
+    e.rawHeaderText.trim().length > 0 ||
     hasText(e.institution) ||
     hasText(e.credential) ||
     hasText(e.fieldOfStudy) ||

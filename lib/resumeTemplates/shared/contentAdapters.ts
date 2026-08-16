@@ -326,7 +326,7 @@ function normalizeSkillGroup(group: SkillGroup): NormalizedSkillGroup {
 function isMeaningfulExperience(e: NormalizedExperienceEntry): boolean {
   return nonBlank(e.organization) || nonBlank(e.role) || nonBlank(e.location) || nonBlank(e.dateRangeText) || e.items.length > 0;
 }
-function isMeaningfulEducation(e: NormalizedEducationEntry): boolean {
+function hasStructuredEducationFields(e: NormalizedEducationEntry): boolean {
   return (
     nonBlank(e.institution) ||
     nonBlank(e.credential) ||
@@ -339,6 +339,36 @@ function isMeaningfulEducation(e: NormalizedEducationEntry): boolean {
     e.honors.length > 0 ||
     e.details.length > 0
   );
+}
+/* Phase 6I.6.42 - a single-line education header the parser could not
+   confidently split (e.g. "Electrical Engineering Technology Diploma"
+   with no discoverable institution/date) previously left every
+   structured field empty, so the entry was filtered out of the
+   Education section entirely - a real fact silently disappearing, not
+   an empty entry. rawHeaderText is the parser's own preserved raw
+   text for exactly this case, so it now counts as meaningful content
+   too, on top of (never instead of) the existing structured checks. */
+function isMeaningfulEducation(e: NormalizedEducationEntry): boolean {
+  return hasStructuredEducationFields(e) || nonBlank(e.rawHeaderText);
+}
+/* Fallback text for template renderers: non-null only when the entry
+   has NO structured fields at all (so nothing else would be shown)
+   but does have a preserved rawHeaderText - never overrides genuine
+   structured data. */
+export function educationHeaderFallbackText(e: NormalizedEducationEntry): string | null {
+  if (hasStructuredEducationFields(e)) return null;
+  return nonBlank(e.rawHeaderText) ? e.rawHeaderText : null;
+}
+/* Same idea for Experience: role/organization can each independently
+   be empty (single-line header, low split confidence) while
+   date/location/bullets still exist - so unlike Education this only
+   guards the HEADER LINE specifically, not the whole entry. Callers
+   must suppress their own separately-rendered date/location line
+   when this returns non-null, to avoid showing the date twice (it is
+   already embedded verbatim in rawHeaderText). */
+export function experienceHeaderFallbackText(e: NormalizedExperienceEntry): string | null {
+  if (nonBlank(e.role) || nonBlank(e.organization)) return null;
+  return nonBlank(e.rawHeaderText) ? e.rawHeaderText : null;
 }
 function isMeaningfulCredential(e: NormalizedCredentialEntry): boolean {
   return (

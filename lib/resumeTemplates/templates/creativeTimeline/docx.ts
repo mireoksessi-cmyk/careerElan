@@ -8,7 +8,7 @@
   this satisfies without any embedded graphic object.
 */
 import { AlignmentType, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType } from "docx";
-import { normalizeResume, type NormalizedExperienceEntry } from "../../shared/contentAdapters";
+import { normalizeResume, type NormalizedExperienceEntry, experienceHeaderFallbackText, educationHeaderFallbackText } from "../../shared/contentAdapters";
 import { CREATIVE_TIMELINE_COLORS } from "../../shared/colorTokens";
 import { CREATIVE_TIMELINE_FONTS } from "../../shared/typography";
 import { DOCX_DENSITY_SPACING } from "../../shared/spacing";
@@ -54,9 +54,14 @@ export async function renderCreativeTimelineDocx(context: TemplateRenderContext)
     if (entries.length === 0) continue;
     mainParagraphs.push(heading(CREATIVE_TIMELINE_LABELS[key]));
     for (const entry of entries) {
-      mainParagraphs.push(new Paragraph({ children: [run(entry.role, { bold: true }), run(entry.organization ? `  —  ${entry.organization}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
-      if (entry.location) mainParagraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 }, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
-      if (entry.dateRangeText) mainParagraphs.push(new Paragraph({ children: [run(entry.dateRangeText, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 }, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
+      const rawFallback = experienceHeaderFallbackText(entry);
+      if (rawFallback) {
+        mainParagraphs.push(new Paragraph({ children: [run(rawFallback, { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
+      } else {
+        mainParagraphs.push(new Paragraph({ children: [run(entry.role, { bold: true }), run(entry.organization ? `  —  ${entry.organization}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
+        if (entry.location) mainParagraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 }, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
+        if (entry.dateRangeText) mainParagraphs.push(new Paragraph({ children: [run(entry.dateRangeText, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 }, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
+      }
       mainParagraphs.push(...renderContentItemsToParagraphs(entry.items, { ...contentOpts, leftBorder: TIMELINE_BORDER, extraLeftIndentTwips: 100 }));
     }
   }
@@ -64,6 +69,11 @@ export async function renderCreativeTimelineDocx(context: TemplateRenderContext)
   if (normalized.education.length > 0) {
     mainParagraphs.push(heading(CREATIVE_TIMELINE_LABELS.education));
     for (const edu of normalized.education) {
+      const eduFallback = educationHeaderFallbackText(edu);
+      if (eduFallback) {
+        mainParagraphs.push(new Paragraph({ children: [run(eduFallback, { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
+        continue;
+      }
       mainParagraphs.push(new Paragraph({ children: [run(edu.institution || edu.institutions.join(" / "), { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));
       const creds = edu.credentials.join(", ") || edu.credential;
       mainParagraphs.push(new Paragraph({ children: [run([creds, edu.dateRangeText].filter(Boolean).join(" — "))], spacing: { after: 20 }, border: { left: TIMELINE_BORDER }, indent: { left: 100 } }));

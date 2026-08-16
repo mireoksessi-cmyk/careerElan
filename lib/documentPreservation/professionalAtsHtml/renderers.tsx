@@ -376,14 +376,16 @@ function ExperienceLikeView({ block, subRange, isContinuation, spacing = DEFAULT
     <div data-block-id={block.id} data-block-kind={block.kind} data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
         <div data-block-header>
-          {(role || org) && (
+          {(role || org) ? (
             <strong>
               {role}
               {role && org ? " — " : ""}
               {org}
             </strong>
+          ) : (
+            entry.rawHeaderText && <strong>{entry.rawHeaderText}</strong>
           )}
-          {(location || dateRange) && <div>{joinContact([location, dateRange])}</div>}
+          {(role || org) && (location || dateRange) && <div>{joinContact([location, dateRange])}</div>}
           {technologies.length > 0 && <div>{technologies.join(", ")}</div>}
         </div>
       )}

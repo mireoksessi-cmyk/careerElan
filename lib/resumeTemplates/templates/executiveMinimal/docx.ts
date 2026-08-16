@@ -6,7 +6,7 @@
   other format for this template consumes.
 */
 import { AlignmentType, Document, Packer, Paragraph, TextRun } from "docx";
-import { normalizeResume } from "../../shared/contentAdapters";
+import { normalizeResume, experienceHeaderFallbackText, educationHeaderFallbackText } from "../../shared/contentAdapters";
 import { EXECUTIVE_MINIMAL_FONTS } from "../../shared/typography";
 import { DOCX_DENSITY_SPACING } from "../../shared/spacing";
 import { renderContentItemsToParagraphs } from "../../docx/renderContentItems";
@@ -74,9 +74,17 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
       if (entries.length === 0) continue;
       heading(EXECUTIVE_MINIMAL_SECTION_LABELS[key] ?? key);
       for (const entry of entries) {
-        const headerText = [entry.role, entry.organization].filter(Boolean).join(", ");
-        paragraphs.push(new Paragraph({ children: [run(headerText, { bold: true }), run(entry.dateRangeText ? `   —   ${entry.dateRangeText}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
-        if (entry.location) paragraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
+        const rawFallback = experienceHeaderFallbackText(entry);
+        if (rawFallback) {
+          /* rawHeaderText already embeds any date/location text verbatim,
+             so the separately-extracted date is suppressed to avoid
+             showing it twice. */
+          paragraphs.push(new Paragraph({ children: [run(rawFallback, { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+        } else {
+          const headerText = [entry.role, entry.organization].filter(Boolean).join(", ");
+          paragraphs.push(new Paragraph({ children: [run(headerText, { bold: true }), run(entry.dateRangeText ? `   —   ${entry.dateRangeText}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+        }
+        if (!rawFallback && entry.location) paragraphs.push(new Paragraph({ children: [run(entry.location, { size: tokens.fontSizeHalfPoints - 2 })], spacing: { after: 20 } }));
         paragraphs.push(...renderContentItemsToParagraphs(entry.items, contentItemOpts));
       }
       continue;
@@ -96,6 +104,11 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
       if (normalized.education.length === 0) continue;
       heading(EXECUTIVE_MINIMAL_SECTION_LABELS.education ?? "Education");
       for (const edu of normalized.education) {
+        const eduFallback = educationHeaderFallbackText(edu);
+        if (eduFallback) {
+          paragraphs.push(new Paragraph({ children: [run(eduFallback, { bold: true })], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
+          continue;
+        }
         paragraphs.push(new Paragraph({ children: [run(edu.institution || edu.institutions.join(" / "), { bold: true }), run(edu.dateRangeText ? `   —   ${edu.dateRangeText}` : "")], spacing: { before: tokens.entrySpacingBeforeTwips }, keepNext: true }));
         const creds = edu.credentials.join(", ") || edu.credential;
         if (creds) paragraphs.push(new Paragraph({ children: [run(creds)], spacing: { after: 20 } }));

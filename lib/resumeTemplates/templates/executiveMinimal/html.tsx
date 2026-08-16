@@ -18,6 +18,7 @@ import { ContentItemsView } from "../../shared/ContentItemsView";
 import { renderHtmlDocument } from "../../shared/documentShell";
 import { measureFlowLayout, groupPlacementsByPage, type FlowBlockSpec } from "../../shared/htmlPagination";
 import { resolveHtmlLang } from "../../shared/accessibility";
+import { experienceHeaderFallbackText, educationHeaderFallbackText } from "../../shared/contentAdapters";
 import { EXECUTIVE_MINIMAL_SECTION_ORDER, EXECUTIVE_MINIMAL_SECTION_LABELS } from "./sectionPolicy";
 import type { TemplateHtmlResult, TemplateRenderContext } from "../../contracts/types";
 import { buildValidationReport } from "../../parity/validateOutput";
@@ -27,17 +28,24 @@ import { extractVisibleTextFromHtml } from "../../shared/htmlText";
 type FlowItem = { id: string; sectionKey: SectionKey; node: React.ReactNode };
 
 function ExperienceEntryBlock({ entry, colors, entryGapPx }: { entry: NormalizedExperienceEntry; colors: typeof EXECUTIVE_MINIMAL_COLORS; entryGapPx: number }): React.ReactElement {
+  const rawFallback = experienceHeaderFallbackText(entry);
   return (
     <div style={{ marginBottom: entryGapPx }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ fontWeight: 700, color: colors.heading }}>
-          {entry.role}
-          {entry.role && entry.organization ? ", " : ""}
-          {entry.organization}
-        </span>
-        <span style={{ color: colors.muted, fontSize: "0.9em" }}>{entry.dateRangeText}</span>
+        {rawFallback ? (
+          <span style={{ fontWeight: 700, color: colors.heading }}>{rawFallback}</span>
+        ) : (
+          <>
+            <span style={{ fontWeight: 700, color: colors.heading }}>
+              {entry.role}
+              {entry.role && entry.organization ? ", " : ""}
+              {entry.organization}
+            </span>
+            <span style={{ color: colors.muted, fontSize: "0.9em" }}>{entry.dateRangeText}</span>
+          </>
+        )}
       </div>
-      {entry.location && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{entry.location}</div>}
+      {!rawFallback && entry.location && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{entry.location}</div>}
       <ContentItemsView items={entry.items} textColor={colors.text} />
     </div>
   );
@@ -194,8 +202,10 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
     if (key === "education") {
       if (normalized.education.length === 0) continue;
       normalized.education.forEach((edu, i) => {
+        const eduFallback = educationHeaderFallbackText(edu);
         const body = (
           <div style={{ marginBottom: tokens.entryGapPx }}>
+            {eduFallback && <div style={{ fontWeight: 700, color: colors.heading }}>{eduFallback}</div>}
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontWeight: 700, color: colors.heading }}>{edu.institution || edu.institutions.join(" / ")}</span>
               <span style={{ color: colors.muted, fontSize: "0.9em" }}>{edu.dateRangeText}</span>

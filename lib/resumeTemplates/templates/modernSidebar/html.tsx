@@ -8,7 +8,7 @@
   column, sidebar column - see htmlPagination.ts), combined per page.
 */
 import React from "react";
-import { normalizeResume, type NormalizedExperienceEntry } from "../../shared/contentAdapters";
+import { normalizeResume, type NormalizedExperienceEntry, experienceHeaderFallbackText, educationHeaderFallbackText } from "../../shared/contentAdapters";
 import { MODERN_SIDEBAR_COLORS } from "../../shared/colorTokens";
 import { MODERN_SIDEBAR_FONTS, MIN_SAFE_FONT_SIZE_PT } from "../../shared/typography";
 import { HTML_DENSITY_SPACING, type HtmlSpacingTokens } from "../../shared/spacing";
@@ -27,6 +27,15 @@ type FlowItem = { id: string; sectionKey: string; node: React.ReactNode };
 type Colors = typeof MODERN_SIDEBAR_COLORS;
 
 function ExperienceBlock({ entry, colors, entryGapPx }: { entry: NormalizedExperienceEntry; colors: Colors; entryGapPx: number }): React.ReactElement {
+  const rawFallback = experienceHeaderFallbackText(entry);
+  if (rawFallback) {
+    return (
+      <div style={{ marginBottom: entryGapPx }}>
+        <div style={{ fontWeight: 700, color: colors.heading }}>{rawFallback}</div>
+        <ContentItemsView items={entry.items} textColor={colors.text} />
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: entryGapPx }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -115,8 +124,10 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
   if (normalized.education.length > 0) {
     headingsInOrder.push(MODERN_SIDEBAR_LABELS.education);
     normalized.education.forEach((edu, i) => {
+      const eduFallback = educationHeaderFallbackText(edu);
       const body = (
         <div style={{ marginBottom: tokens.entryGapPx }}>
+          {eduFallback && <div style={{ fontWeight: 700, color: colors.heading }}>{eduFallback}</div>}
           <div style={{ fontWeight: 700, color: colors.heading }}>{edu.institution || edu.institutions.join(" / ")}</div>
           <div style={{ color: colors.text, fontSize: "0.9em" }}>{edu.credentials.join(", ") || edu.credential}</div>
           {edu.fieldsOfStudy.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.fieldsOfStudy.join(" & ")}</div>}
