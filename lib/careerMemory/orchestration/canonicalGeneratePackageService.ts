@@ -42,7 +42,7 @@ import { logOperationalEvent, elapsedMs } from "../../observability/logger";
 import { withOpenAiTelemetry } from "../../openai/telemetry";
 
 const client = wrapOpenAiClientForE2eSafety(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
-const OPENAI_CALL_TIMEOUT_MS = 60_000;
+const OPENAI_CALL_TIMEOUT_MS = 90_000;
 const MAX_TAILORING_ATTEMPTS = 2; // 1 original + 1 schema-repair retry, per round spec §7
 
 export type CanonicalGeneratePackageInput = {
