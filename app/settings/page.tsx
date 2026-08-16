@@ -68,6 +68,7 @@ export default function SettingsPage() {
 
   const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingNotifications, setSavingNotifications] = useState(false);
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -188,6 +189,26 @@ export default function SettingsPage() {
 
     setSaving(false);
   }
+
+async function saveNotificationPreferences() {
+  setSavingNotifications(true);
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      email_notifications: profile.email_notifications,
+      marketing_notifications: profile.marketing_notifications,
+    })
+    .eq("id", userId);
+
+  if (error) {
+    toast.error(error.message);
+  } else {
+    toast.success("Notification preferences saved!");
+  }
+
+  setSavingNotifications(false);
+}
 
 async function changePassword() {
 
@@ -512,14 +533,15 @@ async function deleteAccount() {
   </SectionHeading>
 
   <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-    These preferences are saved, but Career Élan doesn&apos;t send
-    automated emails yet - turning a toggle on will not cause you to
-    receive anything right now.
+    These preferences are saved. Email Notifications controls automated
+    account and application emails, such as Job Tracker follow-up
+    reminders. Marketing Emails preferences are saved, but Career Élan
+    doesn&apos;t send automated marketing emails yet.
   </p>
 
   <div className="mt-6 space-y-6">
 
-    <label className="flex items-center justify-between opacity-60">
+    <label className="flex items-center justify-between">
 
       <div>
 
@@ -527,10 +549,6 @@ async function deleteAccount() {
           <p className="font-semibold">
             Email Notifications
           </p>
-
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
-            Coming soon
-          </span>
         </div>
 
         <p className="text-sm text-slate-500">
@@ -541,7 +559,6 @@ async function deleteAccount() {
 
       <input
         type="checkbox"
-        disabled
         checked={profile.email_notifications}
         onChange={(e) =>
           setProfile({
@@ -549,12 +566,12 @@ async function deleteAccount() {
             email_notifications: e.target.checked,
           })
         }
-        className="h-5 w-5 cursor-not-allowed"
+        className="h-5 w-5 cursor-pointer"
       />
 
     </label>
 
-    <label className="flex items-center justify-between opacity-60">
+    <label className="flex items-center justify-between">
 
       <div>
 
@@ -562,10 +579,6 @@ async function deleteAccount() {
           <p className="font-semibold">
             Marketing Emails
           </p>
-
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
-            Coming soon
-          </span>
         </div>
 
         <p className="text-sm text-slate-500">
@@ -576,7 +589,6 @@ async function deleteAccount() {
 
       <input
   type="checkbox"
-  disabled
   checked={profile.marketing_notifications}
   onChange={(e) =>
     setProfile({
@@ -584,10 +596,14 @@ async function deleteAccount() {
       marketing_notifications: e.target.checked,
     })
   }
-  className="h-5 w-5 cursor-not-allowed"
+  className="h-5 w-5 cursor-pointer"
 />
 
     </label>
+
+    <Button onClick={saveNotificationPreferences} disabled={savingNotifications} size="lg">
+      {savingNotifications ? "Saving..." : "Save Notification Preferences"}
+    </Button>
 
   </div>
 
