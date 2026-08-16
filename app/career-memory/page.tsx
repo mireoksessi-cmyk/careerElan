@@ -2983,7 +2983,7 @@ return;
                   selectedTemplateId={inlineSelectedTemplateId as any}
                   onSelect={(templateId) => selectInlineTemplate(templateId)}
                   disabled={inlineTemplateStatus === "saving"}
-                  livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
+                  livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail&genericSkeleton=1`}
                 />
                 {inlineSelectedTemplateId ? (
                   <p className="mt-4 text-sm font-bold text-slate-900">

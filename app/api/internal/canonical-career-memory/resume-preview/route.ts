@@ -7,6 +7,7 @@ import { resolveCanonicalResumeContext, loadRuntimeForResolvedVersion } from "@/
 import { CanonicalCareerMemoryService } from "@/lib/careerMemory/services/canonicalCareerMemoryService";
 import { renderTemplateFromRuntime } from "@/lib/resumeTemplates/engine/renderTemplate";
 import { buildPreviewOnlyResume } from "@/lib/resumeTemplates/preview/previewOnlyCompletion";
+import { buildManualCanonicalRuntime } from "@/lib/careerMemory/services/manualResumeRuntimeMapper";
 import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/types";
 import type { TemplateDensity } from "@/lib/resumeTemplates/contracts/types";
 
@@ -148,16 +149,38 @@ export function makeHandleResumePreview(request: Request) {
       above), so this is a separate, purpose-built flag.
     */
     const allowPlaceholder = url.searchParams.get("allowPlaceholder") === "1";
+    /*
+      Card-thumbnail generic-skeleton mode: unlike allowPlaceholder (fills only EMPTY
+      sections of the user's REAL resume - see buildPreviewOnlyResume's
+      own header comment), genericSkeleton skips resolving the caller's
+      real resume entirely: it reuses the exact same two building
+      blocks Manual Career Memory Step 9 itself relies on to show its
+      4 template cards generic for a brand-new profile -
+      buildManualCanonicalRuntime() (the same function import-manual/
+      route.ts calls, here fed an all-empty input instead of the
+      user's own typed fields) followed by buildPreviewOnlyResume()
+      filling every now-empty section with the same "YOUR NAME"/
+      generic-label placeholder text Step 9 shows. No DB read of any
+      per-user canonical data happens in this branch, so it can never
+      leak real name/email/phone/employer regardless of how complete
+      the caller's actual (uploaded) resume is.
+    */
+    const genericSkeleton = url.searchParams.get("genericSkeleton") === "1";
 
-    const resolved = await resolveCanonicalResumeContext({ mode: "session", repos: ctx.repos, client: ctx.client, userId: ctx.userId, versionId: explicitVersionId });
     let runtime;
-    if (resolved.status === "not-canonical" || resolved.status === "legacy-only") {
-      const memoryService = new CanonicalCareerMemoryService(ctx.repos);
-      runtime = await memoryService.getCanonicalRuntime(ctx.userId);
-      if (!runtime) throw new CanonicalProfileUnavailableForTemplateError();
-      if (!runtime.version?.id) throw new CanonicalVersionUnavailableError("No canonical resume version exists for this profile.");
+    if (genericSkeleton) {
+      const emptyRuntime = buildManualCanonicalRuntime({});
+      runtime = { ...emptyRuntime, resume: buildPreviewOnlyResume(emptyRuntime.resume) };
     } else {
-      runtime = resolved.runtime ?? (await loadRuntimeForResolvedVersion(ctx.repos, resolved.versionId));
+      const resolved = await resolveCanonicalResumeContext({ mode: "session", repos: ctx.repos, client: ctx.client, userId: ctx.userId, versionId: explicitVersionId });
+      if (resolved.status === "not-canonical" || resolved.status === "legacy-only") {
+        const memoryService = new CanonicalCareerMemoryService(ctx.repos);
+        runtime = await memoryService.getCanonicalRuntime(ctx.userId);
+        if (!runtime) throw new CanonicalProfileUnavailableForTemplateError();
+        if (!runtime.version?.id) throw new CanonicalVersionUnavailableError("No canonical resume version exists for this profile.");
+      } else {
+        runtime = resolved.runtime ?? (await loadRuntimeForResolvedVersion(ctx.repos, resolved.versionId));
+      }
     }
 
     /*
@@ -183,7 +206,7 @@ export function makeHandleResumePreview(request: Request) {
       untouched in all those cases; a section with no real data renders
       as fully absent instead of gaining fabricated placeholder text.
     */
-    if (allowPlaceholder) {
+    if (allowPlaceholder && !genericSkeleton) {
       runtime = { ...runtime, resume: buildPreviewOnlyResume(runtime.resume) };
     }
 
