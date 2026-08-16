@@ -361,8 +361,8 @@ function HomePageBody() {
           <Stat icon="☆" label="Apply Everywhere" value="One Profile" accent="text-yellow-500" />
           <div className="text-center md:border-r md:border-slate-200 last:border-r-0">
             <p className="text-xl font-black text-yellow-400">★★★★★</p>
-            <p className="mt-2 text-sm font-bold text-slate-700">Join our first users.</p>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Help shape Career Élan.</p>
+            <p className="mt-2 text-sm font-bold text-slate-700">Your Next Opportunity Starts Here</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Build stronger applications with Career Élan.</p>
           </div>
         </div>
       </section>
@@ -446,12 +446,12 @@ function HomePageBody() {
 
       <section id="features" className="w-full bg-white px-5 py-8 sm:px-8 lg:px-10 xl:px-12">
         <h2 className="text-center text-2xl font-black text-slate-950">Why Career Élan is Different</h2>
-        <div className="mx-auto mt-7 grid max-w-[1440px] gap-4 md:grid-cols-3 xl:grid-cols-6">
-          <SmallFeature icon="💡" title="Explain WHY" body="See exactly why AI added or changed each section." />
-          <SmallFeature icon="♙" title="AI Recruiter Simulation (Coming Soon)" body="Get AI feedback like a real recruiter before you apply." />
-          <SmallFeature icon="🧠" title="Career Memory" body="AI learns from your applications and improves results." />
-          <SmallFeature icon="🌐" title="Built for Canada" body="Tailored for the Canadian job market with ATS-friendly resumes, local formatting, and employer expectations." />
-          <SmallFeature icon="🚀" title="Auto Apply (Coming Soon)" body="Apply to jobs automatically with one click." />
+        <div className="mx-auto mt-7 grid max-w-[1440px] gap-4 md:grid-cols-5">
+          <SmallFeature icon="💡" title="Explain Why" body="See exactly why AI added or changed each section." />
+          <SmallFeature icon="🧠" title="Career Memory" body="AI learns from your career history and improves every application." />
+          <SmallFeature icon="🎯" title="Job-Specific Tailoring" body="Tailor your resume and cover letter to each job in minutes." />
+          <SmallFeature icon="📋" title="Job Tracker" body="Keep every application, status, and follow-up organized in one place." />
+          <SmallFeature icon="🇨🇦" title="Built for Canada" body="Built around Canadian job seekers, resumes, and employer expectations." />
         </div>
       </section>
 
