@@ -96,9 +96,36 @@ function collectHierarchicalTextFragments(nodes: HierarchicalContentNode[]): str
 
 export function extractExperienceEntryFragments(entry: ExperienceEntry): string[] {
   const fragments: string[] = [];
-  for (const f of [entry.organization, entry.role, entry.location, entry.dateRangeText]) {
-    const v = nonEmpty(f?.value);
-    if (v) fragments.push(v);
+  const orgValue = nonEmpty(entry.organization?.value);
+  const roleValue = nonEmpty(entry.role?.value);
+  if (orgValue) fragments.push(orgValue);
+  if (roleValue) fragments.push(roleValue);
+  /*
+    Raw-header-fidelity parity fix - mirrors renderers.tsx's
+    ExperienceLikeView header block exactly (both branches, not just
+    the "everything is empty" case):
+      - role/org header line present -> location/dateRangeText render
+        as their own separate line (renderer's own
+        "(role || org) && (location || dateRange)" guard).
+      - role AND org both empty -> the renderer suppresses that
+        separate location/date line entirely and instead falls back to
+        rendering entry.rawHeaderText verbatim (which already carries
+        whatever location/date text originally existed in that raw
+        header line, if any) - so location/dateRangeText must NOT be
+        expected as their own fragments in this branch, only
+        rawHeaderText's own fallback fragments. This decision is made
+        purely on role/org emptiness, independent of whether
+        content/hierarchicalContent below also produces fragments -
+        the renderer's header <div> and its body content are two
+        separate, unconditional render paths.
+  */
+  if (orgValue || roleValue) {
+    for (const f of [entry.location, entry.dateRangeText]) {
+      const v = nonEmpty(f?.value);
+      if (v) fragments.push(v);
+    }
+  } else {
+    fragments.push(...rawHeaderFallbackFragments(entry.rawHeaderText));
   }
   /*
     Phase 5D.3A / Phase 6G.1 - mirrors renderers.tsx's ExperienceLikeView
