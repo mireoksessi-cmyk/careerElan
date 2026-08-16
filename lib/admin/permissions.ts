@@ -14,7 +14,8 @@ export type AdminRole =
   | "SUPPORT"
   | "OPERATIONS"
   | "ANALYST"
-  | "VIEWER";
+  | "VIEWER"
+  | "MARKETING";
 
 export const ADMIN_ROLES: AdminRole[] = [
   "OWNER",
@@ -23,6 +24,7 @@ export const ADMIN_ROLES: AdminRole[] = [
   "OPERATIONS",
   "ANALYST",
   "VIEWER",
+  "MARKETING",
 ];
 
 export type AdminPermission =
@@ -39,7 +41,8 @@ export type AdminPermission =
   | "admin.alerts.manage"
   | "admin.staff.read"
   | "admin.staff.manage"
-  | "admin.audit.read";
+  | "admin.audit.read"
+  | "admin.marketing.send";
 
 /*
   Role -> permission grants. OWNER implicitly has everything ADMIN has
@@ -65,6 +68,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
     "admin.staff.read",
     "admin.staff.manage",
     "admin.audit.read",
+    "admin.marketing.send",
   ]),
   ADMIN: new Set<AdminPermission>([
     "admin.overview.read",
@@ -80,6 +84,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
     "admin.alerts.manage",
     "admin.staff.read",
     "admin.audit.read",
+    "admin.marketing.send",
   ]),
   SUPPORT: new Set<AdminPermission>([
     "admin.overview.read",
@@ -98,6 +103,16 @@ const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> = {
     "admin.api_costs.read",
   ]),
   VIEWER: new Set<AdminPermission>(["admin.overview.read"]),
+  /*
+    Deliberately the ONLY role with exactly one permission and nothing
+    else - a future marketing hire granted this role (via the existing
+    Staff & Permissions page, unchanged) gets access to the manual
+    Marketing Email sender and nothing else: no user data, no billing,
+    no staff management, no other admin tool. See app/admin/marketing-
+    email/page.tsx and app/api/admin/marketing-email/route.ts, both of
+    which check for this permission alone.
+  */
+  MARKETING: new Set<AdminPermission>(["admin.marketing.send"]),
 };
 
 export function hasPermission(

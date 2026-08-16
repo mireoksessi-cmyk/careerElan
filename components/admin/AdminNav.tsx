@@ -18,6 +18,7 @@ const NAV_ITEMS: { href: string; label: string; permission: AdminPermission }[] 
   { href: "/admin/system-health", label: "System Health", permission: "admin.system_health.read" },
   { href: "/admin/subscriptions", label: "Subscriptions", permission: "admin.subscriptions.read" },
   { href: "/admin/alerts", label: "Alerts", permission: "admin.alerts.read" },
+  { href: "/admin/marketing-email", label: "Marketing Email", permission: "admin.marketing.send" },
   { href: "/admin/staff", label: "Staff & Permissions", permission: "admin.staff.read" },
   { href: "/admin/audit", label: "Audit Log", permission: "admin.audit.read" },
 ];
