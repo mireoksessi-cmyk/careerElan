@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmDialogProvider";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { QuotaLimitModal, type QuotaLimitModalData } from "@/components/generatePackage/QuotaLimitModal";
 /*
   Phase 6I.6.33B - preserved-original-layout DPE output (D안 Phase 1)
   is no longer a supported user-facing rendering mode (see product
@@ -1261,6 +1262,18 @@ export default function PasteJobPage() {
     used: number | null;
     remaining: number | null;
   } | null>(null);
+
+  /*
+    Real Production quota rejection opens this modal (see the
+    "quota_reached" branch below); the local-only dev preview button
+    also sets it, with synthetic sample data, purely to let a
+    developer see the modal's UI without any server round trip. Plan
+    name/limit/used/remaining/resetAt are always taken from whatever
+    the caller passed in - never hardcoded here or in the modal
+    itself, so a future Pro (or any other) plan's real values render
+    correctly with zero code change.
+  */
+  const [quotaModalData, setQuotaModalData] = useState<QuotaLimitModalData | null>(null);
 
   const [packageData, setPackageData] = useState<GeneratedPackage>({
   resume: "",
@@ -2706,6 +2719,20 @@ async function loadSelectedApplicationMaterials() {
         remaining: 0,
       });
 
+      /*
+        Real server quota rejection - open the modal with the exact
+        data the server just returned. The current server contract
+        has no planName/resetAt field, so both stay undefined here;
+        the modal renders correctly either way (falls back to "your
+        plan" and omits the "Resets" line) - see QuotaLimitModal's
+        own header comment.
+      */
+      setQuotaModalData({
+        limit: result.limit,
+        used: result.used,
+        remaining: 0,
+      });
+
       const limitError: Error & { code?: string } = new Error(
         "You've reached your monthly Generate Package limit. You can generate up to 3 packages per month."
       );
@@ -2739,9 +2766,10 @@ async function loadSelectedApplicationMaterials() {
     if (
       error?.code === "GENERATE_PACKAGE_LIMIT_REACHED"
     ) {
-      toast.error(
-        "Generate Package limit reached\n\nYou've reached your monthly Generate Package limit. You can generate up to 3 packages per month."
-      );
+      // The quota modal was already opened above (in the
+      // "quota_reached" branch) with the real server data - no
+      // separate toast, to avoid stacking two notifications for the
+      // same rejection.
     } else if (
       error?.name === "TimeoutError" ||
       error?.name === "AbortError"
@@ -3966,6 +3994,55 @@ async function downloadDocx() {
     ›
   </span>
 </button>
+
+                  {/*
+                    LOCAL-ONLY dev preview trigger: visible only when the
+                    server has already confirmed quota is NOT enforced here
+                    (i.e. this is not a real Netlify Production runtime -
+                    see generatePackageQuota.enforced, sourced from
+                    /api/generate-package/usage) AND the developer has
+                    explicitly opted in via
+                    NEXT_PUBLIC_DEV_QUOTA_MODAL_PREVIEW=true. Opens the SAME
+                    modal with synthetic sample data only - no fetch, no DB
+                    write, no effect on real generation, and no way to
+                    render in Production (a real Production build's
+                    generatePackageQuota.enforced is true, which alone
+                    hides this regardless of the env flag's value). Kept
+                    as a sibling of the Generate Package button, never
+                    nested inside it, since a <button> cannot contain
+                    another <button>.
+                  */}
+                  {!generatePackageQuota?.enforced &&
+                  process.env.NEXT_PUBLIC_DEV_QUOTA_MODAL_PREVIEW === "true" ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQuotaModalData({
+                          planKey: "free",
+                          planName: "Free (preview)",
+                          limit: 3,
+                          used: 3,
+                          remaining: 0,
+                          resetAt: new Date(
+                            Date.UTC(
+                              new Date().getUTCFullYear(),
+                              new Date().getUTCMonth() + 1,
+                              1
+                            )
+                          ).toISOString(),
+                          unlimited: false,
+                        })
+                      }
+                      className="mt-2 text-xs font-bold text-slate-500 underline decoration-dotted hover:text-slate-700"
+                    >
+                      Dev: preview quota modal
+                    </button>
+                  ) : null}
+
+                  <QuotaLimitModal
+                    data={quotaModalData}
+                    onClose={() => setQuotaModalData(null)}
+                  />
 
                   <button
                     onClick={handleApplyNow}
