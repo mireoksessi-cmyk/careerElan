@@ -1275,6 +1275,33 @@ export default function PasteJobPage() {
   */
   const [quotaModalData, setQuotaModalData] = useState<QuotaLimitModalData | null>(null);
 
+  /*
+    Pure UI-simulation counter for the LOCAL-ONLY quota modal
+    auto-trigger in handleGeneratePackage below - counts local
+    generations that have actually completed (incremented once per
+    success in applySucceededResult, only when
+    generatePackageQuota.enforced is false). null means "not seeded
+    yet" (distinct from a real 0), so the Generate button never shows
+    a false exhausted state while the seed query below is in flight.
+    Seeded once from this user's REAL successful-generation count for
+    the current UTC calendar month (see the effect below) so a page
+    reload does not silently forget usage from an earlier session -
+    still never read, written, or trusted by any server code, and
+    never consulted when enforced is true (Production always relies
+    solely on the server's real quota_reached response).
+  */
+  const [localSimulatedGenerationCount, setLocalSimulatedGenerationCount] = useState<number | null>(null);
+
+  /*
+    Set only by the local-only auto-trigger below, to the exact
+    runGeneratePackage call it just skipped - lets the modal offer a
+    "Continue anyway" action that resumes that one click's generation
+    without re-checking the local limit. Always null on the real
+    Production quota_reached path (that branch never sets it), so
+    QuotaLimitModal never renders that button for a real rejection.
+  */
+  const [quotaModalContinueAnyway, setQuotaModalContinueAnyway] = useState<(() => void) | null>(null);
+
   const [packageData, setPackageData] = useState<GeneratedPackage>({
   resume: "",
   coverLetter: "",
@@ -1506,6 +1533,18 @@ export default function PasteJobPage() {
   ) {
     clearGiveUpTimer();
     isGeneratingRef.current = false;
+
+    /*
+      Local-only UI simulation: count this success toward the modal
+      auto-trigger threshold above, but only when quota is genuinely
+      not enforced here (never in Production, where the server already
+      blocked the request itself well before this point if the real
+      limit was hit).
+    */
+    if (generatePackageQuota && !generatePackageQuota.enforced) {
+      setLocalSimulatedGenerationCount((count) => (count ?? 0) + 1);
+    }
+
     setPackageData({
       resume: result.resume,
       coverLetter: result.coverLetter,
@@ -1936,6 +1975,70 @@ useEffect(() => {
     cancelled = true;
   };
 }, [loading, user]);
+
+const localUsageSeedFetchedRef = useRef(false);
+
+/*
+  Seeds localSimulatedGenerationCount from this user's REAL successful
+  Generate Package count for the current UTC calendar month - read-only
+  count query, no quota RPC call, no reservation/ledger write. Without
+  this, a full page reload would silently reset the local-only
+  simulation to 0 even when the user already generated 3+ packages
+  earlier this month (in a prior session), so the "next click reaches
+  the limit" auto-trigger below would never fire until 3 MORE
+  generations happened in the current session. Runs only once real
+  usage data confirms this is NOT a real Production runtime
+  (generatePackageQuota.enforced === false) - never in Production, and
+  never affects server quota enforcement either way. UTC calendar-month
+  boundary chosen to match the server's own quota-period convention
+  (see packageQuota.ts / the generate_package_quota_periods design -
+  MONTHLY, UTC).
+*/
+useEffect(() => {
+  if (loading) return;
+  if (!user) return;
+  if (!generatePackageQuota) return;
+  if (generatePackageQuota.enforced) return;
+  if (localUsageSeedFetchedRef.current) return;
+  localUsageSeedFetchedRef.current = true;
+
+  let cancelled = false;
+
+  (async () => {
+    const now = new Date();
+    const monthStartUtc = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    ).toISOString();
+
+    const { count, error } = await supabase
+      .from("applications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("generation_status", "succeeded")
+      .gte("created_at", monthStartUtc);
+
+    if (cancelled) return;
+
+    if (error) {
+      console.error("LOCAL QUOTA SIMULATION SEED ERROR =", error);
+      return;
+    }
+
+    /*
+      Functional update, guarded on prev === null: if an actual local
+      generation already succeeded (incrementing the count away from
+      null) before this read-only query resolved, this seed must not
+      clobber that newer, more-correct value back down.
+    */
+    setLocalSimulatedGenerationCount((prev) =>
+      prev === null ? count ?? 0 : prev
+    );
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [loading, user, generatePackageQuota]);
 
 /*
   Recovery on page load, in priority order:
@@ -2618,6 +2721,42 @@ async function loadSelectedApplicationMaterials() {
   if (isGeneratingRef.current) {
     return;
   }
+
+  /*
+    LOCAL-ONLY UI simulation of hitting the monthly limit. Never runs
+    when generatePackageQuota.enforced is true (real Production, where
+    the server is the only real gate - see the "quota_reached" branch
+    below), and never reserves/writes anything itself. It exists so a
+    developer on localhost (where real quota enforcement is off) sees
+    the exact same modal a real Production user would see, once local
+    usage (localSimulatedGenerationCount, incremented only by an
+    actual local generation succeeding - see applySucceededResult)
+    reaches the same limit /api/generate-package/usage already
+    reports. "Continue anyway" (in the modal) bypasses this check for
+    exactly the one click that triggered it, by calling
+    runGeneratePackage() directly; the next normal button click
+    re-checks and shows the modal again, since local usage still
+    meets or exceeds the limit.
+  */
+  if (
+    generatePackageQuota &&
+    !generatePackageQuota.enforced &&
+    localSimulatedGenerationCount !== null &&
+    localSimulatedGenerationCount >= generatePackageQuota.limit
+  ) {
+    setQuotaModalData({
+      limit: generatePackageQuota.limit,
+      used: localSimulatedGenerationCount,
+      remaining: 0,
+    });
+    setQuotaModalContinueAnyway(() => runGeneratePackage);
+    return;
+  }
+
+  await runGeneratePackage();
+}
+
+async function runGeneratePackage() {
   isGeneratingRef.current = true;
 
   // A retry after failure/timeout starts clean: drop any leftover poller
@@ -2732,6 +2871,7 @@ async function loadSelectedApplicationMaterials() {
         used: result.used,
         remaining: 0,
       });
+      setQuotaModalContinueAnyway(null);
 
       const limitError: Error & { code?: string } = new Error(
         "You've reached your monthly Generate Package limit. You can generate up to 3 packages per month."
@@ -4016,7 +4156,7 @@ async function downloadDocx() {
                   process.env.NEXT_PUBLIC_DEV_QUOTA_MODAL_PREVIEW === "true" ? (
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
                         setQuotaModalData({
                           planKey: "free",
                           planName: "Free (preview)",
@@ -4031,8 +4171,9 @@ async function downloadDocx() {
                             )
                           ).toISOString(),
                           unlimited: false,
-                        })
-                      }
+                        });
+                        setQuotaModalContinueAnyway(null);
+                      }}
                       className="mt-2 text-xs font-bold text-slate-500 underline decoration-dotted hover:text-slate-700"
                     >
                       Dev: preview quota modal
@@ -4041,7 +4182,20 @@ async function downloadDocx() {
 
                   <QuotaLimitModal
                     data={quotaModalData}
-                    onClose={() => setQuotaModalData(null)}
+                    onClose={() => {
+                      setQuotaModalData(null);
+                      setQuotaModalContinueAnyway(null);
+                    }}
+                    onContinueAnyway={
+                      quotaModalContinueAnyway
+                        ? () => {
+                            const resume = quotaModalContinueAnyway;
+                            setQuotaModalData(null);
+                            setQuotaModalContinueAnyway(null);
+                            resume();
+                          }
+                        : undefined
+                    }
                   />
 
                   <button

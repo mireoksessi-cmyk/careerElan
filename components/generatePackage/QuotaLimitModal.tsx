@@ -31,9 +31,18 @@ export type QuotaLimitModalData = {
 export function QuotaLimitModal({
   data,
   onClose,
+  onContinueAnyway,
 }: {
   data: QuotaLimitModalData | null;
   onClose: () => void;
+  /*
+    LOCAL-ONLY escape hatch: present only when the caller opened this
+    modal from the local (non-Production) UI-simulation path in
+    app/paste-job/page.tsx - real Production quota rejections never
+    pass this prop, so this button can never appear for a real quota
+    block. Resumes the exact generation attempt that was skipped, once.
+  */
+  onContinueAnyway?: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -96,7 +105,17 @@ export function QuotaLimitModal({
           <p className="mt-2 text-sm text-gray-500">Resets {resetLabel}</p>
         ) : null}
 
-        <div className="mt-8 flex flex-wrap justify-end gap-3">
+        <div className="mt-8 flex flex-wrap items-center justify-end gap-3">
+          {onContinueAnyway ? (
+            <button
+              type="button"
+              onClick={onContinueAnyway}
+              className="mr-auto text-xs font-semibold text-gray-400 underline decoration-dotted hover:text-gray-600"
+            >
+              Continue anyway (local only)
+            </button>
+          ) : null}
+
           <Link
             href="/pricing"
             className="rounded-xl border px-5 py-2 text-center font-semibold text-gray-700 hover:bg-gray-50"
