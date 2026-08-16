@@ -2613,10 +2613,26 @@ return;
   setImportStage("preview");
 }
 
+  /*
+    Cover Letter has no canonical-template concept, so it must not go
+    through continueToDashboard()'s checkAndBlockOnTemplateGate() -
+    that gate exists to make sure a RESUME template default is chosen
+    (Resume satisfies it as a side effect of its own mandatory
+    selectInlineTemplate() step before ever reaching this point), and
+    tripping it here stranded Cover-Letter-only saves on the "One more
+    step before Dashboard" modal instead of navigating (see the
+    forensic audit this fix is based on). refresh() is still awaited
+    before navigating, same as continueToDashboard() does, so
+    LoginManager's coverLetters state is fresh before Dashboard mounts.
+  */
   async function saveCoverLetterAndContinue() {
-    await persistMemory();
+    const saved = await persistMemory();
+    if (!saved) {
+      return;
+    }
     toast.success("Cover Letter saved.");
-    continueToDashboard();
+    await refresh();
+    router.replace("/dashboard");
   }
 
   function renderResumePreview() {
