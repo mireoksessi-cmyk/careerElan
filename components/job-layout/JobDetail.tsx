@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import A4Preview from "@/app/job-tracker/A4Preview";
 import A4DocumentPreview from "@/lib/brand/render/A4DocumentPreview";
-import ApplicationTemplateSwitcher from "@/components/canonicalGeneratePackage/ApplicationTemplateSwitcher";
 import { useIframeFitScale } from "@/components/shared/useIframeFitScale";
 import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
 import { useToast } from "@/components/ui/ToastProvider";
@@ -112,6 +111,17 @@ export default function JobDetail({
   const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"idle" | "loading" | "ready" | "not-applicable" | "error">("idle");
   const [canonicalPreviewHtml, setCanonicalPreviewHtml] = useState<string | null>(null);
   /*
+    Phase 6I.9 - race guard: loadCanonicalPreview() is re-invoked every
+    time selectedApplication changes (see the effect below). Without
+    this, a slow in-flight request for a PREVIOUSLY selected application
+    could resolve after a newer request for the CURRENTLY selected
+    application already finished, and silently overwrite the correct
+    preview with stale content. Every invocation claims a new id here
+    before doing anything else; each setState after an await is guarded
+    by isStale(), which is false only for the single most-recent call.
+  */
+  const previewRequestIdRef = useRef(0);
+  /*
     Phase 6I.6.6 (round spec §15) - same shared "Fit Page" scaling as
     Paste Job's CanonicalTemplateSelector, so the now-wider (xl:col-span-6,
     up from 5) resume column actually grows the visible page instead of
@@ -124,32 +134,72 @@ export default function JobDetail({
   const { scale: canonicalPreviewScale, nativeHeight: canonicalPreviewNativeHeight, scaledHeight: canonicalPreviewScaledHeight, recompute: recomputeCanonicalPreviewScale } = useIframeFitScale(canonicalPreviewContainerRef, canonicalPreviewIframeRef, PAPER_DIMENSIONS.letter.widthPx);
 
   const loadCanonicalPreview = useCallback(async () => {
+    const requestId = ++previewRequestIdRef.current;
+    const isStale = () => requestId !== previewRequestIdRef.current;
+
+    /*
+      Phase 6I.9 - clear the previous application's preview immediately,
+      synchronously, before this request even starts, so a still-mounting
+      iframe can never render leftover content from the application that
+      was selected a moment ago.
+    */
+    setCanonicalPreviewHtml(null);
+
     if (!selectedApplication || selectedApplication.generation_engine !== "canonical") {
       setCanonicalPreviewStatus("not-applicable");
       return;
     }
     setCanonicalPreviewStatus("loading");
     try {
-      const resolveRes = await fetch(`/api/internal/canonical-career-memory/resolve-template?applicationId=${selectedApplication.id}`);
-      const resolution = resolveRes.ok ? await resolveRes.json() : null;
-      if (resolution?.kind !== "canonical") {
-        setCanonicalPreviewStatus("not-applicable");
-        return;
+      /*
+        Phase 6I.9 - reuse Generate Package's OWN reference preview
+        mechanism exactly (CanonicalTemplateSelector.tsx's own
+        handleSelectTemplate): call the SAME /canonical-generate-package
+        /preview endpoint with the SAME applicationId and the SAME
+        generation-time selected_template_id, instead of reading the
+        persisted Storage artifact through a separate endpoint. The
+        template id is read directly off the already-loaded application
+        row - never re-resolved against the user's CURRENT profile
+        default when selected_template_id is already present, matching
+        CanonicalTemplateSelector's own "selected_template_id ?? ...
+        fallback" seeding exactly. Only an OLDER row that never recorded
+        a selected_template_id at all falls back to the existing
+        resolve-template priority chain below (unchanged, pre-existing
+        safe fallback - not a new one introduced by this phase).
+      */
+      let templateId: string | null =
+        typeof selectedApplication.selected_template_id === "string" && selectedApplication.selected_template_id
+          ? selectedApplication.selected_template_id
+          : null;
+
+      if (!templateId) {
+        const resolveRes = await fetch(`/api/internal/canonical-career-memory/resolve-template?applicationId=${selectedApplication.id}`);
+        if (isStale()) return;
+        const resolution = resolveRes.ok ? await resolveRes.json() : null;
+        if (isStale()) return;
+        if (resolution?.kind !== "canonical") {
+          setCanonicalPreviewStatus("not-applicable");
+          return;
+        }
+        templateId = resolution.templateId;
       }
+
       const previewRes = await fetch("/api/internal/canonical-generate-package/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicationId: selectedApplication.id, templateId: resolution.templateId, format: "html" }),
+        body: JSON.stringify({ applicationId: selectedApplication.id, templateId, format: "html" }),
       });
+      if (isStale()) return;
       if (!previewRes.ok) {
         setCanonicalPreviewStatus("error");
         return;
       }
       const data = await previewRes.json();
+      if (isStale()) return;
       setCanonicalPreviewHtml(data.html ?? "");
       setCanonicalPreviewStatus("ready");
     } catch {
-      setCanonicalPreviewStatus("error");
+      if (!isStale()) setCanonicalPreviewStatus("error");
     }
   }, [selectedApplication]);
 
@@ -429,11 +479,6 @@ export default function JobDetail({
                 }
                 templateId={selectedApplication.resume_template_id}
               />
-            )}
-            {selectedApplication.generation_engine === "canonical" && (
-              <div className="mt-6">
-                <ApplicationTemplateSwitcher applicationId={selectedApplication.id} onTemplateChanged={loadCanonicalPreview} />
-              </div>
             )}
           </>
         )}

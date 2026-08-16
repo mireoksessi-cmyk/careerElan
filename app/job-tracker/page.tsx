@@ -440,14 +440,41 @@ async function downloadPackage(type: "docx" | "pdf") {
       application (the vast majority of existing rows).
     */
     if (selectedApplication.generation_engine === "canonical") {
+      /*
+        Phase 6I.9 - reuse Generate Package's OWN reference download
+        mechanism exactly (CanonicalTemplateSelector.tsx's own
+        handleDownload): call the SAME /canonical-generate-package
+        /preview endpoint with the SAME applicationId and the SAME
+        generation-time selected_template_id (read directly off the
+        already-loaded application row, never re-resolved against the
+        CURRENT profile default when already present). Only an older
+        row with no recorded selected_template_id falls back to the
+        existing resolve-template priority chain - the pre-existing
+        safe fallback, unchanged by this phase.
+      */
       try {
-        const resolveRes = await fetch(`/api/internal/canonical-career-memory/resolve-template?applicationId=${selectedApplication.id}`);
-        const resolution = resolveRes.ok ? await resolveRes.json() : null;
-        if (resolution?.kind === "canonical") {
+        let templateId: string | null =
+          typeof selectedApplication.selected_template_id === "string" && selectedApplication.selected_template_id
+            ? selectedApplication.selected_template_id
+            : null;
+
+        if (!templateId) {
+          const resolveRes = await fetch(`/api/internal/canonical-career-memory/resolve-template?applicationId=${selectedApplication.id}`);
+          const resolution = resolveRes.ok ? await resolveRes.json() : null;
+          if (resolution?.kind === "selection-required") {
+            toast.warning("Choose a default resume template on Dashboard before downloading this resume.");
+            return;
+          }
+          if (resolution?.kind === "canonical") {
+            templateId = resolution.templateId;
+          }
+        }
+
+        if (templateId) {
           const previewRes = await fetch("/api/internal/canonical-generate-package/preview", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ applicationId: selectedApplication.id, templateId: resolution.templateId, format: type }),
+            body: JSON.stringify({ applicationId: selectedApplication.id, templateId, format: type }),
           });
           if (previewRes.ok) {
             const blob = await previewRes.blob();
@@ -459,10 +486,6 @@ async function downloadPackage(type: "docx" | "pdf") {
             URL.revokeObjectURL(downloadUrl);
             return;
           }
-        }
-        if (resolution?.kind === "selection-required") {
-          toast.warning("Choose a default resume template on Dashboard before downloading this resume.");
-          return;
         }
       } catch {
         // Falls through to the legacy export below on any resolution/
