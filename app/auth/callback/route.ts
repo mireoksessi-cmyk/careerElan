@@ -226,8 +226,25 @@ export async function GET(request: Request) {
   }
 
   /*
-    Google, LinkedIn, Facebook 최초 로그인 사용자는
-    profiles 행이 없을 수 있으므로 생성하거나 갱신한다.
+    Google, LinkedIn, Facebook 로그인 사용자의 provider 프로필 정보를
+    갱신한다. 행 생성은 여기서 하지 않는다 - auth.users INSERT 시점에
+    on_auth_user_created 트리거(handle_new_user(), 20260720153937_remote_schema.sql:733)
+    가 이미 profiles 행을 만들며, 그 때 login_id를
+    lower(coalesce(raw_user_meta_data->>'login_id', split_part(email,'@',1)))
+    로 채운다. OAuth 신규 가입도 auth.users INSERT를 거치므로 예외가 아니다.
+
+    이전 구현은 upsert({id, full_name, email, phone})였는데, PostgREST의
+    upsert는 INSERT ... ON CONFLICT (id) DO UPDATE로 나가고 Postgres는
+    충돌 판정 전에 INSERT 튜플의 NOT NULL 제약을 먼저 검사한다. profiles
+    .login_id는 NOT NULL이고 DEFAULT가 없으므로(remote_schema.sql:258),
+    행이 이미 존재하더라도 매 콜백마다 23502
+    "null value in column login_id ... violates not-null constraint"로
+    실패했다 - Production 로그상 모든 OAuth 콜백에서 100% 재현.
+
+    UPDATE로 바꾸면 login_id를 아예 전송하지 않으므로 제약을 건드리지
+    않고, 사용자가 설정 화면(app/settings/page.tsx)에서 직접 바꾼
+    login_id를 provider 값으로 덮어쓸 위험도 없다. 바로 아래 consent
+    블록이 이미 같은 전제(행 존재)로 update().eq("id")를 쓰고 있다.
   */
   const fullName =
     user.user_metadata?.full_name ||
@@ -243,17 +260,12 @@ export async function GET(request: Request) {
   const { error: profileError } =
     await supabase
       .from("profiles")
-      .upsert(
-        {
-          id: user.id,
-          full_name: fullName,
-          email: user.email || "",
-          phone,
-        },
-        {
-          onConflict: "id",
-        }
-      );
+      .update({
+        full_name: fullName,
+        email: user.email || "",
+        phone,
+      })
+      .eq("id", user.id);
 
   if (profileError) {
     /*
