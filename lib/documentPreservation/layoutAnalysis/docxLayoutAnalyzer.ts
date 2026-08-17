@@ -37,7 +37,6 @@
 */
 
 import mammoth from "mammoth";
-import DOMPurify from "isomorphic-dompurify";
 import type { DPEDocumentType } from "../types";
 import type {
   ElementMetadata,
@@ -270,6 +269,28 @@ export async function analyzeDocxLayout(
   buffer: Buffer
 ): Promise<LayoutAnalysisResult> {
   const result = await mammoth.convertToHtml({ buffer });
+
+  /*
+    isomorphic-dompurify is loaded HERE rather than at module top level.
+    Same sanitize() call, same single option, same DOM-fragment output -
+    only the load timing changed. Reason: index.ts re-exports both
+    analyzers from one barrel, so canonicalResumeImportService's
+    `import { analyzeDocument } from ".../layoutAnalysis"` evaluated THIS
+    module - and therefore isomorphic-dompurify's jsdom chain - even for
+    a PDF import, which never calls analyzeDocxLayout at all. In the
+    deployed Netlify function that evaluation throws before the import
+    service is ever entered: isomorphic-dompurify -> jsdom ->
+    html-encoding-sniffer require()s @exodus/bytes/encoding-lite.js,
+    which is ESM, giving "Failed to load external module
+    isomorphic-dompurify...: Error [ERR_REQUIRE_ESM]" and a 500 that
+    surfaced in the UI as "Could not prepare this resume for Canonical
+    Templates." Deferring the load keeps the PDF path clear of a
+    DOCX-only dependency. It does NOT fix that require chain: a real
+    DOCX import still evaluates the same package here and would still
+    hit ERR_REQUIRE_ESM in Production - deliberately left to surface
+    through the existing error contract rather than be masked.
+  */
+  const DOMPurify = (await import("isomorphic-dompurify")).default;
 
   const fragment = DOMPurify.sanitize(result.value, {
     RETURN_DOM_FRAGMENT: true,
