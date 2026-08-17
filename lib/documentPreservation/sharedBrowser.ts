@@ -66,7 +66,7 @@ class BrowserRuntimeError extends Error {
   byte-identical to the previously published artifacts.
 */
 const RUNTIME_RELEASE_BASE_URL =
-  "https://github.com/mireoksessi-cmyk/careerElan/releases/download/chromium-runtime-cft151-v1";
+  "https://github.com/mireoksessi-cmyk/careerElan/releases/download/chromium-runtime-cft151-v2";
 
 const BROWSER_MANIFEST_ASSET = "browser__manifest.json";
 const BROWSER_MANIFEST_SHA256 =
@@ -75,8 +75,8 @@ const BROWSER_ENTRY_COUNT = 284;
 
 const LIB_MANIFEST_ASSET = "libs__manifest.json";
 const LIB_MANIFEST_SHA256 =
-  "ad553c48b47fcf550c2fa6509db63528562c31b6aaed00465139f8789f3e5924";
-const LIB_ENTRY_COUNT = 43;
+  "cbad4712c4b04dbd84b2500054d2737c6fa0ad963108a31fb1f9ffd3d22aa59c";
+const LIB_ENTRY_COUNT = 59;
 
 const FONT_MANIFEST_ASSET = "fonts__manifest.json";
 const FONT_MANIFEST_SHA256 =
