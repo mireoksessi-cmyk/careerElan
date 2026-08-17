@@ -66,7 +66,70 @@ function isApiPath(pathname: string) {
   return pathname.startsWith("/api/");
 }
 
+/*
+  Netlify gives this site more hostnames than the one users are meant to
+  browse: every deploy gets a permanent <deploy-id>--<site>.netlify.app
+  permalink, and the production branch gets master--<site>.netlify.app.
+  All of them serve the app, but a deploy permalink is FROZEN to that
+  build forever.
+
+  That matters for auth specifically. Supabase's auth cookies carry no
+  Domain attribute (lib/supabase.ts / lib/supabase-server.ts / the client
+  below all use @supabase/ssr defaults), so they are host-only, and
+  lib/auth/auth.ts starts OAuth with
+  redirectTo: `${window.location.origin}/auth/callback`, so the provider
+  returns to whichever host the click happened on. Browsing an alternate
+  host therefore creates a SEPARATE session that the canonical host
+  cannot see - Production logs on 2026-08-17 show seven consecutive
+  Google logins landing on 6a832a98...--<site> and master--<site> rather
+  than the canonical host, which reads to a user as "login failed" and,
+  on an older permalink, as "the site went back to an old version".
+
+  Redirecting here, before the session client is built, moves the browser
+  onto the canonical host BEFORE any OAuth click, so window.location.origin
+  is already canonical when the flow starts.
+
+  Deliberate details:
+  - The destination is built from the CANONICAL_HOST constant, never from
+    the incoming Host header. The header is only ever read as a boolean
+    test, so a forged Host cannot steer the redirect.
+  - The suffix test requires the hostname to END with
+    "--<canonical host>", which only Netlify can issue for this site.
+    localhost, 127.0.0.1, any other *.netlify.app site, and any custom
+    domain never match. The canonical host itself has no "--" and cannot
+    match, so this cannot loop.
+  - pathname and search are preserved verbatim, including an OAuth
+    ?code=... A code minted for an alternate host will still fail its PKCE
+    exchange on the canonical host (the verifier cookie is host-only) -
+    that in-flight case was already broken; what this prevents is the flow
+    ever STARTING on the wrong host.
+  - 307, not 308: a permanent redirect would be cached by browsers and
+    would make deploy permalinks unopenable for debugging long after this
+    code changed.
+*/
+const CANONICAL_HOST = "fabulous-frangipane-b5d970.netlify.app";
+const NETLIFY_ALTERNATE_HOST_SUFFIX = `--${CANONICAL_HOST}`;
+
+function isNetlifyAlternateHost(hostHeader: string | null) {
+  if (!hostHeader) return false;
+  const hostname = hostHeader.split(":")[0].toLowerCase();
+  return (
+    hostname.length > NETLIFY_ALTERNATE_HOST_SUFFIX.length &&
+    hostname.endsWith(NETLIFY_ALTERNATE_HOST_SUFFIX)
+  );
+}
+
 export async function middleware(request: NextRequest) {
+  if (isNetlifyAlternateHost(request.headers.get("host"))) {
+    return NextResponse.redirect(
+      new URL(
+        `${request.nextUrl.pathname}${request.nextUrl.search}`,
+        `https://${CANONICAL_HOST}`
+      ),
+      307
+    );
+  }
+
   let response = NextResponse.next({
     request,
   });
