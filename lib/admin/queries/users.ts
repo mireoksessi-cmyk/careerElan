@@ -128,6 +128,12 @@ export type AdminUserDetail = AdminUserRow & {
   monthlyGenerationLimit: number;
   remainingGenerateAllowance: number | null;
   recentSafeErrors: { code: string; date: string }[];
+  /* Admin User Controls Phase 2 */
+  suspended: boolean;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  planKey: string;
+  quotaOverride: number | null;
 };
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail | null> {
@@ -135,12 +141,14 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
   if (userError || !userResult?.user) return null;
   const user = userResult.user;
 
-  const [{ data: cm }, { data: resumes }, { data: apps }, { data: proSub }, { data: quota }] = await Promise.all([
+  const [{ data: cm }, { data: resumes }, { data: apps }, { data: proSub }, { data: quota }, { data: profileRow }, { data: quotaOverrideRow }] = await Promise.all([
     supabaseAdmin.from("career_memory").select("required_completed, selected_resume_id, resume_template").eq("user_id", userId).maybeSingle(),
     supabaseAdmin.from("resumes").select("id").eq("user_id", userId),
     supabaseAdmin.from("applications").select("created_at, generation_status, generation_error_code, generation_completed_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(100),
-    supabaseAdmin.from("subscriptions").select("status").eq("user_id", userId).in("status", ["active", "trialing"]).maybeSingle(),
+    supabaseAdmin.from("subscriptions").select("plan_key, status").eq("user_id", userId).in("status", ["active", "trialing"]).maybeSingle(),
     supabaseAdmin.rpc("get_generate_package_usage", { p_user_id: userId, p_limit: 3 }),
+    supabaseAdmin.from("profiles").select("suspended_at, suspended_reason").eq("id", userId).maybeSingle(),
+    supabaseAdmin.from("admin_user_quota_overrides").select("monthly_generate_limit").eq("user_id", userId).maybeSingle(),
   ]);
 
   const monthStart = startOfUtcMonth().toISOString();
@@ -168,5 +176,28 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     monthlyGenerationLimit: quotaRow?.limit ?? 3,
     remainingGenerateAllowance: quotaRow?.remaining ?? null,
     recentSafeErrors: failed.slice(0, 5).map((a) => ({ code: a.generation_error_code ?? "UNKNOWN", date: a.created_at })),
+    suspended: Boolean(profileRow?.suspended_at),
+    suspendedAt: profileRow?.suspended_at ?? null,
+    suspendedReason: profileRow?.suspended_reason ?? null,
+    planKey: proSub?.plan_key ?? "free",
+    quotaOverride: quotaOverrideRow?.monthly_generate_limit ?? null,
   };
+}
+
+/*
+  Admin User Controls Phase 2 - the enabled plan_key list the Plan
+  Override dropdown offers, read from the existing quota_plans config
+  table rather than a hardcoded ["free", "pro"] array, so a future
+  plan added purely via a quota_plans INSERT (per that table's own
+  documented "add a plan by inserting a row, never a code change"
+  design) shows up here automatically.
+*/
+export async function getEnabledPlanKeys(): Promise<string[]> {
+  const { data } = await supabaseAdmin
+    .from("quota_plans")
+    .select("plan_key")
+    .eq("enabled", true)
+    .order("plan_key");
+
+  return (data ?? []).map((p) => p.plan_key);
 }

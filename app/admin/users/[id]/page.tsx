@@ -1,7 +1,9 @@
 import { guardAdminPage } from "@/lib/admin/pageAuth";
 import AdminDenied from "@/components/admin/AdminDenied";
-import { getAdminUserDetail } from "@/lib/admin/queries/users";
-import { PageTitle, Badge, EmptyState } from "@/components/admin/ui";
+import { getAdminUserDetail, getEnabledPlanKeys } from "@/lib/admin/queries/users";
+import { PageTitle, Badge, EmptyState, Section } from "@/components/admin/ui";
+import { hasPermission } from "@/lib/admin/permissions";
+import { SuspendReactivateButton, PlanOverrideForm, QuotaOverrideForm, DeleteUserButton } from "@/components/admin/UserControls";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +21,11 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   if (guard.denied) return <AdminDenied message={guard.message} />;
 
   const { id } = await params;
-  const detail = await getAdminUserDetail(id);
+  const [detail, planKeys] = await Promise.all([getAdminUserDetail(id), getEnabledPlanKeys()]);
 
   if (!detail) return <EmptyState message="User not found." />;
+
+  const canManage = hasPermission(guard.ctx.role, "admin.users.manage");
 
   return (
     <div className="max-w-2xl">
@@ -29,9 +33,21 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
 
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <Row label="User ID" value={<span className="font-mono text-xs">{detail.userId}</span>} />
+        <Row
+          label="Account Status"
+          value={
+            detail.suspended ? (
+              <Badge tone="danger">Suspended{detail.suspendedAt ? ` since ${new Date(detail.suspendedAt).toLocaleDateString()}` : ""}</Badge>
+            ) : (
+              <Badge tone="success">Active</Badge>
+            )
+          }
+        />
+        {detail.suspended && detail.suspendedReason && <Row label="Suspension Reason" value={detail.suspendedReason} />}
         <Row label="Joined" value={new Date(detail.joinedAt).toLocaleString()} />
         <Row label="Signup Provider" value={detail.provider} />
         <Row label="Plan" value={<Badge tone={detail.plan === "pro" ? "success" : "default"}>{detail.plan}</Badge>} />
+        <Row label="Admin Quota Override" value={detail.quotaOverride === null ? "None (uses plan default)" : detail.quotaOverride} />
         <Row label="Career Memory" value={detail.careerMemoryComplete ? <Badge tone="success">Complete</Badge> : <Badge>Incomplete</Badge>} />
         <Row label="Resume Count" value={detail.resumeCount} />
         <Row label="Selected Resume" value={detail.selectedResumeExists ? "Yes" : "No"} />
@@ -45,6 +61,23 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         <Row label="Application Count" value={detail.applicationCount} />
         <Row label="Last Activity" value={detail.lastActivity ? new Date(detail.lastActivity).toLocaleString() : "—"} />
       </div>
+
+      {canManage && (
+        <Section title="Admin Actions">
+          <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+            <div>
+              <span className="mb-1 block text-xs text-slate-500">Account</span>
+              <SuspendReactivateButton userId={detail.userId} suspended={detail.suspended} />
+            </div>
+            <PlanOverrideForm userId={detail.userId} planKeys={planKeys} currentPlanKey={detail.planKey} />
+            <QuotaOverrideForm userId={detail.userId} currentQuotaOverride={detail.quotaOverride} />
+            <div>
+              <span className="mb-1 block text-xs text-slate-500">Danger zone</span>
+              <DeleteUserButton userId={detail.userId} userEmail={detail.email} />
+            </div>
+          </div>
+        </Section>
+      )}
 
       {detail.recentSafeErrors.length > 0 && (
         <div className="mt-6">
