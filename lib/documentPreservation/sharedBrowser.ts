@@ -37,6 +37,7 @@ type BrowserRuntimeFailureCategory =
   | "PAYLOAD_WRITE"
   | "RUNTIME_DISK_FULL"
   | "EXECUTABLE_MISSING"
+  | "EXECUTABLE_READBACK_CHECKSUM"
   | "FONT_CONFIG_FAILED"
   | "LIBRARY_MISSING"
   | "BROWSER_LAUNCH_FAILED";
@@ -107,6 +108,41 @@ const isLambda = () => Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
    sizes, paths and timings. */
 function logRuntimeEvent(event: string, detail: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ domain: "browserRuntime", event, ...detail }));
+}
+
+/*
+  Which execution environment emitted this line. Production showed nine cold
+  inits for one render, and timestamps alone cannot tell whether that was one
+  container initialising repeatedly or several containers each initialising once
+  - a distinction that changes the diagnosis entirely. pid separates processes;
+  the Lambda log stream name separates execution environments, since AWS assigns
+  one stream per environment and reuses it across invocations. Neither value is
+  a credential; no key, token, session or user value is read here.
+*/
+function environmentIdentity(): Record<string, unknown> {
+  return {
+    pid: process.pid,
+    logStream: process.env.AWS_LAMBDA_LOG_STREAM_NAME || null,
+    logGroup: process.env.AWS_LAMBDA_LOG_GROUP_NAME || null,
+  };
+}
+
+/*
+  Playwright packs the real diagnosis - Chromium's stderr, its exit code or
+  signal, and the "Browser logs" section - into the tail of the launch error.
+  Keeping only the first line, as this module previously did, discarded exactly
+  the evidence needed to tell a resource kill from a bad executable. The message
+  is kept whole but bounded, and any query string is stripped in case a signed
+  URL ever appears in it. Nothing here reads process.env, so no environment
+  secret can reach the log.
+*/
+const MAX_LAUNCH_ERROR_CHARS = 8000;
+
+function boundedLaunchErrorMessage(raw: string): string {
+  const redacted = raw.replace(/\?[A-Za-z0-9_%\-.=&+/:]+/g, "?<redacted>");
+  return redacted.length > MAX_LAUNCH_ERROR_CHARS
+    ? `${redacted.slice(0, MAX_LAUNCH_ERROR_CHARS)}…[truncated ${redacted.length - MAX_LAUNCH_ERROR_CHARS} chars]`
+    : redacted;
 }
 
 /*
@@ -387,7 +423,7 @@ async function reconstructRuntime(
   const readySentinel = path.join(runtimeRoot, ".ready");
   if (fs.existsSync(readySentinel)) {
     if (fs.readFileSync(readySentinel, "utf8").trim() === identity) {
-      logRuntimeEvent("browser_runtime_cache_hit", { entries: entries.length });
+      logRuntimeEvent("browser_runtime_cache_hit", { ...environmentIdentity(), entries: entries.length });
       return;
     }
     fs.rmSync(runtimeRoot, { recursive: true, force: true });
@@ -498,12 +534,28 @@ async function applyLambdaEnvironment(runtimeRoot: string): Promise<void> {
   process.env.HOME = homeDir;
 }
 
+/*
+  Hash what is actually on disk, streamed so the 188 MB executable is never held
+  in memory. Per-payload verification hashes the bytes in flight, which cannot
+  detect a file damaged after its own stream completed - and Production showed
+  four initialisations reconstructing into one shared runtime root, so that is a
+  real possibility rather than a theoretical one. This is the independent check.
+*/
+async function hashFileStreaming(filePath: string): Promise<string> {
+  const fs = await import("node:fs");
+  const crypto = await import("node:crypto");
+  const { pipeline } = await import("node:stream/promises");
+  const hash = crypto.createHash("sha256");
+  await pipeline(fs.createReadStream(filePath), hash);
+  return hash.digest("hex");
+}
+
 async function initialiseLambdaBrowser(): Promise<Browser> {
   const fs = await import("node:fs");
   const path = await import("node:path");
   const crypto = await import("node:crypto");
 
-  logRuntimeEvent("browser_runtime_init_start", { lambda: true });
+  logRuntimeEvent("browser_runtime_init_start", { ...environmentIdentity(), lambda: true });
 
   const browser = await fetchManifest("browser", BROWSER_MANIFEST_ASSET, BROWSER_MANIFEST_SHA256, BROWSER_ENTRY_COUNT);
   const libs = await fetchManifest("libs", LIB_MANIFEST_ASSET, LIB_MANIFEST_SHA256, LIB_ENTRY_COUNT);
@@ -534,8 +586,42 @@ async function initialiseLambdaBrowser(): Promise<Browser> {
     throw new BrowserRuntimeError("EXECUTABLE_MISSING", "chrome-headless-shell is not an executable file");
   }
 
+  /*
+    Diagnostic gate. The expected value is the browser manifest's own entry for
+    the executable - already parsed and already SHA-pinned - so no second
+    constant is introduced. Launching a mismatching binary would only produce
+    the same ambiguous "browser has been closed" error, so it is refused here
+    where the cause is still legible.
+  */
+  const executableEntry = browser.entries.find(
+    (entry) => entry.targetPath === "browser/chrome-headless-shell"
+  );
+  if (!executableEntry) {
+    throw new BrowserRuntimeError("MANIFEST_INVALID", "browser manifest has no chrome-headless-shell entry");
+  }
+  const readbackStarted = Date.now();
+  const actualSha256 = await hashFileStreaming(executablePath);
+  const readbackMatch = actualSha256 === executableEntry.uncompressedSha256;
+  logRuntimeEvent("browser_executable_readback", {
+    ...environmentIdentity(),
+    path: executablePath,
+    size: stat.size,
+    expectedSize: executableEntry.uncompressedSize,
+    mode: (stat.mode & 0o7777).toString(8),
+    expectedSha256: executableEntry.uncompressedSha256,
+    actualSha256,
+    match: readbackMatch,
+    elapsedMs: Date.now() - readbackStarted,
+  });
+  if (!readbackMatch) {
+    throw new BrowserRuntimeError(
+      "EXECUTABLE_READBACK_CHECKSUM",
+      "on-disk chrome-headless-shell does not match the manifest SHA-256"
+    );
+  }
+
   const { chromium } = await import("playwright");
-  logRuntimeEvent("browser_launch_start", { size: stat.size });
+  logRuntimeEvent("browser_launch_start", { ...environmentIdentity(), size: stat.size });
   const launchStarted = Date.now();
   let launched: Browser;
   try {
@@ -554,7 +640,11 @@ async function initialiseLambdaBrowser(): Promise<Browser> {
       error instanceof Error ? error.message : "unknown launch failure"
     );
   }
-  logRuntimeEvent("browser_launch_success", { elapsedMs: Date.now() - launchStarted });
+  logRuntimeEvent("browser_launch_success", {
+    ...environmentIdentity(),
+    elapsedMs: Date.now() - launchStarted,
+    browserVersion: launched.version(),
+  });
   return launched;
 }
 
@@ -575,10 +665,17 @@ export async function getSharedBrowser(): Promise<Browser> {
       browserPromise = null;
       const category =
         error instanceof BrowserRuntimeError ? error.category : "BROWSER_LAUNCH_FAILED";
+      /*
+        The whole bounded message, not just its first line. Chromium's stderr,
+        exit code, signal and "Browser logs" section all live past that first
+        newline, and losing them is what left the previous Production failure
+        undiagnosable.
+      */
       logRuntimeEvent("browser_init_failure", {
+        ...environmentIdentity(),
         category,
         errorName: error instanceof Error ? error.name : "Unknown",
-        message: error instanceof Error ? String(error.message).split("\n")[0] : "unknown failure",
+        message: error instanceof Error ? boundedLaunchErrorMessage(String(error.message)) : "unknown failure",
       });
       throw error;
     });
