@@ -23,6 +23,15 @@ export type UsageEventRow = {
   cost_classification: "ESTIMATED_COST" | "EXACT_PROVIDER_DATA" | "UNKNOWN_PRICING";
   retry_count: number;
   http_status_class: string | null;
+  /* Admin API Usage Phase 1 - nullable FK, present on every wrapped call site. */
+  user_id: string | null;
+  /*
+    Admin API Usage Phase 2 - frozen at insert time by
+    lib/openai/telemetry.ts using whatever OPENAI_ACCOUNTING_USD_CAD_RATE
+    was configured then. NULL whenever no rate was configured at insert
+    time (or estimated_cost_usd itself is null) - never recomputed here.
+  */
+  estimated_cost_cad: number | null;
 };
 
 export type UsagePeriodSummary = {
@@ -40,6 +49,20 @@ export type UsagePeriodSummary = {
   timeouts: number;
   serverErrors5xx: number;
   lastCallAt: string | null;
+  /*
+    Admin API Usage Phase 2 - sum of already-persisted estimated_cost_cad
+    values only (never recomputed from costUsd here - see
+    UsageEventRow.estimated_cost_cad's own comment on why).
+  */
+  costCadKnown: number;
+  /*
+    Count of rows with a known USD cost but no recorded CAD conversion
+    (no accounting rate was configured when they were written) - the
+    honest disclosure that costCadKnown understates true total cost
+    whenever this is > 0, rather than silently presenting costCadKnown
+    as complete.
+  */
+  costCadMissingCount: number;
 };
 
 export type OperationBreakdownRow = {
@@ -50,6 +73,10 @@ export type OperationBreakdownRow = {
   successRatePercent: number | null;
   totalTokens: number;
   costUsd: number;
+  /* Physical provider request attempts with retry_count > 0 - see this module's own retry-semantics note on buildUserBreakdown. */
+  retryCount: number;
+  costCadKnown: number;
+  costCadMissingCount: number;
 };
 
 export type ModelBreakdownRow = {
@@ -78,6 +105,8 @@ export function summarizeUsagePeriod(rows: UsageEventRow[]): UsagePeriodSummary 
   let timeouts = 0;
   let serverErrors5xx = 0;
   let lastCallAt: string | null = null;
+  let costCadKnown = 0;
+  let costCadMissingCount = 0;
 
   for (const row of rows) {
     if (row.status === "success") successCount++;
@@ -91,6 +120,12 @@ export function summarizeUsagePeriod(rows: UsageEventRow[]): UsagePeriodSummary 
 
     if (typeof row.estimated_cost_usd === "number") costUsd += row.estimated_cost_usd;
     if (row.cost_classification === "UNKNOWN_PRICING") unknownPricingCount++;
+
+    if (typeof row.estimated_cost_cad === "number") {
+      costCadKnown += row.estimated_cost_cad;
+    } else if (typeof row.estimated_cost_usd === "number") {
+      costCadMissingCount++;
+    }
 
     durationSum += row.duration_ms;
 
@@ -116,6 +151,8 @@ export function summarizeUsagePeriod(rows: UsageEventRow[]): UsagePeriodSummary 
     timeouts,
     serverErrors5xx,
     lastCallAt,
+    costCadKnown: round6(costCadKnown),
+    costCadMissingCount,
   };
 }
 
@@ -132,6 +169,9 @@ export function buildOperationBreakdown(rows: UsageEventRow[]): OperationBreakdo
       successRatePercent: summary.calls > 0 ? Math.round((summary.successCount / summary.calls) * 10000) / 100 : null,
       totalTokens: summary.totalTokens,
       costUsd: summary.costUsd,
+      retryCount: summary.retryCount,
+      costCadKnown: summary.costCadKnown,
+      costCadMissingCount: summary.costCadMissingCount,
     };
   });
 }
@@ -159,6 +199,108 @@ export function buildModelBreakdown(rows: UsageEventRow[]): ModelBreakdownRow[] 
     .sort((a, b) => b.calls - a.calls);
 }
 
+export type UserBreakdownRow = {
+  userId: string | null;
+  calls: number;
+  retryCount: number;
+  totalTokens: number;
+  costUsd: number;
+  costCadKnown: number;
+  costCadMissingCount: number;
+};
+
+/*
+  Admin API Usage Phase 1 - groups already-fetched rows by user_id (a
+  plain in-memory grouping over rows the caller already queried, not a
+  new DB query - see lib/admin/queries/apiCosts.ts). userId is null for
+  any row written before this Phase (or from a call site that could not
+  legitimately determine a userId) - grouped together rather than
+  dropped, so no real usage silently disappears from a total.
+
+  "calls" here is physical provider request attempts (row count), NOT
+  Career Élan user actions or packages generated - see this module's own
+  Part R header comment and Admin API Usage Phase 1's "call count
+  semantics" requirement. A caller wanting "how many Generate Package
+  actions" must derive that separately (e.g. from applications.
+  generation_request_id), not from this count.
+*/
+export function buildUserBreakdown(rows: UsageEventRow[]): UserBreakdownRow[] {
+  const byUser = new Map<string | null, UsageEventRow[]>();
+
+  for (const row of rows) {
+    const existing = byUser.get(row.user_id);
+    if (existing) existing.push(row);
+    else byUser.set(row.user_id, [row]);
+  }
+
+  return Array.from(byUser.entries())
+    .map(([userId, userRows]) => {
+      const summary = summarizeUsagePeriod(userRows);
+      return {
+        userId,
+        calls: summary.calls,
+        retryCount: summary.retryCount,
+        totalTokens: summary.totalTokens,
+        costUsd: summary.costUsd,
+        costCadKnown: summary.costCadKnown,
+        costCadMissingCount: summary.costCadMissingCount,
+      };
+    })
+    .sort((a, b) => b.calls - a.calls);
+}
+
+function utcYearMonthKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/*
+  Admin API Usage Phase 2 - MONTHLY HISTORY. Pure grouping by UTC
+  calendar-month boundary (matches lib/admin/queries/shared.ts's
+  startOfUtcMonth/startOfNextUtcMonth convention) over rows the caller
+  already fetched - current month "resets" purely because a query for
+  "this month" naturally returns nothing from a month that hasn't
+  started yet, never because any row was deleted, rewritten, or a
+  counter reset. See supabase/migrations/20260816000000_
+  openai_usage_events_cad_columns.sql's sibling design note.
+*/
+export function groupRowsByUtcMonth(rows: UsageEventRow[]): Map<string, UsageEventRow[]> {
+  const byMonth = new Map<string, UsageEventRow[]>();
+
+  for (const row of rows) {
+    const key = utcYearMonthKey(row.created_at);
+    const existing = byMonth.get(key);
+    if (existing) existing.push(row);
+    else byMonth.set(key, [row]);
+  }
+
+  return byMonth;
+}
+
+export type MonthlySummaryRow = UsagePeriodSummary & {
+  yearMonth: string;
+  userCount: number;
+};
+
+/*
+  Newest month first (lexicographic descending sorts "YYYY-MM" keys
+  correctly without a date parse) - matches the History page's required
+  ordering directly.
+*/
+export function buildMonthlySummaries(rows: UsageEventRow[]): MonthlySummaryRow[] {
+  const byMonth = groupRowsByUtcMonth(rows);
+
+  return Array.from(byMonth.entries())
+    .map(([yearMonth, monthRows]) => {
+      const summary = summarizeUsagePeriod(monthRows);
+      const distinctUsers = new Set(
+        monthRows.map((r) => r.user_id).filter((id): id is string => id !== null)
+      );
+      return { ...summary, yearMonth, userCount: distinctUsers.size };
+    })
+    .sort((a, b) => (a.yearMonth < b.yearMonth ? 1 : a.yearMonth > b.yearMonth ? -1 : 0));
+}
+
 export type UsageAggregation = {
   today: UsagePeriodSummary;
   thisMonth: UsagePeriodSummary;
@@ -166,6 +308,7 @@ export type UsageAggregation = {
   projectedMonthEndCostUsd: number;
   perOperation: OperationBreakdownRow[];
   perModel: ModelBreakdownRow[];
+  perUser: UserBreakdownRow[];
 };
 
 /*
@@ -191,5 +334,6 @@ export function aggregateUsageRows(monthRows: UsageEventRow[], now = new Date())
     projectedMonthEndCostUsd,
     perOperation: buildOperationBreakdown(monthRows),
     perModel: buildModelBreakdown(monthRows),
+    perUser: buildUserBreakdown(monthRows),
   };
 }

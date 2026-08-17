@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { guardAdminPage } from "@/lib/admin/pageAuth";
 import AdminDenied from "@/components/admin/AdminDenied";
 import { getApiCostMetrics, type PeriodMetrics } from "@/lib/admin/queries/apiCosts";
@@ -5,6 +6,7 @@ import { PageTitle, CardGrid, MetricCard, Section, Badge } from "@/components/ad
 import { RecordRechargeForm } from "@/components/admin/RecordRechargeForm";
 import { hasPermission } from "@/lib/admin/permissions";
 import type { BudgetStatus } from "@/lib/openai/budget";
+import { OPENAI_OPERATION_LABELS } from "@/lib/openai/operations";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,10 @@ function usd(v: number) {
   return `$${v.toFixed(2)}`;
 }
 
+function cad(v: number) {
+  return `CA$${v.toFixed(2)}`;
+}
+
 function PeriodCards({ p }: { p: PeriodMetrics }) {
   return (
     <CardGrid>
@@ -26,7 +32,8 @@ function PeriodCards({ p }: { p: PeriodMetrics }) {
       <MetricCard label="Success / Failed" metric={{ ...p.successCount, value: `${p.successCount.value} / ${p.errorCount.value}` }} />
       <MetricCard label="Retries" metric={p.retryCount} />
       <MetricCard label="Total Tokens" metric={p.totalTokens} />
-      <MetricCard label="Cost" metric={p.cost} format={(v) => usd(Number(v))} />
+      <MetricCard label="OpenAI API Cost (CAD)" metric={p.costCad} format={(v) => cad(Number(v))} />
+      <MetricCard label="OpenAI API Cost (USD reference)" metric={p.cost} format={(v) => usd(Number(v))} />
       <MetricCard label="Avg Latency" metric={{ ...p.avgLatencyMs, value: p.avgLatencyMs.value === null ? null : `${p.avgLatencyMs.value}ms` }} />
       <MetricCard label="429 (Rate Limited)" metric={p.rateLimited429} />
       <MetricCard label="Timeouts" metric={p.timeouts} />
@@ -45,16 +52,27 @@ export default async function ApiCostsPage() {
 
   return (
     <div>
-      <PageTitle
-        title="AI & API Costs"
-        subtitle="OpenAI call/token/cost metrics below read real telemetry (openai_usage_events). Cost is a local token x price estimate, never provider billing - see each card's classification label."
-      />
+      <div className="mb-4 flex items-center justify-between">
+        <PageTitle
+          title="AI & API Costs"
+          subtitle="OpenAI call/token/cost metrics below read real telemetry (openai_usage_events). Cost figures - USD and CAD alike - are a local token x price estimate, never provider billing; 'Tracked AI Cost' below covers OpenAI only, not RapidAPI/Google Places/Resend (see Other Providers)."
+        />
+        <Link href="/admin/api-costs/history" className="whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800">
+          API Cost History →
+        </Link>
+      </div>
 
-      <Section title="OpenAI — Today">
+      {!m.openAi.cadRateConfiguredNow && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          OPENAI_ACCOUNTING_USD_CAD_RATE is not currently configured (server-only env var) - CAD figures below show as unavailable. USD figures remain available regardless.
+        </div>
+      )}
+
+      <Section title="Tracked AI Cost — Today">
         <PeriodCards p={m.openAi.today} />
       </Section>
 
-      <Section title="OpenAI — This Month">
+      <Section title="Tracked AI Cost — This Month">
         <PeriodCards p={m.openAi.thisMonth} />
         <div className="mt-4">
           <CardGrid>
@@ -63,6 +81,15 @@ export default async function ApiCostsPage() {
             <MetricCard label="Last Call" metric={{ ...m.openAi.thisMonth.lastCallAt, value: m.openAi.thisMonth.lastCallAt.value }} />
           </CardGrid>
         </div>
+      </Section>
+
+      <Section title="Tracked AI Cost — All Time">
+        <PeriodCards p={m.openAi.allTime} />
+        {m.openAi.allTimeRowCapReached && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            All-Time figures are capped at the most recent 50,000 telemetry rows - older rows beyond that are not included above (still permanently retained in openai_usage_events and visible via API Cost History).
+          </div>
+        )}
       </Section>
 
       <Section title="OpenAI Budget">
@@ -150,26 +177,78 @@ export default async function ApiCostsPage() {
         </Section>
       )}
 
+      <Section title="User Usage (this month)">
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-2">User</th>
+                <th className="px-3 py-2">API Calls</th>
+                <th className="px-3 py-2">Retries</th>
+                <th className="px-3 py-2">Tokens</th>
+                <th className="px-3 py-2">Cost (CAD)</th>
+                <th className="px-3 py-2">Cost (USD)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {m.openAi.perUser.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-3 text-slate-400" colSpan={6}>
+                    No calls recorded this month.
+                  </td>
+                </tr>
+              ) : (
+                m.openAi.perUser.map((u) => (
+                  <tr key={u.userId ?? "unattributed"} className="border-b border-slate-100 last:border-0">
+                    <td className="px-3 py-2">{u.email ?? (u.userId ? u.userId : "Unattributed (pre-telemetry call)")}</td>
+                    <td className="px-3 py-2">{u.calls}</td>
+                    <td className="px-3 py-2">{u.retryCount}</td>
+                    <td className="px-3 py-2">{u.totalTokens}</td>
+                    <td className="px-3 py-2">{u.costCad.classification === "NOT_AVAILABLE" ? "—" : cad(Number(u.costCad.value))}</td>
+                    <td className="px-3 py-2 text-slate-400">{usd(u.costUsd)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 text-xs text-slate-400">
+          "API Calls" counts physical OpenAI provider request attempts, not Career Élan user actions or packages generated - a single Generate Package click that retries once counts as 2 calls / 1 retry here.
+        </div>
+      </Section>
+
       <Section title="Per Operation (this month)">
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-3 py-2">Operation</th>
+                <th className="px-3 py-2">Feature</th>
                 <th className="px-3 py-2">Calls</th>
+                <th className="px-3 py-2">Retries</th>
                 <th className="px-3 py-2">Success Rate</th>
                 <th className="px-3 py-2">Tokens</th>
-                <th className="px-3 py-2">Cost</th>
+                <th className="px-3 py-2">Cost (CAD)</th>
+                <th className="px-3 py-2">Cost (USD)</th>
               </tr>
             </thead>
             <tbody>
               {m.openAi.perOperation.map((op) => (
                 <tr key={op.operation} className="border-b border-slate-100 last:border-0">
-                  <td className="px-3 py-2 font-mono text-xs">{op.operation}</td>
+                  <td className="px-3 py-2">
+                    {OPENAI_OPERATION_LABELS[op.operation]}
+                    <span className="ml-1 font-mono text-xs text-slate-400">({op.operation})</span>
+                  </td>
                   <td className="px-3 py-2">{op.calls}</td>
+                  <td className="px-3 py-2">{op.retryCount}</td>
                   <td className="px-3 py-2">{op.successRatePercent === null ? "—" : `${op.successRatePercent}%`}</td>
                   <td className="px-3 py-2">{op.totalTokens}</td>
-                  <td className="px-3 py-2">{usd(op.costUsd)}</td>
+                  <td className="px-3 py-2">
+                    {op.costCadKnown === 0 && op.costCadMissingCount > 0 ? "—" : cad(op.costCadKnown)}
+                    {op.costCadMissingCount > 0 && (
+                      <span className="ml-1 text-xs text-amber-600">({op.costCadMissingCount} unconverted)</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-slate-400">{usd(op.costUsd)}</td>
                 </tr>
               ))}
             </tbody>

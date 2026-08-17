@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { withOpenAiTelemetry } from "./openai/telemetry";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -141,7 +142,19 @@ export function buildCareerMemoryDraftText(memory: any): string {
   return buildCareerMemoryDraft(memory).trim();
 }
 
-export async function buildResumeFromCareerMemory(memory: any) {
+/*
+  Admin API Usage Phase 1 - options.userId is threaded through from
+  resolveSelectedResume()'s own userId parameter (lib/resume-service.ts)
+  purely for telemetry attribution. Optional and defaults to undefined
+  so any other caller (e.g. the real-DB test scripts under
+  fixtures/scripts/ that call this indirectly with no options) keeps
+  working unchanged - the wrapped OpenAI request itself, its model, and
+  its output are completely unaffected by this parameter.
+*/
+export async function buildResumeFromCareerMemory(
+  memory: any,
+  options: { userId?: string | null } = {}
+) {
   try {
     const draft = buildCareerMemoryDraft(memory);
 
@@ -181,21 +194,41 @@ Career Memory Draft:
 ${draft}
 `;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      temperature: 0,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an expert Canadian ATS resume writer.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    });
+    /*
+      Admin API Usage Phase 1 - closes the confirmed telemetry gap: this
+      is the only real OpenAI call site in the repo that previously
+      bypassed withOpenAiTelemetry() entirely. "OTHER" is the closest
+      existing valid operation classification (see
+      lib/openai/operations.ts's OPENAI_OPERATION_LABELS) - this call
+      does not fit any of the 8 named feature operations, and adding a
+      new enum/DB-check-constraint value was explicitly out of scope for
+      this phase. The model, prompt, and request body below are
+      byte-for-byte unchanged from before this wrapper was added.
+    */
+    const completion = await withOpenAiTelemetry(
+      {
+        operation: "OTHER",
+        model: "gpt-4.1",
+        retryCount: 0,
+        userId: options.userId ?? null,
+      },
+      () =>
+        openai.chat.completions.create({
+          model: "gpt-4.1",
+          temperature: 0,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an expert Canadian ATS resume writer.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        })
+    );
 
     const resume =
       completion.choices[0].message.content?.trim() || "";

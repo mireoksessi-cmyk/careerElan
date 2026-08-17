@@ -25,6 +25,7 @@ import OpenAI from "openai";
 import { supabaseAdmin } from "../supabaseAdmin";
 import { logOperationalEvent } from "../observability/logger";
 import { estimateCostUsd } from "./pricing";
+import { getConfiguredUsdToCadRate, convertUsdToCad } from "./currency";
 import { checkAndTriggerBudgetAlerts } from "./budgetAlerts";
 import type { OpenAiOperation } from "./operations";
 
@@ -114,6 +115,25 @@ async function persistUsageEvent(row: {
 }): Promise<void> {
   try {
     const cost = estimateCostUsd(row.model, row.usage.inputTokens, row.usage.outputTokens);
+
+    /*
+      Admin API Usage Phase 2 - CAD is computed ONCE, here, using
+      whatever rate is configured at this exact insert moment, and then
+      persisted alongside the USD figure. This is the one and only
+      place a USD->CAD conversion happens for this row, ever - reporting
+      code (lib/openai/usageAggregation.ts) only sums the persisted
+      estimated_cost_cad column, it never re-derives CAD from
+      estimated_cost_usd. That is what keeps a historical row's CAD
+      value stable even if OPENAI_ACCOUNTING_USD_CAD_RATE changes later.
+      null (never a fabricated conversion) whenever no rate was
+      configured at insert time, or the USD cost itself is unknown.
+    */
+    const cadRate = getConfiguredUsdToCadRate();
+    const estimatedCostCad =
+      cost.classification === "ESTIMATED_COST" && cadRate !== null
+        ? convertUsdToCad(cost.costUsd, cadRate)
+        : null;
+
     const { error } = await supabaseAdmin.from("openai_usage_events").insert({
       operation: row.operation,
       model: row.model,
@@ -124,6 +144,8 @@ async function persistUsageEvent(row: {
       total_tokens: row.usage.totalTokens,
       estimated_cost_usd: cost.costUsd,
       cost_classification: cost.classification,
+      estimated_cost_cad: estimatedCostCad,
+      usd_cad_rate: estimatedCostCad !== null ? cadRate : null,
       retry_count: row.retryCount,
       http_status_class: row.httpStatusClass,
       error_category: row.errorCategory,

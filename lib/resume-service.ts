@@ -186,7 +186,7 @@ export async function resolveSelectedResume(
 
   // source === "career_memory"
   const generationText = includeGenerationText
-    ? await buildResumeFromCareerMemory(memory)
+    ? await buildResumeFromCareerMemory(memory, { userId })
     : "";
 
   if (includeGenerationText && !generationText.trim()) {
