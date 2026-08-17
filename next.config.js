@@ -17,13 +17,9 @@ const nextConfig = {
   ],
 
   /*
-    Two runtime inputs that output file tracing cannot discover on its own,
-    because neither is reached through a static import:
+    One runtime input that output file tracing cannot discover on its own,
+    because it is not reached through a static import:
 
-    - build/chromium-runtime/** : the packaged Chromium runtime produced by
-      scripts/prepare-chromium-runtime.mjs before `next build`. It is read at
-      request time by lib/documentPreservation/sharedBrowser.ts, which resolves
-      it by walking up from its own module location.
     - playwright-core/browsers.json : coreBundle.js builds its browser registry
       at module load via require(path.join(packageRoot, "browsers.json")), a
       runtime-computed path the tracer cannot follow. Its absence is not
@@ -31,16 +27,20 @@ const nextConfig = {
       playwright...: Cannot find module '/var/task/node_modules/playwright-core/
       browsers.json'" in Production, thrown before executablePath was ever read.
 
+    The Chromium runtime itself is deliberately NOT traced. Including it put
+    ~157 MB of payload into the traced set and pushed ___netlify-server-handler
+    past Netlify's 250 MB function limit, failing the deploy at upload. The
+    runtime is now streamed from an immutable GitHub Release into /tmp on cold
+    start by lib/documentPreservation/sharedBrowser.ts, so the handler carries
+    none of it.
+
     Key "/*" targets all routes, which is what this Next version's own output.md
     documents for a global include. Netlify packs every route into one
     ___netlify-server-handler, so a per-route key would save nothing while
     risking a missed route through bracket-segment escaping.
   */
   outputFileTracingIncludes: {
-    "/*": [
-      "./build/chromium-runtime/**",
-      "./node_modules/playwright-core/browsers.json",
-    ],
+    "/*": ["./node_modules/playwright-core/browsers.json"],
   },
 
   eslint: {

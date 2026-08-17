@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:all": "supabase start && next dev",
-    "build": "node scripts/prepare-chromium-runtime.mjs && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test"
