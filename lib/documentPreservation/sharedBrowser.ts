@@ -39,48 +39,7 @@ export async function getSharedBrowser(): Promise<Browser> {
       only now from the same await that would have launched anyway.
     */
     const { chromium } = await import("playwright");
-
-    /*
-      Lambda-only branch. Playwright resolves its browser from the
-      ms-playwright cache, which exists on a developer machine but is not
-      part of the deployed function bundle - the deployed
-      ___netlify-server-handler is ~26 MB, and Playwright's own Chromium
-      measures 284-428 MB, so it cannot be shipped inside AWS Lambda's
-      250 MB unzipped limit at any configuration. @sparticuz/chromium
-      instead ships a 65 MB Brotli-compressed Chromium that inflates into
-      /tmp on first launch, which does fit.
-
-      AWS_LAMBDA_FUNCTION_NAME is the detection signal because it describes
-      the actual capability boundary - "is this process inside Lambda", which
-      is exactly where the bundled browser is missing. It is set by every AWS
-      managed runtime (Netlify Functions are aws_lambda/nodejs24.x per the
-      deploy manifest) and is absent in `next dev`, in tests, and at build
-      time. Deliberately NOT process.env.URL/NETLIFY: those are also set by
-      `netlify dev` locally, which would drag the Lambda path onto a
-      developer machine.
-
-      Everything below the branch is unchanged: same Playwright API, same
-      headless:true, same singleton, same close semantics. Locally nothing
-      about this function's behavior differs from before - no @sparticuz
-      import is evaluated and no /tmp extraction happens.
-
-      NOTE, unresolved by design: Playwright 1.62.1 expects Chromium
-      151.0.7922.34 (playwright-core/browsers.json) while @sparticuz/chromium
-      149.0.0 supplies Chromium 149. Upstream documents this exact
-      playwright + executablePath pairing, and the only browser APIs this
-      codebase uses are setContent/evaluate/pdf, but the skew is real and is
-      not claimed to be proven until a Production render succeeds.
-    */
-    if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
-      const lambdaChromium = (await import("@sparticuz/chromium")).default;
-      sharedBrowser = await chromium.launch({
-        args: lambdaChromium.args,
-        executablePath: await lambdaChromium.executablePath(),
-        headless: true,
-      });
-    } else {
-      sharedBrowser = await chromium.launch({ headless: true });
-    }
+    sharedBrowser = await chromium.launch({ headless: true });
   }
   return sharedBrowser;
 }
