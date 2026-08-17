@@ -1,23 +1,22 @@
 /*
-  Phase 6F - dev-only Template Gallery listing endpoint. Mirrors the
-  EXISTING app/api/internal/resume-structured-preview/route.ts
-  convention exactly: same isNetlifyRuntime() gate, same unauthenticated-
-  but-local-only posture (this endpoint only ever reads registry
-  metadata + a static synthetic fixture, never a real user's data, so
-  it does not need withCanonicalAuth()'s session requirement - see that
-  route's own header comment for why an unauthenticated fixture-only
-  preview route is an established, safe pattern in this codebase).
-  Never wired into the production Template Selector (lib/brand/render/
-  templateId.ts) - spec section 12/22.
+  Phase 6F - Template catalog listing endpoint, now confirmed to be a
+  real Production dependency: both app/career-memory/page.tsx's
+  runInlineCanonicalFlow() (loadInlineTemplateList()) and
+  runManualCanonicalFlow() fetch this route as their ONLY source for
+  the Step 9 "Choose a template" card list, for the uploaded-resume and
+  Built From Scratch flows respectively. The previous isNetlifyRuntime()
+  404 gate (originally mirrored from resume-structured-preview/route.ts,
+  a genuinely dev-only route) was factually wrong for how this endpoint
+  is actually used - it made Production Career Memory always receive
+  templates: [] (confirmed via Production read-only audit: empty
+  template cards, default_template_id never set). Removed. Response
+  content is unchanged and remains unauthenticated by original design:
+  only static template capability metadata (id/label/enabled flags),
+  never a real user's data - see listTemplates()/buildCapabilityMatrix().
 */
 import { NextResponse } from "next/server";
-import { isNetlifyRuntime } from "@/lib/generatePackage/backgroundTarget";
 
 export async function GET() {
-  if (isNetlifyRuntime()) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-
   const { ensureTemplatesRegistered } = await import("@/lib/resumeTemplates/registry/bootstrap");
   const { listTemplates } = await import("@/lib/resumeTemplates/registry/templateRegistry");
   const { buildCapabilityMatrix } = await import("@/lib/resumeTemplates/engine/templateCapabilities");
