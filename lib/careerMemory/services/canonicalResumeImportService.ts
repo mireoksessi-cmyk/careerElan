@@ -175,11 +175,33 @@ export class CanonicalResumeImportService {
         "IMPORT_ANALYSIS_TIMEOUT",
         "This resume took too long to process for import. Please try again or upload a simpler file."
       );
-    } catch (timeoutError) {
-      if (timeoutError instanceof UploadValidationError) {
-        throw new ValidationError([`${timeoutError.code}: ${timeoutError.message}`]);
+    } catch (analysisError) {
+      if (analysisError instanceof UploadValidationError) {
+        throw new ValidationError([`${analysisError.code}: ${analysisError.message}`]);
       }
-      throw timeoutError;
+      if (analysisError instanceof ValidationError || analysisError instanceof NotFoundError) {
+        throw analysisError;
+      }
+      /*
+        Production PDF-analysis error conversion - previously any OTHER
+        thrown error here (a raw runtime/module-load failure - e.g.
+        pdfjs-dist's own internal exceptions, not one of this codebase's
+        own domain errors) propagated unconverted past this service,
+        landing in withCanonicalAuth's generic catch as an opaque "An
+        unexpected error occurred." (or, on some failure modes, a
+        response the client couldn't even parse error.message from at
+        all). Converting it here to a stable ValidationError keeps the
+        response a clean, safe JSON body the client already knows how to
+        display (page.tsx's importData.error.message branch), without
+        ever exposing the original error's own message/stack - which
+        could contain filesystem paths or other internal detail - to the
+        caller. The LOSSLESS_ and STRUCTURE_ prefixed validation failures below are
+        unaffected - they are already ValidationError instances thrown
+        outside this catch's scope.
+      */
+      throw new ValidationError([
+        `Canonical resume analysis failed before import could be completed for resume "${resumeId}". Please try again or contact support if this persists.`,
+      ]);
     }
     const losslessDoc = buildLosslessResumeDocument(layoutResult, {
       fileName: resume.file_name ?? "resume",
