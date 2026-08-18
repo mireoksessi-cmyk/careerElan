@@ -2750,11 +2750,12 @@ return;
     if (uploadedCoverLetterKind === "txt") {
       return <pre className="min-h-[900px] whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-10 text-sm leading-7 text-slate-800 shadow-xl">{memoryData.uploadedCoverLetterText || "TXT cover letter preview is empty."}</pre>;
     }
-    if (uploadedCoverLetterKind === "docx") {
+    if (uploadedCoverLetterKind === "docx" && uploadedCoverLetterUrl) {
       return (
-        <div className="flex min-h-[900px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-xl">
-          <div><p className="text-5xl">📄</p><h3 className="mt-5 text-2xl font-black text-slate-950">DOCX uploaded</h3><p className="mt-3 max-w-md text-sm leading-6 text-slate-500">Browser preview for DOCX is not available in this page yet. Convert DOCX to PDF on the backend or extract its text before showing the full cover letter.</p><p className="mt-4 text-sm font-bold text-blue-600">{memoryData.uploadedCoverLetterName}</p></div>
-        </div>
+        <UploadedCoverLetterDocxPreview
+          fileUrl={uploadedCoverLetterUrl}
+          fileName={memoryData.uploadedCoverLetterName}
+        />
       );
     }
     return <div className="flex min-h-[900px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-xl"><div><p className="text-5xl">⚠️</p><h3 className="mt-5 text-2xl font-black text-slate-950">Preview not available</h3><p className="mt-3 max-w-md text-sm leading-6 text-slate-500">Please upload a PDF, DOCX, or TXT cover letter.</p></div></div>;
@@ -4309,6 +4310,111 @@ return;
       </div>
       <CareerElanFooter />
     </main>
+  );
+}
+
+/*
+  Cover letter DOCX preview. Browsers cannot render a .docx in an <iframe>
+  the way they render a PDF, which is why this branch previously showed a
+  "preview is not available in this page yet" card. docx-preview (already a
+  dependency, already used the same way by components/resume/
+  DocxResumePreview.tsx's Original View) renders the real file client-side,
+  so nothing about the upload or the conversion changes: the source here is
+  the object URL applyCoverLetterAnalysisResult() already created from the
+  file the user just picked, so there is no second upload, no re-conversion,
+  no mammoth call and no API request - a blob: fetch reads memory the page
+  already holds.
+
+  Deliberately NOT reusing DocxResumePreview itself: that component is bound
+  to a persisted resume row (resume.id, resume.extracted_layout.html) and
+  fetches /api/resumes/[id]/preview-url, none of which a just-uploaded cover
+  letter has at this point in the flow. Reusing its docx-preview pattern
+  locally is what keeps this a one-file UI change instead of a new endpoint.
+
+  A render failure keeps the uploaded cover letter exactly as it is and falls
+  back to the same informational card this branch showed before - it never
+  clears the upload or touches any state.
+*/
+function UploadedCoverLetterDocxPreview({
+  fileUrl,
+  fileName,
+}: {
+  fileUrl: string;
+  fileName: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    const container = containerRef.current;
+
+    if (!container || !fileUrl) return;
+
+    container.innerHTML = "";
+    setStatus("loading");
+
+    (async () => {
+      try {
+        const fileRes = await fetch(fileUrl);
+
+        if (!fileRes.ok) {
+          throw new Error("DOWNLOAD_FAILED");
+        }
+
+        const blob = await fileRes.blob();
+
+        // Dynamic import keeps docx-preview (a browser-only library) out of
+        // any server-evaluated module graph, exactly as DocxResumePreview does.
+        const docxPreview = await import("docx-preview");
+
+        if (cancelled) return;
+
+        await docxPreview.renderAsync(blob, container, undefined, {
+          // Images as data URLs rather than blob object URLs, so there is
+          // nothing left to revoke when this unmounts.
+          useBase64URL: true,
+        });
+
+        if (cancelled) return;
+
+        setStatus("success");
+      } catch (error) {
+        if (cancelled) return;
+
+        // Never surface the raw error - fall back to the informational card.
+        console.error("COVER LETTER DOCX PREVIEW RENDER ERROR =", error);
+        container.innerHTML = "";
+        setStatus("error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fileUrl]);
+
+  return (
+    <div className="min-h-[900px] overflow-auto rounded-2xl border border-slate-200 bg-white p-10 shadow-xl">
+      {status !== "success" && (
+        <div className="flex min-h-[820px] items-center justify-center text-center">
+          <div>
+            <p className="text-5xl">📄</p>
+            <h3 className="mt-5 text-2xl font-black text-slate-950">
+              {status === "loading" ? "Preparing preview…" : "DOCX uploaded"}
+            </h3>
+            {status === "error" && (
+              <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
+                This cover letter was uploaded successfully, but its preview could not be displayed here.
+              </p>
+            )}
+            <p className="mt-4 text-sm font-bold text-blue-600">{fileName}</p>
+          </div>
+        </div>
+      )}
+
+      <div ref={containerRef} className="docx-preview text-sm leading-7" />
+    </div>
   );
 }
 
