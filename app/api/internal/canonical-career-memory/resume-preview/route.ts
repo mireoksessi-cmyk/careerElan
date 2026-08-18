@@ -12,6 +12,49 @@ import type { PaperSize } from "@/lib/documentPreservation/professionalAtsHtml/t
 import type { TemplateDensity } from "@/lib/resumeTemplates/contracts/types";
 
 /*
+  Diagnostic-only instrumentation. Production reached browser_launch_success and
+  then failed with "browser.newPage: Target crashed", and this file had no
+  logging at all, so which stage died was invisible server-side - the message
+  only ever reached the client through the route's JSON body. These events add
+  no control flow: every original return value, thrown error and code path is
+  preserved exactly, including the deliberate placement of newPage OUTSIDE the
+  try below, whose failures propagate to the caller rather than degrading to an
+  empty result - which is how the crash surfaced at all.
+*/
+const MAX_ATS_ERROR_CHARS = 8000;
+const RE_QUERY = /\?[A-Za-z0-9_%\-.=&+/:]+/g;
+
+/*
+  Correlates these stages with the browser_* events already logged from the same
+  execution environment. pid and the two Lambda log-name variables are not
+  credentials, and no user, document or request value is read.
+*/
+function atsEnvironmentIdentity(): Record<string, unknown> {
+  return {
+    pid: process.pid,
+    logStream: process.env.AWS_LAMBDA_LOG_STREAM_NAME || null,
+    logGroup: process.env.AWS_LAMBDA_LOG_GROUP_NAME || null,
+  };
+}
+
+/*
+  Chromium/Playwright crash text is the point of this log, so sanitisation is
+  narrow: only query strings are stripped, in case a signed URL ever appears.
+  Nothing here reads process.env.
+*/
+function boundedAtsErrorMessage(raw: string): string {
+  const redacted = raw.replace(RE_QUERY, "?<redacted>");
+  return redacted.length > MAX_ATS_ERROR_CHARS
+    ? redacted.slice(0, MAX_ATS_ERROR_CHARS) + "…[truncated " + (redacted.length - MAX_ATS_ERROR_CHARS) + " chars]"
+    : redacted;
+}
+
+/* Metadata only - never HTML, resume text, ids, or user values. */
+function logAtsEvent(event: string, detail: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ domain: "professionalAtsRender", event, ...detail }));
+}
+
+/*
   Phase 6I.3 - all 4 templates render a full standalone HTML document
   whose <body> is a flat sequence of sibling page-wrapper elements, one
   per physical page (confirmed for all 4: professional-ats's own
@@ -212,6 +255,7 @@ export function makeHandleResumePreview(request: Request) {
 
     const renderOptions = { templateId, useTailored: false as const, paperSize: rawPaperSize, density: rawDensity, locale, generatedAt: new Date(0).toISOString() };
 
+    const renderStartedAt = Date.now();
     try {
       if (rawFormat === "html") {
         /*
@@ -234,6 +278,22 @@ export function makeHandleResumePreview(request: Request) {
       const contentType = rawFormat === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       return new NextResponse(new Uint8Array(result.bytes), { status: 200, headers: { "content-type": contentType, "cache-control": "no-store" } });
     } catch (error) {
+      /*
+        Logged BEFORE TemplateRenderingError replaces it. The client response is
+        untouched - same error type, same 200-character slice, same status - but
+        the original render failure is otherwise recorded nowhere server-side,
+        which is why "browser.newPage: Target crashed" was visible on screen and
+        absent from every log.
+      */
+      logAtsEvent("template_render_failure", {
+        ...atsEnvironmentIdentity(),
+        templateId,
+        format: rawFormat,
+        variant: rawVariant,
+        elapsedMs: Date.now() - renderStartedAt,
+        errorName: error instanceof Error ? error.name : "Unknown",
+        message: boundedAtsErrorMessage(error instanceof Error ? String(error.message) : String(error)),
+      });
       throw new TemplateRenderingError(error instanceof Error ? error.message.slice(0, 200) : "unknown rendering failure");
     }
   };

@@ -40,6 +40,49 @@ const MEASURE_TIMEOUT_MS = 15_000;
 const MEASURE_VIEWPORT_WIDTH = 1400;
 const MEASURE_VIEWPORT_HEIGHT = 20_000;
 
+/*
+  Diagnostic-only instrumentation. Production reached browser_launch_success and
+  then failed with "browser.newPage: Target crashed", and this file had no
+  logging at all, so which stage died was invisible server-side - the message
+  only ever reached the client through the route's JSON body. These events add
+  no control flow: every original return value, thrown error and code path is
+  preserved exactly, including the deliberate placement of newPage OUTSIDE the
+  try below, whose failures propagate to the caller rather than degrading to an
+  empty result - which is how the crash surfaced at all.
+*/
+const MAX_ATS_ERROR_CHARS = 8000;
+const RE_QUERY = /\?[A-Za-z0-9_%\-.=&+/:]+/g;
+
+/*
+  Correlates these stages with the browser_* events already logged from the same
+  execution environment. pid and the two Lambda log-name variables are not
+  credentials, and no user, document or request value is read.
+*/
+function atsEnvironmentIdentity(): Record<string, unknown> {
+  return {
+    pid: process.pid,
+    logStream: process.env.AWS_LAMBDA_LOG_STREAM_NAME || null,
+    logGroup: process.env.AWS_LAMBDA_LOG_GROUP_NAME || null,
+  };
+}
+
+/*
+  Chromium/Playwright crash text is the point of this log, so sanitisation is
+  narrow: only query strings are stripped, in case a signed URL ever appears.
+  Nothing here reads process.env.
+*/
+function boundedAtsErrorMessage(raw: string): string {
+  const redacted = raw.replace(RE_QUERY, "?<redacted>");
+  return redacted.length > MAX_ATS_ERROR_CHARS
+    ? redacted.slice(0, MAX_ATS_ERROR_CHARS) + "…[truncated " + (redacted.length - MAX_ATS_ERROR_CHARS) + " chars]"
+    : redacted;
+}
+
+/* Metadata only - never HTML, resume text, ids, or user values. */
+function logAtsEvent(event: string, detail: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ domain: "professionalAtsRender", event, ...detail }));
+}
+
 function emptyResult(error: string): FlatMeasurementResult {
   return { measurable: false, measurementErrors: [error], contentWidthPx: 0, sectionHeadings: [], blocks: [] };
 }
@@ -58,10 +101,44 @@ export async function measureFlatContent(
     return emptyResult(`browser launch failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const page = await browser.newPage({ viewport: { width: MEASURE_VIEWPORT_WIDTH, height: MEASURE_VIEWPORT_HEIGHT } });
+  const measureStartedAt = Date.now();
+  logAtsEvent("professional_ats_measure_start", {
+    ...atsEnvironmentIdentity(),
+    paperSize,
+    density,
+    htmlBytes: html.length,
+    viewportWidth: MEASURE_VIEWPORT_WIDTH,
+    viewportHeight: MEASURE_VIEWPORT_HEIGHT,
+  });
 
+  /* newPage deliberately stays OUTSIDE the try, exactly as before, so its
+     failure still propagates to the caller instead of degrading to an empty
+     result. It is only observed here and rethrown unchanged. */
+  logAtsEvent("professional_ats_measure_page_open_start", { ...atsEnvironmentIdentity() });
+  const page = await (async () => {
+    try {
+      const opened = await browser.newPage({ viewport: { width: MEASURE_VIEWPORT_WIDTH, height: MEASURE_VIEWPORT_HEIGHT } });
+      logAtsEvent("professional_ats_measure_page_open_success", { ...atsEnvironmentIdentity(), elapsedMs: Date.now() - measureStartedAt });
+      return opened;
+    } catch (error) {
+      logAtsEvent("professional_ats_measure_failure", {
+        ...atsEnvironmentIdentity(),
+        stage: "newPage",
+        elapsedMs: Date.now() - measureStartedAt,
+        errorName: error instanceof Error ? error.name : "Unknown",
+        message: boundedAtsErrorMessage(error instanceof Error ? String(error.message) : String(error)),
+        viewportWidth: MEASURE_VIEWPORT_WIDTH,
+        viewportHeight: MEASURE_VIEWPORT_HEIGHT,
+      });
+      throw error;
+    }
+  })();
+
+  let stage = "setContent";
   try {
+    logAtsEvent("professional_ats_measure_set_content_start", { ...atsEnvironmentIdentity(), htmlBytes: html.length });
     await page.setContent(html, { waitUntil: "domcontentloaded", timeout: MEASURE_TIMEOUT_MS });
+    logAtsEvent("professional_ats_measure_set_content_success", { ...atsEnvironmentIdentity(), elapsedMs: Date.now() - measureStartedAt });
 
     /* Font-load-complete + one rendered-frame wait, so measurement
        reads a stable layout (spec requirement: measure only after
@@ -69,9 +146,14 @@ export async function measureFlatContent(
        here is system Arial/Helvetica (no @font-face), so this
        resolves near-instantly - the wait exists for correctness under
        any future font-stack change, not because it's currently slow. */
+    stage = "fontsReady";
+    logAtsEvent("professional_ats_measure_fonts_ready_start", { ...atsEnvironmentIdentity() });
     await page.evaluate(() => document.fonts.ready);
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    logAtsEvent("professional_ats_measure_fonts_ready_success", { ...atsEnvironmentIdentity(), elapsedMs: Date.now() - measureStartedAt });
 
+    stage = "evaluate";
+    logAtsEvent("professional_ats_measure_evaluate_start", { ...atsEnvironmentIdentity() });
     const result = await page.evaluate((contentId) => {
       const contentEl = document.getElementById(contentId);
       if (!contentEl) return { error: "measure content root not found" };
@@ -117,6 +199,13 @@ export async function measureFlatContent(
         blocks,
       };
     }, MEASURE_CONTENT_ID);
+    logAtsEvent("professional_ats_measure_evaluate_success", {
+      ...atsEnvironmentIdentity(),
+      elapsedMs: Date.now() - measureStartedAt,
+      sectionHeadingCount: Array.isArray(result.sectionHeadings) ? result.sectionHeadings.length : null,
+      blockCount: Array.isArray(result.blocks) ? result.blocks.length : null,
+      contentWidthPx: typeof result.contentWidthPx === "number" ? result.contentWidthPx : null,
+    });
 
     if (typeof result.error === "string") {
       return emptyResult(result.error);
@@ -133,8 +222,19 @@ export async function measureFlatContent(
       blocks: result.blocks,
     };
   } catch (error) {
+    logAtsEvent("professional_ats_measure_failure", {
+      ...atsEnvironmentIdentity(),
+      stage,
+      elapsedMs: Date.now() - measureStartedAt,
+      errorName: error instanceof Error ? error.name : "Unknown",
+      message: boundedAtsErrorMessage(error instanceof Error ? String(error.message) : String(error)),
+      viewportWidth: MEASURE_VIEWPORT_WIDTH,
+      viewportHeight: MEASURE_VIEWPORT_HEIGHT,
+    });
     return emptyResult(`measurement failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
+    logAtsEvent("professional_ats_measure_page_close_start", { ...atsEnvironmentIdentity() });
     await page.close();
+    logAtsEvent("professional_ats_measure_page_close_success", { ...atsEnvironmentIdentity(), elapsedMs: Date.now() - measureStartedAt });
   }
 }
