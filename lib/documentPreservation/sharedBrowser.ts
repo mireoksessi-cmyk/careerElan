@@ -633,7 +633,7 @@ async function initialiseLambdaBrowser(): Promise<Browser> {
       deliberately absent: they are Puppeteer-oriented flags that conflict with
       Playwright's process model.
     */
-    launched = await chromium.launch({ executablePath, headless: true });
+    launched = await chromium.launch({ executablePath, headless: true, args: ["--no-zygote"] });
   } catch (error) {
     throw new BrowserRuntimeError(
       "BROWSER_LAUNCH_FAILED",
