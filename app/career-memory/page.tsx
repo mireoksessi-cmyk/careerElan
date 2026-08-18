@@ -1364,6 +1364,37 @@ return true;
   router.replace("/dashboard");
 }
 
+/*
+  Uploaded-resume completion only (mode === "import" && importStage === "parsed").
+  Deliberately NOT continueToDashboard(): that handler opens with
+  `if (!canUseService()) return`, which requires Personal Information, Experience
+  AND Skills. An uploaded resume populates none of them -
+  applyResumeAnalysisResult() sets only uploadedResumeName/uploadedResumeText/
+  resumeSource - so on this screen that gate returned before persistMemory() ever
+  ran, making the button a silent no-op with nothing saved and no message.
+
+  The gates are omitted here rather than removed there, because
+  continueToDashboard() has four other call sites (the required-sections banner,
+  StartScreen, the manual build CTA and renderFullResumePreview) whose policy must
+  not change. Manual/direct resumes keep the required-section requirement in full.
+
+  Safe to persist partially: persistMemory() has no completeness precondition and
+  records `required_completed` honestly, which is the flag the rest of the product
+  (auth/callback routing, find-jobs) still gates on. The template requirement is
+  NOT relaxed - the button stays disabled by inlineTemplateBlocksContinue until a
+  template has been explicitly selected and its preference PUT has succeeded.
+*/
+async function saveImportedResumeAndContinue() {
+  const saved = await persistMemory();
+
+  if (!saved) {
+    return;
+  }
+
+  await refresh();
+  router.replace("/dashboard");
+}
+
 async function confirmTemplateGateAndContinue(templateId: string) {
   setTemplateGateSaving(true);
   setTemplateGateError(null);
@@ -3131,11 +3162,11 @@ return;
 
           <button
             type="button"
-            onClick={continueToDashboard}
+            onClick={saveImportedResumeAndContinue}
             disabled={inlineTemplateBlocksContinue}
             className={`rounded-xl px-6 py-3 font-bold text-white ${inlineTemplateBlocksContinue ? "cursor-not-allowed bg-slate-300" : "bg-blue-600"}`}
           >
-            Continue to Dashboard
+            Save and Continue to Dashboard
           </button>
         </div>
       </>
@@ -3805,14 +3836,28 @@ return;
     </p>
   </div>
 
-  <Button
-    variant="primary"
-    onClick={saveMemory}
-    disabled={mode === "import" && importStage === "parsed" && inlineTemplateBlocksContinue}
-    title={mode === "import" && importStage === "parsed" && inlineTemplateBlocksContinue ? "Choose a template for your resume before saving." : undefined}
-  >
-    Save Memory
-  </Button>
+  {/*
+    Hidden on the two upload-completion screens only. Each already ends in its
+    own "Save and Continue to Dashboard" button that persists before
+    navigating (continueToDashboard() and saveCoverLetterAndContinue(), both
+    via persistMemory()), so a second save affordance in the header was a
+    redundant, competing call to action. Every other mode - build, and either
+    import flow before its result is ready - keeps this header button exactly
+    as it was; saveMemory itself is untouched and still used here.
+  */}
+  {!(
+    (mode === "import" && importStage === "parsed") ||
+    (mode === "importCoverLetter" && coverLetterImportStage === "parsed")
+  ) && (
+    <Button
+      variant="primary"
+      onClick={saveMemory}
+      disabled={mode === "import" && importStage === "parsed" && inlineTemplateBlocksContinue}
+      title={mode === "import" && importStage === "parsed" && inlineTemplateBlocksContinue ? "Choose a template for your resume before saving." : undefined}
+    >
+      Save Memory
+    </Button>
+  )}
 </header>
 
 {renderRequiredBanner()}
@@ -4083,7 +4128,7 @@ return;
           onClick={saveCoverLetterAndContinue}
           className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white"
         >
-          Save & Continue
+          Save and Continue to Dashboard
         </button>
       </div>
     )}
