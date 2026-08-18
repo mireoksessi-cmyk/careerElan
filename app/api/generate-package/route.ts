@@ -27,6 +27,7 @@ import {
   type GenerationMode,
   type LayoutConstraints,
 } from "@/lib/generatePackage/shared";
+import { entitlementEmailHmac } from "@/lib/security/generatePackageEntitlementIdentity";
 import { decideGenerationRoute } from "@/lib/careerMemory/orchestration/canonicalTrafficRouter";
 import { dispatchCanonicalGeneration } from "@/lib/careerMemory/orchestration/canonicalGenerateDispatchService";
 import { logCanonicalMetric } from "@/lib/careerMemory/orchestration/canonicalProductionMetrics";
@@ -91,14 +92,21 @@ const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
   of throwing. Best-effort: the reserve_generate_package_usage() reconcile
   step is a second, delayed safety net for any path this call itself
   can't reach, so a release failure here is logged, never thrown.
+
+  Stage 2B: the id passed in is the id the reservation was actually MADE
+  under - the founding entitlement owner, which is not necessarily the
+  current auth user - because release_generate_package_usage() matches on
+  (p_user_id, p_request_id). Passing the auth uuid instead would silently
+  refund nothing. It is null whenever no reservation was taken, which the
+  guard below already treats as a no-op.
 */
 async function releaseQuotaReservation(
   quotaReserved: boolean,
-  userId: string | null,
+  reservationOwnerId: string | null,
   generationRequestId: string | null,
   context: { requestId: string }
 ) {
-  if (!quotaReserved || !userId || !generationRequestId) {
+  if (!quotaReserved || !reservationOwnerId || !generationRequestId) {
     return;
   }
 
@@ -106,7 +114,7 @@ async function releaseQuotaReservation(
     const { error } = await supabaseAdmin.rpc(
       "release_generate_package_usage",
       {
-        p_user_id: userId,
+        p_user_id: reservationOwnerId,
         p_request_id: generationRequestId,
       }
     );
@@ -302,6 +310,7 @@ export async function POST(req: Request) {
   let userId: string | null = null;
   let generationRequestId: string | null = null;
   let quotaReserved = false;
+  let reservationOwnerId: string | null = null;
 
   try {
     const supabase = await createClient();
@@ -378,6 +387,116 @@ export async function POST(req: Request) {
     }
 
     /*
+      Stage 2B - resolve the entitlement identity ONCE, here, before the
+      routing decision below. Both engines then reserve against the same
+      verified-email-derived claim, and a request that fails this gate reaches
+      neither of them.
+
+      Scoped to isNetlifyProductionRuntime() because that is exactly the
+      condition under which either engine reserves quota at all. Outside it
+      nothing is metered, so nothing here runs and non-production behaviour is
+      unchanged.
+    */
+    let emailHmac: string | null = null;
+
+    if (isNetlifyProductionRuntime()) {
+      /*
+        Free vs paid is decided from the SUBSCRIPTION, never from the numeric
+        limit: admin_user_quota_overrides can set any limit for any user, so a
+        limit of 3 does not imply Free. 'active'/'trialing' are precisely the
+        statuses resolve_generate_package_quota_limit() treats as plan-granting
+        (20260817000000_admin_user_controls.sql), so this stays in step with the
+        limit the database will actually apply.
+      */
+      const { data: planGrantingSubscription, error: subscriptionError } =
+        await supabaseAdmin
+          .from("subscriptions")
+          .select("plan_key")
+          .eq("user_id", user.id)
+          .in("status", ["active", "trialing"])
+          // limit(1) because only EXISTENCE matters here, and a user can legitimately hold more than one active/trialing row; resolve_generate_package_quota_limit() tolerates that the same way (a non-STRICT SELECT INTO). Without it maybeSingle() would 500 on a duplicate rather than answering the question asked.
+          .limit(1)
+          .maybeSingle();
+
+      if (subscriptionError) {
+        logSafeError(subscriptionError, {
+          requestId,
+          route: "/api/generate-package",
+          generationRequestId,
+        });
+
+        return NextResponse.json(
+          {
+            error:
+              "We could not verify your monthly usage. Please try again in a moment.",
+            requestId,
+          },
+          { status: 500 }
+        );
+      }
+
+      /*
+        The address comes only from the server-side session User - never the
+        request body, the profile row, or Career Memory. Free callers must have
+        confirmed it before any allowance is spent, because an unconfirmed
+        address proves nothing and would let one person mint an unlimited number
+        of distinct entitlements. Paid callers are not gated on confirmation.
+      */
+      if (!planGrantingSubscription && !user.email_confirmed_at) {
+        return NextResponse.json(
+          {
+            error:
+              "Please confirm your email address before generating a package.",
+            code: "EMAIL_CONFIRMATION_REQUIRED",
+            requestId,
+          },
+          { status: 403 }
+        );
+      }
+
+      /*
+        No address means no entitlement identity can be derived. Fail closed:
+        falling back to the current auth uuid here would hand a recreated
+        account a fresh monthly allowance, which is the exact bypass this
+        design exists to prevent.
+      */
+      if (!user.email) {
+        return NextResponse.json(
+          {
+            error:
+              "We could not verify your monthly usage. Please try again in a moment.",
+            requestId,
+          },
+          { status: 500 }
+        );
+      }
+
+      try {
+        emailHmac = entitlementEmailHmac(user.email);
+      } catch (entitlementIdentityError) {
+        /*
+          Missing or misconfigured secret in production. Logged without the
+          address, the digest or the secret, and never downgraded to a
+          per-uuid fallback - a retryable failure is the safe outcome.
+        */
+        logSafeError(entitlementIdentityError, {
+          requestId,
+          route: "/api/generate-package",
+          generationRequestId,
+        });
+
+        return NextResponse.json(
+          {
+            error:
+              "We could not verify your monthly usage. Please try again in a moment.",
+            requestId,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
+    /*
       Phase 6I - Part A: the ONE routing dispatch point. decideGenerationRoute()
       is the single, isolated routing decision service (see its own file) -
       this route never re-implements or inlines its logic, only branches on
@@ -396,6 +515,13 @@ export async function POST(req: Request) {
       return await dispatchCanonicalGeneration({
         supabase,
         userId: user.id,
+        /*
+          Stage 2B: the entitlement claim is resolved once, above, and handed
+          to the canonical engine rather than recomputed there - so the two
+          engines cannot drift apart on gating rules, and the HMAC secret and
+          the raw address stay confined to this file.
+        */
+        emailHmac,
         memory,
         generationRequestId,
         jobText,
@@ -429,12 +555,40 @@ export async function POST(req: Request) {
       required-but-unused parameter value and a display fallback.
     */
     if (isNetlifyProductionRuntime()) {
+      /*
+        Stage 2B: emailHmac is non-null on every path that reaches here - the
+        gate above returns before this point otherwise. Re-checked rather than
+        asserted so that a future edit which loosens that gate fails closed
+        instead of sending a null claim to the database.
+      */
+      if (!emailHmac) {
+        return NextResponse.json(
+          {
+            error:
+              "We could not verify your monthly usage. Please try again in a moment.",
+            requestId,
+          },
+          { status: 500 }
+        );
+      }
+
       const { data: quotaRows, error: quotaError } =
-        await supabaseAdmin.rpc("reserve_generate_package_usage", {
-          p_user_id: user.id,
-          p_request_id: generationRequestId,
-          p_limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
-        });
+        await supabaseAdmin.rpc(
+          "reserve_generate_package_usage_for_entitlement",
+          {
+            /*
+              p_user_id stays the CURRENT auth user: the RPC resolves this
+              caller's plan limit (subscription / admin override) from it. Only
+              the usage counter is moved onto the founding entitlement owner
+              that p_email_hmac resolves to, so a returning user keeps their own
+              plan's limit while a recreated account inherits its prior usage.
+            */
+            p_user_id: user.id,
+            p_email_hmac: emailHmac,
+            p_request_id: generationRequestId,
+            p_limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
+          }
+        );
 
       if (quotaError) {
         logSafeError(quotaError, {
@@ -477,13 +631,44 @@ export async function POST(req: Request) {
         );
       }
 
+      /*
+        The reservation was made against the founding entitlement owner, not
+        necessarily this auth user, so every later completion/release for this
+        request must target that same id. There is deliberately NO fallback to
+        user.id here: if the RPC did not return an owner the reservation cannot
+        be reconciled, so we fail closed and leave the row to the RPC's own
+        stale-reservation reclaim rather than completing it under the wrong id.
+      */
+      if (!quota.entitlement_owner_id) {
+        logSafeError(
+          new Error(
+            "Quota reservation returned no entitlement owner."
+          ),
+          {
+            requestId,
+            route: "/api/generate-package",
+            generationRequestId,
+          }
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "We could not verify your monthly usage. Please try again in a moment.",
+            requestId,
+          },
+          { status: 500 }
+        );
+      }
+
+      reservationOwnerId = quota.entitlement_owner_id;
       quotaReserved = true;
     }
 
     if (!process.env.OPENAI_API_KEY) {
       await releaseQuotaReservation(
         quotaReserved,
-        userId,
+        reservationOwnerId,
         generationRequestId,
         { requestId }
       );
@@ -542,7 +727,7 @@ export async function POST(req: Request) {
 
         await releaseQuotaReservation(
           quotaReserved,
-          userId,
+          reservationOwnerId,
           generationRequestId,
           { requestId }
         );
@@ -592,7 +777,7 @@ export async function POST(req: Request) {
     ) {
       await releaseQuotaReservation(
         quotaReserved,
-        userId,
+        reservationOwnerId,
         generationRequestId,
         { requestId }
       );
@@ -611,7 +796,7 @@ export async function POST(req: Request) {
     if (!jobText) {
       await releaseQuotaReservation(
         quotaReserved,
-        userId,
+        reservationOwnerId,
         generationRequestId,
         { requestId }
       );
@@ -684,6 +869,16 @@ export async function POST(req: Request) {
       .insert({
         user_id: user.id,
         generation_request_id: generationRequestId,
+        /*
+          Stage 2B: records the id this generation's quota reservation was
+          actually taken under, so the worker's completion/release path
+          (lib/generatePackage/generateCore.ts, via
+          claim_generate_package_worker) targets the same id rather than
+          user_id. Null outside the metered runtime, where no reservation
+          exists - which reads back as the legacy model, exactly as it did
+          before Stage 2B. Never client-supplied.
+        */
+        entitlement_owner_id: reservationOwnerId,
         generation_status: "pending",
         generation_stage: "queued",
         generation_stage_updated_at: new Date().toISOString(),
@@ -756,7 +951,7 @@ export async function POST(req: Request) {
 
           await releaseQuotaReservation(
             quotaReserved,
-            userId,
+            reservationOwnerId,
             generationRequestId,
             { requestId }
           );
@@ -787,11 +982,11 @@ export async function POST(req: Request) {
             re-reserves or re-charges anything - it only ever flips an
             existing 'reserved' row for this same request_id.
           */
-          if (quotaReserved && generationRequestId && userId) {
+          if (quotaReserved && generationRequestId && reservationOwnerId) {
             const { error: completeError } = await supabaseAdmin.rpc(
               "complete_generate_package_usage",
               {
-                p_user_id: userId,
+                p_user_id: reservationOwnerId,
                 p_request_id: generationRequestId,
               }
             );
@@ -898,7 +1093,7 @@ export async function POST(req: Request) {
 
             await releaseQuotaReservation(
               quotaReserved,
-              userId,
+              reservationOwnerId,
               generationRequestId,
               { requestId }
             );
@@ -983,6 +1178,17 @@ export async function POST(req: Request) {
             generation_stage_updated_at: new Date().toISOString(),
             generation_started_at: new Date().toISOString(),
             generation_worker_claimed_at: null,
+            /*
+              Stage 2B: this re-enqueue is charged against the reservation
+              taken by THIS request, so the row must point at that
+              reservation's owner rather than whatever a prior attempt
+              recorded. Realigns pre-Stage-2B rows (NULL) onto the owner the
+              worker must complete under; a no-op when a prior attempt already
+              recorded the same owner, since the same address always resolves
+              to the same founding owner. Not an input-snapshot column, so the
+              rule above does not apply to it.
+            */
+            entitlement_owner_id: reservationOwnerId,
             updated_at: new Date().toISOString(),
           })
           .eq("id", applicationId)
@@ -996,7 +1202,7 @@ export async function POST(req: Request) {
 
         await releaseQuotaReservation(
           quotaReserved,
-          userId,
+          reservationOwnerId,
           generationRequestId,
           { requestId }
         );
@@ -1071,7 +1277,7 @@ export async function POST(req: Request) {
 
       await releaseQuotaReservation(
         quotaReserved,
-        userId,
+        reservationOwnerId,
         generationRequestId,
         { requestId }
       );
@@ -1145,7 +1351,7 @@ export async function POST(req: Request) {
 
     await releaseQuotaReservation(
       quotaReserved,
-      userId,
+      reservationOwnerId,
       generationRequestId,
       { requestId }
     );

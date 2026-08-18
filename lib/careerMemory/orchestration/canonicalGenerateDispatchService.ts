@@ -44,10 +44,17 @@ const ENQUEUE_FETCH_TIMEOUT_MS = 10 * 1000;
 // Same staleness window legacy's own route.ts uses (matches generateCore.ts's OPENAI_CALL_TIMEOUT_MS class of budget) - not re-derived, deliberately identical, since a canonical background worker has the same real-world enqueue/cold-start/generation-latency profile.
 const WORKER_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
-async function releaseQuotaReservation(quotaReserved: boolean, userId: string | null, generationRequestId: string | null) {
-  if (!quotaReserved || !userId || !generationRequestId) return;
+/*
+  Stage 2B: the id passed here is the id the reservation was actually MADE
+  under - the founding entitlement owner, not necessarily the current auth
+  user - because release_generate_package_usage() matches on (p_user_id,
+  p_request_id). Passing the auth uuid instead would silently refund nothing.
+  Null whenever no reservation was taken, which the guard below no-ops on.
+*/
+async function releaseQuotaReservation(quotaReserved: boolean, reservationOwnerId: string | null, generationRequestId: string | null) {
+  if (!quotaReserved || !reservationOwnerId || !generationRequestId) return;
   try {
-    await supabaseAdmin.rpc("release_generate_package_usage", { p_user_id: userId, p_request_id: generationRequestId });
+    await supabaseAdmin.rpc("release_generate_package_usage", { p_user_id: reservationOwnerId, p_request_id: generationRequestId });
   } catch (error) {
     logSafeError(error, { requestId: "canonical-dispatch", route: "/api/generate-package#canonical", generationRequestId });
   }
@@ -77,6 +84,15 @@ async function enqueueCanonicalWorker(params: { requestOrigin: string; applicati
 export type CanonicalDispatchParams = {
   supabase: Awaited<ReturnType<typeof createClient>>;
   userId: string;
+  /*
+    Stage 2B: the caller's entitlement claim, computed once in
+    app/api/generate-package/route.ts. Passed in rather than derived here so
+    the Free/paid rule, the confirmed-address requirement, the raw address and
+    the HMAC secret all live in exactly one file, and the two engines cannot
+    drift apart. Null only outside the metered runtime, where neither engine
+    reserves anything.
+  */
+  emailHmac: string | null;
   memory: Record<string, unknown> | null;
   generationRequestId: string;
   jobText: string;
@@ -92,7 +108,7 @@ export type CanonicalDispatchParams = {
 };
 
 export async function dispatchCanonicalGeneration(params: CanonicalDispatchParams): Promise<NextResponse> {
-  const { supabase, userId, memory, generationRequestId, jobText, title, company, applicantName, analysis, jobUrl, body, requestOrigin, routingReason, canaryStage } = params;
+  const { supabase, userId, emailHmac, memory, generationRequestId, jobText, title, company, applicantName, analysis, jobUrl, body, requestOrigin, routingReason, canaryStage } = params;
 
   /*
     Phase 6I.6.22 - the exact bug this phase closes: canonical never
@@ -120,10 +136,31 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
 
   let quotaReserved = false;
 
+  /*
+    Stage 2B: the id this request's reservation was actually taken under -
+    the founding entitlement owner resolved from emailHmac, which is NOT
+    necessarily userId. Stays null outside the metered runtime, where no
+    reservation exists at all.
+  */
+  let reservationOwnerId: string | null = null;
+
   // ==================== Quota reservation (Part C, Phase 6I.6.23: monthly/calendar-month) - SAME ledger, SAME RPCs, SAME idempotency key as legacy. A user's plan grants a single monthly generation budget regardless of which engine ultimately serves the request - this is what "no double charging" means at the product level, not just at the per-request level. The RPC ignores p_limit and resolves the real, per-user limit itself server-side. ====================
   if (isNetlifyProductionRuntime()) {
-    const { data: quotaRows, error: quotaError } = await supabaseAdmin.rpc("reserve_generate_package_usage", {
+    /*
+      emailHmac is non-null on every path that reaches here: route.ts gates it
+      under the same isNetlifyProductionRuntime() condition and returns before
+      dispatching otherwise. Re-checked rather than asserted so a future edit
+      which loosens that gate fails closed instead of reserving without a claim.
+    */
+    if (!emailHmac) {
+      logSafeError(new Error("Canonical dispatch reached quota reservation without an entitlement claim."), { requestId: "canonical-dispatch", route: "/api/generate-package#canonical", generationRequestId });
+      return NextResponse.json({ error: "We could not verify your monthly usage. Please try again in a moment." }, { status: 500 });
+    }
+
+    // p_user_id stays the CURRENT auth user so the RPC resolves THIS caller's plan limit (subscription / admin override); only the usage counter moves onto the founding entitlement owner that p_email_hmac resolves to.
+    const { data: quotaRows, error: quotaError } = await supabaseAdmin.rpc("reserve_generate_package_usage_for_entitlement", {
       p_user_id: userId,
+      p_email_hmac: emailHmac,
       p_request_id: generationRequestId,
       p_limit: GENERATE_PACKAGE_MONTHLY_LIMIT,
     });
@@ -149,6 +186,19 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
         remaining: 0,
       }, { status: 429 });
     }
+    /*
+      Every later completion/release for this request must target the id the
+      reservation was made under. Deliberately NO fallback to userId: if the
+      RPC returned no owner the reservation cannot be reconciled, so fail
+      closed and leave it to the RPC's own stale-reservation reclaim rather
+      than completing it under the wrong id.
+    */
+    if (!quota.entitlement_owner_id) {
+      logSafeError(new Error("Quota reservation returned no entitlement owner."), { requestId: "canonical-dispatch", route: "/api/generate-package#canonical", generationRequestId });
+      return NextResponse.json({ error: "We could not verify your monthly usage. Please try again in a moment." }, { status: 500 });
+    }
+
+    reservationOwnerId = quota.entitlement_owner_id;
     quotaReserved = true;
     logOperationalEvent({ domain: "generate_package", event: "quota_reserved", userId, generationRequestId, engine: "canonical" });
   }
@@ -161,17 +211,17 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
     if (error instanceof ResumeResolutionError) {
       const isResumeTextUnavailable = error.code === "EMPTY_GENERATION_TEXT";
       const status = error.code === "NO_CAREER_MEMORY" || error.code === "RESUME_NOT_FOUND" ? 404 : error.code === "FETCH_FAILED" ? 500 : isResumeTextUnavailable ? 422 : 400;
-      await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
+      await releaseQuotaReservation(quotaReserved, reservationOwnerId, generationRequestId);
       return NextResponse.json({ error: safeResumeResolutionMessage(error.code), ...fallbackPackage(title, company, applicantName) }, { status });
     }
-    await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
+    await releaseQuotaReservation(quotaReserved, reservationOwnerId, generationRequestId);
     throw error;
   }
 
   const inputResumeText = resolvedResume.source === "uploaded" ? resolvedResume.generationText : buildCareerMemoryDraftText(resolvedResume.previewData);
 
   if (resolvedResume.source === "career_memory" && !inputResumeText.trim()) {
-    await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
+    await releaseQuotaReservation(quotaReserved, reservationOwnerId, generationRequestId);
     return NextResponse.json({ error: "Career Memory did not produce usable resume text. Please add more detail to your Career Memory.", code: "RESUME_TEXT_UNAVAILABLE", ...fallbackPackage(title, company, applicantName) }, { status: 422 });
   }
 
@@ -268,6 +318,8 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
     .insert({
       user_id: userId,
       generation_request_id: generationRequestId,
+      // Stage 2B: records the id this generation's quota reservation was taken under, so the worker's completion/release path (lib/generatePackage/generateCore.ts, via claim_generate_package_worker) targets that id rather than user_id. Null outside the metered runtime, which reads back as the legacy model - exactly as it did before Stage 2B. Never client-supplied.
+      entitlement_owner_id: reservationOwnerId,
       generation_status: "pending",
       generation_stage: "queued",
       generation_stage_updated_at: new Date().toISOString(),
@@ -301,7 +353,7 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
   if (claimInsertError) {
     if (claimInsertError.code !== "23505") {
       logSafeError(claimInsertError, { requestId: "canonical-dispatch", route: "/api/generate-package#canonical", generationRequestId });
-      await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
+      await releaseQuotaReservation(quotaReserved, reservationOwnerId, generationRequestId);
       return NextResponse.json({ error: "Failed to generate application package. Please try again.", ...fallbackPackage(title, company, applicantName) }, { status: 500 });
     }
 
@@ -314,13 +366,13 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
       .single();
 
     if (existingError || !existing) {
-      await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
+      await releaseQuotaReservation(quotaReserved, reservationOwnerId, generationRequestId);
       return NextResponse.json({ error: "Failed to generate application package. Please try again.", ...fallbackPackage(title, company, applicantName) }, { status: 500 });
     }
 
     if (existing.generation_status === "succeeded") {
       if (quotaReserved) {
-        await supabaseAdmin.rpc("complete_generate_package_usage", { p_user_id: userId, p_request_id: generationRequestId });
+        await supabaseAdmin.rpc("complete_generate_package_usage", { p_user_id: reservationOwnerId, p_request_id: generationRequestId });
       }
       return NextResponse.json({
         success: true,
@@ -384,6 +436,8 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
         generation_stage_updated_at: new Date().toISOString(),
         generation_started_at: new Date().toISOString(),
         generation_worker_claimed_at: null,
+        // Stage 2B: this re-enqueue is charged against the reservation taken by THIS request, so the row must point at that reservation's owner rather than whatever a prior attempt recorded - realigning pre-Stage-2B rows (NULL) onto the owner the worker must complete under. A no-op when a prior attempt already recorded the same owner, since one address always resolves to one founding owner. Not an input-snapshot column, so the "already correct from the original claim" rule above does not cover it.
+        entitlement_owner_id: reservationOwnerId,
         generation_engine: "canonical",
         fallback_used: null,
         fallback_reason: null,
@@ -404,7 +458,7 @@ export async function dispatchCanonicalGeneration(params: CanonicalDispatchParam
   } catch (enqueueError) {
     logSafeError(enqueueError, { requestId: "canonical-dispatch", route: "/api/generate-package#canonical-enqueue", userId, generationRequestId });
     logOperationalEvent({ domain: "background_worker", event: "enqueue_failed", applicationId, generationRequestId, engine: "canonical" });
-    await releaseQuotaReservation(quotaReserved, userId, generationRequestId);
+    await releaseQuotaReservation(quotaReserved, reservationOwnerId, generationRequestId);
     await supabase.from("applications").update({ generation_status: "failed", generation_error_code: "BACKGROUND_ENQUEUE_FAILED", generation_error_summary: "Could not start AI generation. Please try again.", generation_completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", applicationId).eq("user_id", userId);
     return NextResponse.json({ error: "Could not start AI generation. Please try again.", code: "BACKGROUND_ENQUEUE_FAILED", applicationId, ...fallbackPackage(title, company, applicantName) }, { status: 500 });
   }
