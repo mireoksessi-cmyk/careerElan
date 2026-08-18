@@ -1606,9 +1606,34 @@ function continueUploadedDashboard() {
   // this client check cannot perform.
   const extension = getLowercaseExtension(file.name);
 
+  /*
+    Temporary product policy: NEW resume uploads are PDF-only. This is a
+    UI-level gate, deliberately not a parser or server change - every DOCX
+    code path (mammoth, docxLayoutAnalyzer, docxGeometryRenderer,
+    process-resume-design's DOCX branch, canonical DOCX analysis) stays
+    exactly as it is, so already-stored preview_mode="docx_html" resumes keep
+    rendering, DOCX export keeps working, and Cover Letter DOCX is untouched.
+    Only the creation of NEW DOCX resume rows stops here.
+
+    Placed at the top of processResumeFile(), which is the single choke point
+    both the file picker (handleResumeUpload) and drag/drop (handleResumeDrop)
+    call, and ahead of every side effect - no Storage write, no resumes row,
+    no /api/process-resume-design call, no canonical import, so mammoth and
+    Chromium are never reached for a rejected file.
+
+    The file input deliberately still accepts .docx: filtering it out of the
+    picker would leave the user with a greyed-out file and no explanation,
+    and would not cover drag/drop at all. Letting the selection through and
+    rejecting it here is what makes the reason visible.
+  */
+  if (extension === "docx") {
+    setResumeUploadError("Please upload your resume as a PDF file.");
+    return;
+  }
+
   if (!extension || !RESUME_ALLOWED_EXTENSIONS.includes(extension as any)) {
     setResumeUploadError(
-      "Unsupported file type. Please upload a PDF or DOCX resume."
+      "Unsupported file type. Please upload your resume as a PDF file."
     );
     return;
   }
@@ -3887,7 +3912,7 @@ return;
   </h3>
 
   <p className="mt-2 text-sm text-slate-500">
-    PDF or DOCX · Maximum 10MB
+    PDF · Maximum 10MB
   </p>
 
   <button
@@ -3916,7 +3941,7 @@ return;
          {resumeUploadError && (
   <div
     role="alert"
-    className="mt-5 rounded-xl border border-red-300 bg-red-50 px-5 py-4"
+    className="mt-5 rounded-xl border border-red-300 bg-red-50 px-5 py-4 text-center"
   >
     <p className="font-black text-red-700">
       Resume upload failed
