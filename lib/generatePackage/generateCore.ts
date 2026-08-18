@@ -434,6 +434,26 @@ export async function runPackageGeneration(
   const userId: string = row.user_id;
   const generationRequestId: string | null = row.generation_request_id;
 
+  /*
+    Which id this application's quota reservation actually belongs to.
+
+    NULL entitlement_owner_id means the legacy model: the reservation really
+    was made under user_id, so completing/releasing it under user_id is
+    correct. A non-NULL value (written by the reservation path from Stage 2B
+    onward) means the reservation belongs to a founding entitlement owner that
+    may differ from the account running now - a deleted-and-recreated user has
+    a new user_id but keeps the original owner - and completing under user_id
+    would then match no row and silently leak the reserved slot.
+
+    This coalesce is a COMPLETION-time resolution onto whatever the row was
+    reserved with. It is not a reservation-time fallback; no reservation is
+    made in this file. Nothing here consults the entitlement claim store, an
+    email or the HMAC, so a purged claim, a changed address, a deleted account
+    or a month rollover cannot affect it - the owner arrived atomically with
+    the worker claim.
+  */
+  const reservationOwnerId: string = row.entitlement_owner_id ?? userId;
+
   await setStage(applicationId, userId, "claimed", workerRequestId);
 
   try {
@@ -979,7 +999,7 @@ export async function runPackageGeneration(
         const { error } = await supabaseAdmin.rpc(
           "complete_generate_package_usage",
           {
-            p_user_id: userId,
+            p_user_id: reservationOwnerId,
             p_request_id: generationRequestId,
           }
         );
@@ -1075,7 +1095,7 @@ export async function runPackageGeneration(
           application, on the very next reserve/get call for this user.
         */
         await supabaseAdmin.rpc("release_generate_package_usage", {
-          p_user_id: userId,
+          p_user_id: reservationOwnerId,
           p_request_id: generationRequestId,
         });
       } catch {
