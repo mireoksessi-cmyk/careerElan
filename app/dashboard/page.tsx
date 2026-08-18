@@ -1055,6 +1055,20 @@ const [canonicalImportMessage, setCanonicalImportMessage] = useState<string | nu
 */
 const [templateSelectorEnabled, setTemplateSelectorEnabled] = useState(false);
 const [availableTemplates, setAvailableTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
+/*
+  Large canonical preview loading state, keyed by the resolved iframe src
+  rather than by template id: the same templateId can be re-requested with a
+  different canonicalVersionId, which re-navigates the iframe back to a blank
+  document, and an id-keyed "loaded" mark would reveal that blank frame. An
+  unknown src is simply not loaded yet, so a changed src falls back to the
+  static placeholder on its own - no effect, no reset logic. Same reasoning as
+  CanonicalTemplatePicker's card-level state, deliberately kept local here
+  instead of extracted, to avoid widening this change into a shared module.
+*/
+const [largePreviewStatusBySrc, setLargePreviewStatusBySrc] = useState<Record<string, "loaded" | "failed">>({});
+function markLargePreview(src: string, status: "loaded" | "failed") {
+  setLargePreviewStatusBySrc((current) => (current[src] === status ? current : { ...current, [src]: status }));
+}
 const [resumeTemplateResolutions, setResumeTemplateResolutions] = useState<Record<string, ResumeTemplateResolution>>({});
 const [templatePickerOpenForResumeId, setTemplatePickerOpenForResumeId] = useState<string | null>(null);
 const [savingResumeTemplateId, setSavingResumeTemplateId] = useState<string | null>(null);
@@ -2504,13 +2518,36 @@ function renderPreviewContent() {
     selection, must drive this render).
   */
   if (previewAsset.type === "canonical-resume") {
+    /*
+      Cold canonical renders take tens of seconds, and an iframe shows an
+      empty document until its first paint - so this was a blank 820px area
+      for the whole wait. The template's own registry previewAsset (already
+      carried on availableTemplates, the same metadata the picker cards use)
+      now sits behind it as an immediate visual, and the iframe fades in only
+      once it has actually loaded. The src, the key and the request are
+      untouched.
+    */
+    const previewSrc = `/api/internal/canonical-career-memory/resume-preview?templateId=${previewAsset.templateId}&format=html&canonicalVersionId=${previewAsset.versionId}`;
+    const previewStatus = largePreviewStatusBySrc[previewSrc];
+    const placeholderAsset = availableTemplates.find((template) => template.id === previewAsset.templateId)?.previewAsset;
     return (
-      <iframe
-        key={`${previewAsset.templateId}::${previewAsset.versionId}`}
-        src={`/api/internal/canonical-career-memory/resume-preview?templateId=${previewAsset.templateId}&format=html&canonicalVersionId=${previewAsset.versionId}`}
-        title="Resume preview"
-        className="h-[820px] w-full rounded-xl border-0"
-      />
+      <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+        {placeholderAsset && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
+        )}
+        <iframe
+          key={`${previewAsset.templateId}::${previewAsset.versionId}`}
+          src={previewSrc}
+          title="Resume preview"
+          onLoad={() => markLargePreview(previewSrc, "loaded")}
+          onError={() => markLargePreview(previewSrc, "failed")}
+          className={`relative h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+        />
+        {previewStatus === "failed" && (
+          <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
+        )}
+      </div>
     );
   }
 

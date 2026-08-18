@@ -304,6 +304,26 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   */
   const [canonicalPreviewVersionId, setCanonicalPreviewVersionId] = useState<string | null>(null);
 
+  /*
+    Large canonical preview loading state, shared by the canonical preview
+    (renderCanonicalResumePreview) and the Step 9 right-hand preview. Keyed by
+    the resolved iframe src rather than by template id: the same templateId is
+    re-requested with a canonicalVersionId once one exists, which re-navigates
+    an already-loaded iframe back to a blank document, and an id-keyed
+    "loaded" mark would then reveal that blank frame. An unknown src is simply
+    not loaded yet, so a changed src falls back to the static placeholder by
+    itself - no effect, no reset logic. Same reasoning as
+    CanonicalTemplatePicker's card-level state, deliberately kept local rather
+    than extracted into a shared helper.
+  */
+  const [largePreviewStatusBySrc, setLargePreviewStatusBySrc] = useState<Record<string, "loaded" | "failed">>({});
+  function markLargePreview(src: string, status: "loaded" | "failed") {
+    setLargePreviewStatusBySrc((current) => (current[src] === status ? current : { ...current, [src]: status }));
+  }
+  function templatePreviewAsset(templateId: string | null) {
+    return ALL_TEMPLATE_CAPABILITIES.find((template) => template.id === templateId)?.previewAsset ?? null;
+  }
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -2757,14 +2777,32 @@ return;
   }
 
   function renderCanonicalResumePreview() {
+    /*
+      Static underlay while the live render is in flight - see
+      largePreviewStatusBySrc above. src, key and request are unchanged.
+    */
+    const previewSrc = `/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=html${canonicalPreviewVersionId ? `&canonicalVersionId=${canonicalPreviewVersionId}` : ""}`;
+    const previewStatus = largePreviewStatusBySrc[previewSrc];
+    const placeholderAsset = templatePreviewAsset(canonicalPreviewTemplateId);
     return (
       <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
-        <iframe
-          key={`${canonicalPreviewTemplateId}:${canonicalPreviewVersionId ?? ""}`}
-          src={`/api/internal/canonical-career-memory/resume-preview?templateId=${canonicalPreviewTemplateId}&format=html${canonicalPreviewVersionId ? `&canonicalVersionId=${canonicalPreviewVersionId}` : ""}`}
-          title="Canonical resume preview"
-          className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
-        />
+        <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+          {placeholderAsset && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
+          )}
+          <iframe
+            key={`${canonicalPreviewTemplateId}:${canonicalPreviewVersionId ?? ""}`}
+            src={previewSrc}
+            title="Canonical resume preview"
+            onLoad={() => markLargePreview(previewSrc, "loaded")}
+            onError={() => markLargePreview(previewSrc, "failed")}
+            className={`relative h-[820px] w-full rounded-xl border border-slate-200 bg-white transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+          />
+          {previewStatus === "failed" && (
+            <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
+          )}
+        </div>
       </div>
     );
   }
@@ -2914,6 +2952,9 @@ return;
       );
     }
 
+    const manualLargePreviewSrc = `/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html&allowPlaceholder=1${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`;
+    const manualLargePreviewAsset = templatePreviewAsset(manualSelectedTemplateId);
+
     return (
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,65%)]">
         <div className="min-w-0">
@@ -2934,12 +2975,30 @@ return;
         <div className="min-w-0">
           {manualSelectedTemplateId ? (
             <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
-              <iframe
-                key={manualSelectedTemplateId}
-                src={`/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html&allowPlaceholder=1${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
-                title="Canonical resume preview"
-                className="h-[820px] w-full rounded-xl border border-slate-200 bg-white"
-              />
+              {/*
+                Static underlay while the live render is in flight - see
+                largePreviewStatusBySrc above. Because the status is keyed by
+                src, picking another template immediately shows THAT template's
+                static asset and keeps the new iframe hidden until its own
+                document loads. src, key and request are unchanged.
+              */}
+              <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+                {manualLargePreviewAsset && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={manualLargePreviewAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
+                )}
+                <iframe
+                  key={manualSelectedTemplateId}
+                  src={manualLargePreviewSrc}
+                  title="Canonical resume preview"
+                  onLoad={() => markLargePreview(manualLargePreviewSrc, "loaded")}
+                  onError={() => markLargePreview(manualLargePreviewSrc, "failed")}
+                  className={`relative h-[820px] w-full rounded-xl border border-slate-200 bg-white transition-opacity duration-300 ${largePreviewStatusBySrc[manualLargePreviewSrc] === "loaded" ? "opacity-100" : "opacity-0"}`}
+                />
+                {largePreviewStatusBySrc[manualLargePreviewSrc] === "failed" && (
+                  <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex min-h-[500px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
