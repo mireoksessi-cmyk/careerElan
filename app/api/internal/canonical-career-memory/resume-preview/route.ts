@@ -130,6 +130,37 @@ function isValidDensity(value: unknown): value is TemplateDensity {
 
 export function makeHandleResumePreview(request: Request) {
   return async (ctx: CanonicalRouteContext): Promise<NextResponse> => {
+    /*
+      Account-suspension gate, enforced here because this route is deliberately
+      excluded from middleware.ts's matcher (see that file) so its origin Lambda
+      is no longer bound by the ~40 s Edge response-header deadline that was
+      aborting renders the origin had already completed successfully. Middleware
+      still enforces suspension for every other /api/ path; this is the single
+      route that must carry its own copy.
+
+      Semantics are deliberately identical to middleware.ts's own block: same
+      table, same column, same per-request session/RLS client, the same 403, and
+      the same FLAT body - routing this through httpErrorMapping would emit the
+      nested { error: { code, message } } shape and silently change the contract
+      suspended clients already receive. The query error is likewise not read, so
+      a lookup failure leaves the request proceeding exactly as it does in
+      middleware today rather than inventing a stricter policy in one route.
+
+      Placed before any parameter parsing, context resolution or rendering, so a
+      suspended account can never trigger a runtime download or a Chromium launch.
+    */
+    const { data: suspensionProfile } = await ctx.client
+      .from("profiles")
+      .select("suspended_at")
+      .eq("id", ctx.userId)
+      .maybeSingle();
+    if (suspensionProfile?.suspended_at) {
+      return NextResponse.json(
+        { error: "This account has been suspended.", code: "ACCOUNT_SUSPENDED" },
+        { status: 403 }
+      );
+    }
+
     const url = new URL(request.url);
     const rawTemplateId = url.searchParams.get("templateId");
     if (!rawTemplateId) {
