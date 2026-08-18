@@ -83,6 +83,49 @@ const RESUMES_STORAGE_BUCKET = "resumes";
 */
 const LAYOUT_ANALYSIS_TIMEOUT_MS = 45_000;
 
+/*
+  Diagnostic-only instrumentation. The catch further below deliberately replaces
+  any raw analysis failure with one stable client-facing ValidationError - safe
+  for the caller, but it destroys the original pdfjs/module/parse exception
+  before anything records it, which is exactly why the Production import failure
+  could not be diagnosed at all. These three events capture that error while it
+  still exists. They add no control flow, change no error type, and leave every
+  response byte-identical.
+*/
+const MAX_ANALYSIS_ERROR_CHARS = 8000;
+
+/*
+  Which Lambda execution environment emitted the line, so an analysis failure can
+  be correlated with the browser-runtime events already logged from the same
+  container. pid and the two log-name variables are not credentials, and nothing
+  here reads a user, document, file or request value.
+*/
+function analysisEnvironmentIdentity(): Record<string, unknown> {
+  return {
+    pid: process.pid,
+    logStream: process.env.AWS_LAMBDA_LOG_STREAM_NAME || null,
+    logGroup: process.env.AWS_LAMBDA_LOG_GROUP_NAME || null,
+  };
+}
+
+/*
+  The pdfjs diagnostic text is the whole point of this log, so sanitisation is
+  deliberately narrow: only query strings are stripped, in case a signed storage
+  URL ever appears inside an exception message. No environment variable is read
+  here, so no secret can reach the output that way.
+*/
+function boundedAnalysisErrorMessage(raw: string): string {
+  const redacted = raw.replace(/\?[A-Za-z0-9_%\-.=&+/:]+/g, "?<redacted>");
+  return redacted.length > MAX_ANALYSIS_ERROR_CHARS
+    ? `${redacted.slice(0, MAX_ANALYSIS_ERROR_CHARS)}…[truncated ${redacted.length - MAX_ANALYSIS_ERROR_CHARS} chars]`
+    : redacted;
+}
+
+/* Metadata only - no resume text, no file name, no user or document id. */
+function logImportEvent(event: string, detail: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ domain: "canonicalImport", event, ...detail }));
+}
+
 export type ImportResumeResult = {
   status: "imported";
   profileId: string;
@@ -168,6 +211,13 @@ export class CanonicalResumeImportService {
     }
 
     let layoutResult;
+    const analysisStartedAt = Date.now();
+    logImportEvent("canonical_import_analysis_start", {
+      ...analysisEnvironmentIdentity(),
+      sourceFormat,
+      bufferBytes: buffer.byteLength,
+      timeoutMs: LAYOUT_ANALYSIS_TIMEOUT_MS,
+    });
     try {
       layoutResult = await withParseTimeout(
         analyzeDocument("resume", sourceFormat, buffer),
@@ -175,7 +225,30 @@ export class CanonicalResumeImportService {
         "IMPORT_ANALYSIS_TIMEOUT",
         "This resume took too long to process for import. Please try again or upload a simpler file."
       );
+      logImportEvent("canonical_import_analysis_success", {
+        ...analysisEnvironmentIdentity(),
+        sourceFormat,
+        elapsedMs: Date.now() - analysisStartedAt,
+        pageCount: Array.isArray(layoutResult?.pages) ? layoutResult.pages.length : null,
+      });
     } catch (analysisError) {
+      /*
+        Logged FIRST, before any branch below runs: the generic ValidationError
+        at the end of this catch discards the original error entirely, so this is
+        the only point at which it can still be recorded.
+      */
+      logImportEvent("canonical_import_analysis_failure", {
+        ...analysisEnvironmentIdentity(),
+        sourceFormat,
+        elapsedMs: Date.now() - analysisStartedAt,
+        errorName: analysisError instanceof Error ? analysisError.name : "Unknown",
+        message: boundedAnalysisErrorMessage(
+          analysisError instanceof Error ? String(analysisError.message) : String(analysisError)
+        ),
+        isUploadValidationError: analysisError instanceof UploadValidationError,
+        isValidationError: analysisError instanceof ValidationError,
+        isNotFoundError: analysisError instanceof NotFoundError,
+      });
       if (analysisError instanceof UploadValidationError) {
         throw new ValidationError([`${analysisError.code}: ${analysisError.message}`]);
       }
