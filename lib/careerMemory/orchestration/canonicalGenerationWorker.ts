@@ -32,6 +32,7 @@ import { generateCanonicalPackage } from "./canonicalGeneratePackageService";
 import { runCanonicalWithFallbackDecision } from "./canonicalGenerationFallbackService";
 import { classifyErrorCode, logCanonicalMetric } from "./canonicalProductionMetrics";
 import { runPackageGeneration } from "../../generatePackage/generateCore";
+import { logSafeError } from "../../errors/publicError";
 
 type CanonicalInputManifest = {
   jobDescriptionText?: string;
@@ -42,6 +43,61 @@ type CanonicalInputManifest = {
   density?: string;
   locale?: string;
 };
+
+/*
+  Bounded, best-effort settlement of one generation's quota reservation,
+  mirroring lib/generatePackage/generateCore.ts's own completion retry shape:
+  3 attempts, a short backoff, a safe log on final failure, and never a throw.
+
+  Never throwing is the load-bearing property. Both call sites run after the
+  application's own final status is already durably written, and the failure
+  call site is inside a catch block - so a throw would either escape the
+  worker or risk re-running failure handling against a row that has already
+  succeeded. A bookkeeping failure must never change a generation's outcome.
+
+  Both RPCs update only rows still in 'reserved' status, so a duplicate or
+  retried call - including complete-after-release and release-after-complete -
+  is a no-op. Ownership is always supplied explicitly by the caller;
+  request_id alone is never used to resolve an owner.
+*/
+async function settleQuotaReservation(
+  rpcName: "complete_generate_package_usage" | "release_generate_package_usage",
+  reservationOwnerId: string | null,
+  generationRequestId: string | null
+): Promise<void> {
+  if (!reservationOwnerId || !generationRequestId) {
+    return;
+  }
+
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { error } = await supabaseAdmin.rpc(rpcName, {
+        p_user_id: reservationOwnerId,
+        p_request_id: generationRequestId,
+      });
+
+      if (!error) {
+        return;
+      }
+
+      lastError = error;
+    } catch (thrown) {
+      lastError = thrown;
+    }
+
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+
+  logSafeError(lastError, {
+    requestId: "canonical-worker",
+    route: `canonicalGenerationWorker#${rpcName}`,
+    generationRequestId,
+  });
+}
 
 export async function runCanonicalGeneration(applicationId: string): Promise<void> {
   const startedAt = Date.now();
@@ -65,6 +121,48 @@ export async function runCanonicalGeneration(applicationId: string): Promise<voi
 
   const userId: string = claimed.user_id;
   const manifest: CanonicalInputManifest = (claimed.canonical_input_manifest as CanonicalInputManifest | null) || {};
+
+  /*
+    Stage 2B quota identity. This generation's reservation was made under the
+    FOUNDING ENTITLEMENT OWNER, which for a recreated account is NOT
+    claimed.user_id - and complete_/release_generate_package_usage() match on
+    (p_user_id, p_request_id), so targeting the wrong id would silently
+    settle nothing.
+
+    claim_canonical_generate_worker does not return the owner (Stage 2A
+    extended only legacy's claim RPC), so it is read here from the row this
+    worker has just claimed. service_role holds SELECT on public.applications,
+    so this needs no RPC signature change and no migration.
+
+    entitlement_owner_id ?? user_id is a COMPLETION-time fallback onto the id
+    a row was actually reserved with - NULL means the pre-Stage-2B legacy
+    model. It is never a reservation-time fallback, and no owner value is ever
+    taken from client input, an email address or the HMAC.
+
+    Left null when the read itself fails: guessing an owner would target the
+    wrong reservation, whereas leaving it unsettled hands the row to the
+    owner-aware reclaim, which reconciles it from the application's own
+    final status.
+  */
+  const { data: quotaIdentity, error: quotaIdentityError } = await supabaseAdmin
+    .from("applications")
+    .select("entitlement_owner_id, user_id, generation_request_id")
+    .eq("id", applicationId)
+    .maybeSingle();
+
+  if (quotaIdentityError) {
+    logSafeError(quotaIdentityError, {
+      requestId: "canonical-worker",
+      route: "canonicalGenerationWorker#quota-identity",
+    });
+  }
+
+  const reservationOwnerId: string | null = quotaIdentityError
+    ? null
+    : quotaIdentity?.entitlement_owner_id ?? quotaIdentity?.user_id ?? null;
+
+  const generationRequestId: string | null =
+    quotaIdentity?.generation_request_id ?? null;
 
   const templateId = manifest.templateId || "professional-ats";
   const paperSize = (manifest.paperSize as "letter" | "a4") || "letter";
@@ -109,6 +207,23 @@ export async function runCanonicalGeneration(applicationId: string): Promise<voi
         p_cover_letter_text: decision.result.coverLetterText,
         p_email_draft: decision.result.emailDraftText,
       });
+
+      /*
+        Stage 2B: the application's success is now durably written, so this
+        generation's quota reservation can be completed - under the id it was
+        RESERVED with. Deliberately AFTER the application completion: the
+        reverse order would, on a crash, leave a completed reservation against
+        a still-pending application, a state the reclaim heal branch cannot
+        repair, whereas this order leaves reserved+succeeded, which it repairs
+        exactly. Best-effort and never throwing - a bookkeeping failure must
+        never turn a delivered package into a failure, and must never refund
+        one.
+      */
+      await settleQuotaReservation(
+        "complete_generate_package_usage",
+        reservationOwnerId,
+        generationRequestId
+      );
       logCanonicalMetric({ event: "canonical_generate", applicationId, templateId, outcome: "success", latencyMs: Date.now() - startedAt, pdfPersisted: decision.result.render.documentStorage.persisted, docxPersisted: decision.result.render.documentStorage.persisted });
       return;
     }
@@ -151,6 +266,21 @@ export async function runCanonicalGeneration(applicationId: string): Promise<voi
       p_error_code: errorCode,
       p_error_summary: "Canonical generation failed and could not be completed.",
     });
+
+    /*
+      Stage 2B: this generation terminally failed, so the reservation taken
+      for it must be released - under the id it was RESERVED with, which is
+      the founding entitlement owner, not necessarily userId. Best-effort and
+      never throwing: this already sits inside a catch block, so a throw here
+      would escape the worker entirely. If every attempt fails the row stays
+      failed+reserved, which the owner-aware reclaim's failed branch releases
+      on this owner's next reserve or usage read.
+    */
+    await settleQuotaReservation(
+      "release_generate_package_usage",
+      reservationOwnerId,
+      generationRequestId
+    );
     logCanonicalMetric({ event: "canonical_generate", applicationId, templateId, outcome: "error", errorCode, latencyMs: Date.now() - startedAt });
   }
 }
