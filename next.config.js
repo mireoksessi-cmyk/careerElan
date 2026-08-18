@@ -40,7 +40,10 @@ const nextConfig = {
     risking a missed route through bracket-segment escaping.
   */
   outputFileTracingIncludes: {
-    "/*": ["./node_modules/playwright-core/browsers.json"],
+    "/*": [
+      "./node_modules/playwright-core/browsers.json",
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+    ],
   },
 
   eslint: {
