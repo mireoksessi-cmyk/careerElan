@@ -18,7 +18,7 @@
   Keyboard accessible: each card is a real <button>, so Tab/Enter/Space
   all work without any extra handling.
 */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { TemplateCapabilities, TemplateId } from "@/lib/resumeTemplates/contracts/types";
 import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
@@ -44,6 +44,23 @@ const PAGE_HEIGHT_PX = PAPER_DIMENSIONS.letter.heightPx;
 const THUMBNAIL_WIDTH_PX = 280;
 const THUMBNAIL_HEIGHT_PX = Math.round(THUMBNAIL_WIDTH_PX * (PAGE_HEIGHT_PX / PAGE_WIDTH_PX));
 const THUMBNAIL_SCALE = Math.min(THUMBNAIL_WIDTH_PX / PAGE_WIDTH_PX, THUMBNAIL_HEIGHT_PX / PAGE_HEIGHT_PX);
+
+/*
+  How many live thumbnail previews may be IN FLIGHT at once, per picker
+  instance. Each live preview is a full canonical render behind the
+  resume-preview route, so mounting all four at once asked the platform for
+  four simultaneous renders - and in the Step 9 layout, where a large preview
+  mounts alongside, five. Now that every card paints its static previewAsset
+  immediately (see the img below), a card that has not started yet is visually
+  indistinguishable from one still loading, so there is no longer any reason
+  to start them all at once.
+
+  Deliberately per-instance, not global: Dashboard renders one picker per
+  resume, so three open pickers can still have up to six in flight. Bounding
+  that globally would need cross-instance coordination this presentational
+  component has no business owning.
+*/
+const THUMBNAIL_CONCURRENCY = 2;
 
 export type CanonicalTemplatePickerProps = {
   templates: TemplateCapabilities[];
@@ -100,11 +117,63 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
     setPreviewStatusBySrc((current) => (current[src] === status ? current : { ...current, [src]: status }));
   }
 
+  /*
+    Which templates have been allowed to mount a live iframe. A template not
+    in this list renders its static previewAsset and NO iframe element at all -
+    not an empty src, not about:blank - which is what makes the request count
+    exact rather than merely deferred.
+
+    Scheduling priority is the templates prop's own order (the registry order
+    the catalog route returns), except that the currently selected template
+    moves to the front - on Dashboard that is the card the user is actually
+    judging. This reorders only WHICH card starts first; the rendered grid
+    below still maps over `templates` untouched, so the visible order never
+    moves.
+  */
+  const [startedTemplateIds, setStartedTemplateIds] = useState<TemplateId[]>([]);
+  const templateIds = templates.map((template) => template.id);
+  const selectedIndex = selectedTemplateId ? templateIds.indexOf(selectedTemplateId) : -1;
+  const schedulingPriority = selectedIndex > 0
+    ? [templateIds[selectedIndex], ...templateIds.filter((_, index) => index !== selectedIndex)]
+    : templateIds;
+  /*
+    One key covering both inputs the top-up depends on: the priority order and
+    each template's currently resolved src. Recomputing on a src change is what
+    lets a re-navigated (new canonicalVersionId) preview be counted as in
+    flight again instead of staying credited as finished.
+  */
+  const scheduleKey = livePreviewUrl ? schedulingPriority.map((id) => livePreviewUrl(id)).join("|") : "";
+
+  useEffect(() => {
+    if (!livePreviewUrl) return;
+    /*
+      Top up to THUMBNAIL_CONCURRENCY in flight. Written as a fixpoint rather
+      than "start one more on every onLoad" so it is idempotent: it derives the
+      whole set from what is actually still loading, so a duplicate load event
+      or a re-navigation cannot drift the slot count. Returns the SAME array
+      reference when nothing changes, so it cannot loop.
+    */
+    setStartedTemplateIds((current) => {
+      const retained = current.filter((id) => schedulingPriority.includes(id));
+      let inFlight = retained.filter((id) => !previewStatusBySrc[livePreviewUrl(id)]).length;
+      const next = [...retained];
+      for (const id of schedulingPriority) {
+        if (inFlight >= THUMBNAIL_CONCURRENCY) break;
+        if (next.includes(id)) continue;
+        next.push(id);
+        inFlight += 1;
+      }
+      const unchanged = next.length === current.length && next.every((id, index) => id === current[index]);
+      return unchanged ? current : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleKey, previewStatusBySrc]);
+
   return (
     <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto" style={{ gridTemplateColumns: columns ? `repeat(${columns}, ${THUMBNAIL_WIDTH_PX}px)` : `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
       {templates.map((template) => {
         const isSelected = selectedTemplateId === template.id;
-        const previewSrc = livePreviewUrl ? livePreviewUrl(template.id) : null;
+        const previewSrc = livePreviewUrl && startedTemplateIds.includes(template.id) ? livePreviewUrl(template.id) : null;
         const previewStatus = previewSrc ? previewStatusBySrc[previewSrc] : undefined;
         return (
           <button
