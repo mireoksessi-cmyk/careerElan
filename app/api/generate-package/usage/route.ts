@@ -115,19 +115,50 @@ export async function GET() {
     );
   }
 
+  /*
+    The displayed monthly limit comes from the authoritative database
+    resolver, never from this file and never derived from the usage numbers.
+
+    Deliberately NOT used + remaining: the usage RPC floors remaining at
+    greatest(limit - used, 0), so an account that has consumed more than its
+    current limit (an override lowered mid-month, or a downgrade) would report
+    `used` as its limit - 5 instead of 3 in the worked example.
+
+    resolve_generate_package_quota_limit() already applies the full precedence
+    chain (admin override, then a plan-granting subscription, then the default
+    plan) against the CURRENT auth user, preserving the plan-owner /
+    entitlement-owner split: the limit follows this account, while used and
+    remaining follow the founding owner the digest resolves to. A plan whose
+    allowance is defined or changed later flows through here automatically,
+    with no further change to this route or the UI.
+
+    Independent of the usage lookup by design - it needs only user.id, so a
+    usage failure cannot blank the limit and vice versa.
+  */
+  const { data: resolvedLimit, error: resolvedLimitError } =
+    await supabaseAdmin.rpc("resolve_generate_package_quota_limit", {
+      p_user_id: user.id,
+    });
+
   const usage = Array.isArray(usageRows)
     ? usageRows[0]
     : usageRows;
 
   const used = usage?.used ?? 0;
-  const remaining = usage?.remaining ?? GENERATE_PACKAGE_MONTHLY_LIMIT;
+
+  /*
+    Null rather than a literal when either value is unavailable. A hardcoded
+    number would be wrong for every account whose real allowance differs, and
+    an absent figure is better than a confidently wrong one - the client
+    already renders these defensively.
+  */
+  const remaining = typeof usage?.remaining === "number" ? usage.remaining : null;
+  const limit =
+    resolvedLimitError || typeof resolvedLimit !== "number" ? null : resolvedLimit;
 
   return NextResponse.json({
     enforced: true,
-    // used + remaining reflects the RPC's own server-resolved, per-user
-    // limit (resolve_generate_package_quota_limit()) rather than this
-    // file's display constant - see packageQuota.ts's doc comment.
-    limit: used + remaining,
+    limit,
     used,
     remaining,
   });

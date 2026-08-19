@@ -373,7 +373,7 @@ const STAGE_LABELS: Record<string, string> = {
   claimed: "The generation server has started your request.",
   loading_inputs: "Loading your resume and application details.",
   building_prompt: "Preparing your tailored writing plan.",
-  generating: "AI is writing your resume and cover letter.",
+  generating: "Career Élan is writing your resume and cover letter.",
   validating: "Validating the generated documents.",
   saving: "Saving your results.",
 };
@@ -4046,7 +4046,22 @@ async function downloadDocx() {
             return (
               <>
                 <div className="flex items-center justify-between gap-4 rounded-lg bg-white/95 px-2.5 py-1.5 text-xs font-bold text-indigo-950">
-                  <span>{stageLabel}</span>
+                  {/*
+                    Presentational only - the existing /logo.png already used
+                    elsewhere on this page, placed beside the stage label so the
+                    wait reads as Career Élan doing the work. No behaviour,
+                    timing, percentage or state transition is affected.
+                  */}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Image
+                      src="/logo.png"
+                      alt="Career Élan"
+                      width={72}
+                      height={27}
+                      className="h-4 w-auto shrink-0"
+                    />
+                    <span className="truncate">{stageLabel}</span>
+                  </span>
                   <span>
                     {generationPhase === "poll_timeout"
                       ? ""
