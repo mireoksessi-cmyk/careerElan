@@ -142,6 +142,36 @@ export type EducationEntryRange = { headerBlockIndices: number[]; bodyBlockIndic
   contain either), with the pre-5D.3C 1-line lookahead kept as a
   narrower fallback for the keyword-free Institution-first case.
 */
+/*
+  Phase 2B-C1 - continuation metadata, evaluated ONLY while deciding
+  whether a following line terminates an ALREADY-OPEN entry range (its
+  single call site is that forward scan in segmentEducationRanges).
+
+  A record's own second line often carries nothing but location and/or
+  date - "Toronto, ON - 04/2027". isNewEntryStart accepts date evidence
+  ALONE as sufficient for a non-bulleted candidate, so such a line was
+  starting a second, empty EducationEntry and the record lost its own
+  location and date to it.
+
+  The rule is the same two-signal discipline already applied to bulleted
+  candidates: a line that carries NO institution and NO degree/credential
+  evidence of its own is not an independent education record, whatever
+  date it happens to contain. A genuine next record - "University B ...
+  2022 - 2024", or a degree line - still carries one of those keywords
+  and still terminates the range exactly as before.
+
+  Deliberately NOT a change to isNewEntryStart itself: date evidence
+  remains sufficient to START segmentation, which is a different
+  question from whether a line ENDS the entry above it. Bulleted
+  candidates are excluded here because the guard above already routes
+  them through hasStrongBulletedEntryEvidence.
+*/
+function isContinuationMetadataLine(block: SemanticContentBlock): boolean {
+  if (block.blockType === "bullet") return false;
+  if (DEGREE_KEYWORD_RE.test(block.text) || INSTITUTION_KEYWORD_RE.test(block.text)) return false;
+  return hasDateEvidence(block.text);
+}
+
 function isNewEntryStart(blocks: SemanticContentBlock[], index: number): boolean {
   if (index >= blocks.length) return false;
   const block = blocks[index];
@@ -193,7 +223,7 @@ export function segmentEducationRanges(blocks: SemanticContentBlock[]): Educatio
         k++;
         continue;
       }
-      if (isNewEntryStart(blocks, k)) break;
+      if (isNewEntryStart(blocks, k) && !isContinuationMetadataLine(blocks[k])) break;
       k++;
     }
 

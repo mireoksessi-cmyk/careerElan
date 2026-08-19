@@ -425,6 +425,138 @@ counter = 0;
   ]);
 }
 
+/*
+  ====================================================================
+  Phase 2B-C1 - a record's own continuation line (location and/or date,
+  with no institution or credential evidence of its own) must not start
+  a second EducationEntry. C1 proves SEGMENTATION only: field-level
+  resolution of "Credential (Institution)" and "Expected in" is out of
+  scope here.
+  ====================================================================
+*/
+
+// C1-PRIMARY - the audited two-line shape must yield exactly ONE entry.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Credential (Example Polytechnic) Expected in", "bullet"),
+    block("– Toronto, ON · 04/2027"),
+  ]);
+  check("C1 primary: bullet-led record + continuation line is ONE entry", entries.length, 1);
+}
+
+// C1-1 - non-bullet header + location/date continuation.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example Polytechnic"),
+    block("Diploma in Applied Design"),
+    block("Toronto, ON · 04/2027"),
+  ]);
+  check("C1-1 header + location/date continuation is one entry", entries.length, 1);
+}
+
+// C1-2 - date-only continuation.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example Polytechnic"),
+    block("Diploma in Applied Design"),
+    block("04/2027"),
+  ]);
+  check("C1-2 date-only continuation does not split the entry", entries.length, 1);
+}
+
+// C1-3 - location-only continuation (no date evidence at all).
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example Polytechnic - 2019 - 2021"),
+    block("Toronto, ON"),
+  ]);
+  check("C1-3 location-only continuation creates no fake entry", entries.length, 1);
+}
+
+// C1-4 - bullet-led header + non-bullet continuation, MM/YYYY range.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Credential (Example Polytechnic)", "bullet"),
+    block("– Vancouver, BC · 09/2024 - 04/2027"),
+  ]);
+  check("C1-4 bullet-led header + dated continuation is one entry", entries.length, 1);
+}
+
+// C1-5 - month-name continuation, using only the existing date grammar.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example Polytechnic"),
+    block("Diploma in Applied Design"),
+    block("Toronto, ON · May 2027"),
+  ]);
+  check("C1-5 month-name continuation does not split the entry", entries.length, 1);
+}
+
+// ---- True-new-entry negative controls: real records must still split ----
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University - 2014 - 2018"),
+    block("Riverside University - 2019 - 2021"),
+  ]);
+  check("C1-6 a following institution + date is still a new entry", entries.length, 2);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University - 2014 - 2018"),
+    block("M.S. in Computer Science - 2019 - 2021"),
+  ]);
+  check("C1-7 a following credential + date is still a new entry", entries.length, 2);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University - 2014 - 2018"),
+    block("• 2019 - 2021 Central Technical Institute", "bullet"),
+  ]);
+  check("C1-8 a following strong bulleted record is still a new entry", entries.length, 2);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University, School of Engineering - 2014 - 2018"),
+    block("Toronto, ON · 2018"),
+    block("Riverside Polytechnic, School of Computing - 2019 - 2021"),
+  ]);
+  check("C1-9 continuation absorbed, next real record still splits", entries.length, 2);
+}
+
+// ---- Detail regression controls: unchanged production rules ----
+const C1_DETAIL_LINES: { label: string; text: string }[] = [
+  { label: "C1-10 dean's list with a year", text: "• Dean's List 2020" },
+  { label: "C1-11 gpa", text: "• GPA: 3.9" },
+  { label: "C1-12 honours", text: "• Graduated with Honours" },
+  { label: "C1-13 coursework", text: "• Relevant Coursework: Algorithms" },
+  { label: "C1-14 thesis", text: "• Thesis: Battery Thermal Management" },
+  { label: "C1-15 note", text: "• Note: values converted for presentation" },
+  { label: "C1-16 scholarship with a year", text: "• Awarded a scholarship in 2020" },
+];
+
+for (const detail of C1_DETAIL_LINES) {
+  counter = 0;
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block(detail.text, "bullet"),
+  ]);
+  check(`${detail.label} remains a detail, not an entry`, entries.length, 1);
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {
