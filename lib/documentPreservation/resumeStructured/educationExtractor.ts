@@ -425,7 +425,27 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
 
     if (headerBlocks.length === 1) {
       const block = headerBlocks[0];
-      const anchor = stripDateAnchor(block.text);
+      /*
+        Phase 2B-H1 - the header line's own inline bullet glyph is
+        PRESENTATION, never Education semantics, so it must not reach
+        field resolution. Actual-source evidence: a bulleted date-first
+        record ("<glyph> 1990-1994 Example University - B.S. in
+        Engineering") gives stripDateAnchor a date in the MIDDLE, so the
+        glyph alone becomes beforeText and is taken as the primary
+        candidate - the marker was assigned as institution and the real
+        institution demoted to location.
+
+        Normalized here, at the parse input, rather than by repairing an
+        already-corrupted field afterwards: only this expression feeds
+        the resolvers, and every one of them below stays untouched. The
+        existing bulletPresentation module makes the decision (it is
+        blockType-gated, so a non-bullet header is returned verbatim and
+        ordinary non-bullet parsing is bit-for-bit unchanged), and it
+        reads text without writing it - rawHeaderText is still built
+        from block.rawText verbatim, marker included.
+      */
+      const headerParseText = normalizeBulletPresentation(block.text, { blockType: block.blockType }).displayText;
+      const anchor = stripDateAnchor(headerParseText);
       const hasDate = anchor.dateRangeText.length > 0;
       const hasReinforcingLabel = detectProgramLabel(block.text);
       if (hasDate) {

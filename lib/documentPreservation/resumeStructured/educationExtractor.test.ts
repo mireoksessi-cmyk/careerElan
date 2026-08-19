@@ -728,6 +728,101 @@ counter = 0;
   check("S10 qualifier-only text is not assigned as a credential", entries[0].credential?.value === "Expected Graduation", false);
 }
 
+// --- Phase 2B-H1 - bulleted single-header field-resolution input ---
+// Actual-source shape: a date-FIRST record whose only marker is the
+// source's own inline bullet glyph. The glyph is presentation, so it
+// must never land in a structured field, while rawHeaderText must keep
+// it verbatim.
+const H1_MARKER = "•";
+
+function h1StructuredFieldValues(entry: {
+  institution?: { value: string };
+  institutions: { value: string }[];
+  credential?: { value: string };
+  credentials: { value: string }[];
+  fieldOfStudy?: { value: string };
+  fieldsOfStudy: { value: string }[];
+  location?: { value: string };
+}): string[] {
+  return [
+    entry.institution?.value,
+    ...entry.institutions.map((v) => v.value),
+    entry.credential?.value,
+    ...entry.credentials.map((v) => v.value),
+    entry.fieldOfStudy?.value,
+    ...entry.fieldsOfStudy.map((v) => v.value),
+    entry.location?.value,
+  ].filter((v): v is string => v !== undefined);
+}
+
+// H1-1 - bulleted date-first high school (no degree keyword at all).
+counter = 0;
+{
+  const raw = `${H1_MARKER} 1986-1989 Example High School`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H1 high school: exactly one entry", entries.length, 1);
+  check("H1 high school: dateRangeText correct", entries[0].dateRangeText?.value, "1986-1989");
+  check("H1 high school: institution is not the bullet marker", entries[0].institution?.value === H1_MARKER, false);
+  check("H1 high school: institutions[] does not contain the bullet marker", entries[0].institutions.some((v) => v.value === H1_MARKER), false);
+  check("H1 high school: credential is not the bullet marker", entries[0].credential?.value === H1_MARKER, false);
+  check("H1 high school: fieldOfStudy is not the bullet marker", entries[0].fieldOfStudy?.value === H1_MARKER, false);
+  check("H1 high school: location is not the bullet marker", entries[0].location?.value === H1_MARKER, false);
+  check("H1 high school: no structured field equals the bullet marker", h1StructuredFieldValues(entries[0]).includes(H1_MARKER), false);
+  check("H1 high school: rawHeaderText remains verbatim with its marker", entries[0].rawHeaderText, raw);
+  check("H1 high school: the school name resolves as institution", entries[0].institution?.value, "Example High School");
+}
+
+// H1-2 - bulleted date-first university with a degree.
+counter = 0;
+{
+  const raw = `${H1_MARKER} 1990-1994 Example University - B.S. in Engineering`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H1 university: exactly one entry", entries.length, 1);
+  check("H1 university: dateRangeText correct", entries[0].dateRangeText?.value, "1990-1994");
+  check("H1 university: institution is not the bullet marker", entries[0].institution?.value === H1_MARKER, false);
+  check("H1 university: institutions[] does not contain the bullet marker", entries[0].institutions.some((v) => v.value === H1_MARKER), false);
+  check("H1 university: credential is not the bullet marker", entries[0].credential?.value === H1_MARKER, false);
+  check("H1 university: fieldOfStudy is not the bullet marker", entries[0].fieldOfStudy?.value === H1_MARKER, false);
+  check("H1 university: location is not the bullet marker", entries[0].location?.value === H1_MARKER, false);
+  check("H1 university: no structured field equals the bullet marker", h1StructuredFieldValues(entries[0]).includes(H1_MARKER), false);
+  check("H1 university: rawHeaderText remains verbatim with its marker", entries[0].rawHeaderText, raw);
+  checkTrue("H1 university: the semantic remainder is not lost", h1StructuredFieldValues(entries[0]).concat(detailValues(entries[0])).join(" | ").includes("Example University"));
+}
+
+// H1-3 - bulleted date-first institute with a parenthetical tail.
+counter = 0;
+{
+  const raw = `${H1_MARKER} 1994-1996 Example Institute - M.S. in Automation Engineering (Machine Vision)`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H1 institute: exactly one entry", entries.length, 1);
+  check("H1 institute: dateRangeText correct", entries[0].dateRangeText?.value, "1994-1996");
+  check("H1 institute: no structured field equals the bullet marker", h1StructuredFieldValues(entries[0]).includes(H1_MARKER), false);
+  check("H1 institute: rawHeaderText remains verbatim with its marker", entries[0].rawHeaderText, raw);
+  checkTrue("H1 institute: the semantic remainder is not lost", h1StructuredFieldValues(entries[0]).concat(detailValues(entries[0])).join(" | ").includes("Example Institute"));
+}
+
+// H1-4 - presentation sensitivity: the SAME line without a bullet must
+//        parse exactly as it did before this change.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block("1986-1989 Example High School")]);
+  check("H1 non-bullet regression: exactly one entry", entries.length, 1);
+  check("H1 non-bullet regression: dateRangeText unchanged", entries[0].dateRangeText?.value, "1986-1989");
+  check("H1 non-bullet regression: institution unchanged", entries[0].institution?.value, "Example High School");
+  check("H1 non-bullet regression: rawHeaderText verbatim", entries[0].rawHeaderText, "1986-1989 Example High School");
+}
+
+// H1-5 - a bullet-like glyph INSIDE the text is semantic, never a
+//        presentation marker, so it must survive untouched.
+counter = 0;
+{
+  const raw = `${H1_MARKER} 2001-2005 Example College ${H1_MARKER} Honours Program`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H1 inner glyph: rawHeaderText verbatim", entries[0].rawHeaderText, raw);
+  check("H1 inner glyph: no structured field equals the bullet marker", h1StructuredFieldValues(entries[0]).includes(H1_MARKER), false);
+  checkTrue("H1 inner glyph: the non-leading glyph is not globally stripped", h1StructuredFieldValues(entries[0]).concat(detailValues(entries[0])).join(" | ").includes(`${H1_MARKER} Honours Program`));
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {
