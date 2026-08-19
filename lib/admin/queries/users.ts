@@ -126,7 +126,7 @@ export type AdminUserDetail = AdminUserRow & {
   successfulGenerationCount: number;
   failedGenerationCount: number;
   lastGenerationDate: string | null;
-  monthlyGenerationLimit: number;
+  monthlyGenerationLimit: number | null;
   remainingGenerateAllowance: number | null;
   recentSafeErrors: { code: string; date: string }[];
   /* Admin User Controls Phase 2 */
@@ -162,7 +162,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     }
   }
 
-  const [{ data: cm }, { data: resumes }, { data: apps }, { data: proSub }, { data: quota }, { data: profileRow }, { data: quotaOverrideRow }] = await Promise.all([
+  const [{ data: cm }, { data: resumes }, { data: apps }, { data: proSub }, { data: quota }, { data: quotaLimit, error: quotaLimitError }, { data: profileRow }, { data: quotaOverrideRow }] = await Promise.all([
     supabaseAdmin.from("career_memory").select("required_completed, selected_resume_id, resume_template").eq("user_id", userId).maybeSingle(),
     supabaseAdmin.from("resumes").select("id").eq("user_id", userId),
     supabaseAdmin.from("applications").select("created_at, generation_status, generation_error_code, generation_completed_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(100),
@@ -180,6 +180,14 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     emailHmac
       ? supabaseAdmin.rpc("get_generate_package_usage_for_entitlement", { p_user_id: userId, p_email_hmac: emailHmac, p_limit: 3 })
       : Promise.resolve({ data: null }),
+    /*
+      Plan/usage identity split: this resolver takes the CURRENT
+      admin-inspected account's uuid, so the limit follows that account's own
+      subscription/override, while the usage read above follows the digest to
+      the founding entitlement owner. Independent of emailHmac by design - a
+      user whose digest cannot be derived still gets a correct limit.
+    */
+    supabaseAdmin.rpc("resolve_generate_package_quota_limit", { p_user_id: userId }),
     supabaseAdmin.from("profiles").select("suspended_at, suspended_reason").eq("id", userId).maybeSingle(),
     supabaseAdmin.from("admin_user_quota_overrides").select("monthly_generate_limit").eq("user_id", userId).maybeSingle(),
   ]);
@@ -189,6 +197,26 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
   const succeeded = (apps ?? []).filter((a) => a.generation_status === "succeeded");
   const failed = (apps ?? []).filter((a) => a.generation_status === "failed");
   const quotaRow = Array.isArray(quota) ? quota[0] : quota;
+
+  /*
+    The effective monthly limit comes from the authoritative database
+    resolver, never from this file: resolve_generate_package_quota_limit()
+    already applies the full precedence chain (admin override, then a
+    plan-granting subscription, then the default plan), so a plan whose
+    allowance changes later - or is defined for the first time - is reflected
+    here automatically with no admin-display change.
+
+    Deliberately NOT used + remaining: the usage RPC floors remaining at
+    greatest(limit - used, 0), so an account that has consumed more than its
+    current limit (an override lowered mid-month, or a downgrade) would report
+    `used` instead of the real limit.
+
+    Null on any failure or non-numeric result. Never a literal fallback - a
+    hardcoded number would be wrong for every account whose limit is not that
+    number, and an absent value is better than a confidently wrong one.
+  */
+  const resolvedMonthlyLimit: number | null =
+    quotaLimitError || typeof quotaLimit !== "number" ? null : quotaLimit;
 
   return {
     userId,
@@ -206,7 +234,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     successfulGenerationCount: succeeded.length,
     failedGenerationCount: failed.length,
     lastGenerationDate: succeeded[0]?.generation_completed_at ?? null,
-    monthlyGenerationLimit: quotaRow?.limit ?? 3,
+    monthlyGenerationLimit: resolvedMonthlyLimit,
     remainingGenerateAllowance: quotaRow?.remaining ?? null,
     recentSafeErrors: failed.slice(0, 5).map((a) => ({ code: a.generation_error_code ?? "UNKNOWN", date: a.created_at })),
     suspended: Boolean(profileRow?.suspended_at),
