@@ -59,6 +59,7 @@ import { analyzeDocument } from "../../documentPreservation/layoutAnalysis";
 import type { LayoutSourceFormat } from "../../documentPreservation/layoutAnalysis/types";
 import { buildLosslessResumeDocument } from "../../documentPreservation/losslessSemantic/buildLosslessDocument";
 import { buildStructuredResume } from "../../documentPreservation/resumeStructured/buildStructuredResume";
+import { reconstructWrappedLines } from "../../documentPreservation/losslessSemantic/wrappedLineReconstruction";
 import { createCanonicalRuntime, createRuntimeSourceDocument, createRuntimeVersion } from "../runtime/factory";
 import { CANONICAL_RUNTIME_SERIALIZER_VERSION } from "../runtime/types";
 import { CanonicalCareerMemoryService } from "./canonicalCareerMemoryService";
@@ -285,7 +286,19 @@ export class CanonicalResumeImportService {
       throw new ValidationError([`${code}: ${summary}`]);
     }
 
-    const structuredModel = buildStructuredResume(losslessDoc);
+    /*
+      Rejoin physical PDF lines that belong to one semantic unit (a
+      wrapped bullet, a continuation line, a soft-wrap hyphenation)
+      before structured extraction reads them. Deliberately AFTER the
+      lossless gate above: the validator re-derives each block's text
+      from its source elements using a horizontal-gap rule that expects
+      no space across a wrap, so merging earlier would fail validation
+      and turn every wrapped resume into an import error. See
+      wrappedLineReconstruction.ts's own header for the full reasoning.
+    */
+    const reconstructedDoc = reconstructWrappedLines(losslessDoc);
+
+    const structuredModel = buildStructuredResume(reconstructedDoc);
     if (!structuredModel.validation.passed) {
       const { code, summary } = classifyStructuredValidationFailure(structuredModel.validation);
       throw new ValidationError([`${code}: ${summary}`]);
