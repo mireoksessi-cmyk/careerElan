@@ -123,6 +123,198 @@ check("no lexical signal: institution is the non-date line's full text", noSigna
 check("no lexical signal: credential recovered from the date line's own remainder", noSignalEntries[0].credential?.value, "Beta Learning Centre");
 checkTrue("no lexical signal: reasonCodes disclose the positional fallback (not a guessed keyword match)", noSignalEntries[0].reasonCodes.includes("multi-line-header-positional-fallback-no-keyword-signal"));
 
+/*
+  ====================================================================
+  Phase 2B - marker-only details (Bug A) and bulleted education entry
+  boundaries (Bug B). Neutral fixture data only; no production rule
+  depends on any name, school or phrase used below.
+  ====================================================================
+*/
+
+function detailTexts(entry: { details: { value: string }[] } | undefined): string[] {
+  return (entry?.details ?? []).map((d) => d.value);
+}
+
+// ---- Bug A: a decorative marker on its own is never a detail ----
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("•"),
+  ]);
+  check("A1 bare marker-only block emits no detail", detailTexts(entries[0]), []);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("   •   "),
+  ]);
+  check("A2 whitespace-wrapped marker emits no detail", detailTexts(entries[0]), []);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("▪"),
+    block("‣"),
+  ]);
+  check("A3 other decorative marker-only glyphs emit no detail", detailTexts(entries[0]), []);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• Relevant coursework in control systems", "bullet"),
+  ]);
+  check("A4 marker + real text keeps the text", detailTexts(entries[0]), ["Relevant coursework in control systems"]);
+}
+
+counter = 0;
+{
+  // A5 - a marker + real education-entry content must survive Bug A's
+  // filter entirely (Bug B then decides whether it becomes an entry).
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• 2019 - 2021 Central Technical Institute", "bullet"),
+  ]);
+  checkTrue("A5 marker + real education content is not deleted", JSON.stringify(entries).includes("Central Technical Institute"));
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("C++ and MATLAB"),
+    block("Note: figures are presented in local currency"),
+  ]);
+  check("A6 non-marker punctuation-bearing content is not filtered", detailTexts(entries[0]), [
+    "C++ and MATLAB",
+    "Note: figures are presented in local currency",
+  ]);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("•"),
+    block("• Thesis on thermal management", "bullet"),
+  ]);
+  checkTrue("A7 no glyph-only detail survives anywhere", detailTexts(entries[0]).every((d) => d.trim().length > 0 && d.trim() !== "•"));
+}
+
+// ---- Bug B positive: a bulleted line with its OWN strong evidence ----
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• 2019 - 2021 Central Technical Institute", "bullet"),
+  ]);
+  check("B1 bulleted date + institution starts its own entry", entries.length, 2);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• 2019 - 2021 M.S. in Computer Science", "bullet"),
+  ]);
+  check("B2 bulleted date + credential starts its own entry", entries.length, 2);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• 2019 - 2021 Central Technical Institute", "bullet"),
+    block("• 2021 - 2023 Riverside Polytechnic", "bullet"),
+  ]);
+  check("B3 two qualifying bulleted lines produce two further entries", entries.length, 3);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• 2014 - 2018 Northbridge University, B.S. in Mechanical Engineering", "bullet"),
+    block("• 2019 - 2021 Northbridge University, M.S. in Computer Science", "bullet"),
+  ]);
+  check("B4 same institution, two qualifying date ranges, two entries", entries.length, 2);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+  ]);
+  check("B5 ordinary non-bullet education header is unchanged", entries.length, 1);
+  check("B5 ordinary header still resolves its institution", entries[0].institution?.value, "Northbridge University");
+}
+
+// ---- Bug B negative: ordinary detail bullets stay details ----
+const NEGATIVE_BULLETS: { label: string; text: string }[] = [
+  { label: "B6 date only", text: "• 2019 - 2021" },
+  { label: "B7 credential keyword only", text: "• Bachelor level coursework" },
+  { label: "B8 institution-like token only", text: "• University exchange programme" },
+  { label: "B9 dean's list with a year", text: "• Dean's List 2020" },
+  { label: "B10 coursework", text: "• Relevant Coursework: Algorithms" },
+  { label: "B11 thesis", text: "• Thesis: Battery Thermal Management" },
+  { label: "B12 gpa", text: "• GPA: 3.9" },
+  { label: "B13 honors", text: "• Graduated with Honours" },
+  { label: "B14 scholarship with a year", text: "• Awarded a scholarship in 2020" },
+  { label: "B15 note line", text: "• Note: values converted for presentation" },
+  {
+    label: "B16 long prose containing dates and keywords",
+    text: "• Between 2019 and 2021 completed an extended research placement at the university institute covering control systems, thermal modelling and validation",
+  },
+  { label: "B17 generic detail", text: "• Member of the student engineering society" },
+];
+
+for (const negative of NEGATIVE_BULLETS) {
+  counter = 0;
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block(negative.text, "bullet"),
+  ]);
+  check(`${negative.label} stays a detail, not a new entry`, entries.length, 1);
+}
+
+// ---- Regression: a qualifying entry still carries ordinary details ----
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• 2019 - 2021 Central Technical Institute", "bullet"),
+    block("• Member of the student engineering society", "bullet"),
+  ]);
+  check("R4 detail bullet below a qualifying entry stays its detail", entries.length, 2);
+  check("R4 that detail is attached to the second entry", detailTexts(entries[1]), ["Member of the student engineering society"]);
+}
+
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• 2014 - 2018 Northbridge University, B.S. in Mechanical Engineering", "bullet"),
+  ]);
+  check("R6 a qualifying bulleted entry still traces to its source block", entries[0]?.source.sourceBlockIds, ["block-p0-b0"]);
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {

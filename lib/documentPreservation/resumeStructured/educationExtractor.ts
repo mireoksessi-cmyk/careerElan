@@ -66,6 +66,63 @@ function isPureLabelLine(text: string): boolean {
   return detectProgramLabel(text) && text.trim().split(/\s+/).filter((w) => w.length > 0).length <= PURE_LABEL_MAX_WORDS;
 }
 
+/*
+  Phase 2B Bug A - a decorative list marker that arrived as a block of
+  its OWN, with no content beside it. Upstream bullet recognition
+  (blockAdapter's BULLET_PREFIX_RE, bulletPresentation's
+  DECORATIVE_GLYPH_RE/DASH_MARKER_RE) all require whitespace AFTER the
+  glyph, so a lone "•" matches none of them: it is typed "paragraph",
+  its marker is never stripped, and it reaches details[] as a literal
+  one-character string that renderers then display verbatim.
+
+  The character class mirrors those two existing repository sets rather
+  than inventing a new symbol vocabulary, and is anchored to the WHOLE
+  trimmed line, so it can only ever match a block that carries no
+  content at all. "• Relevant coursework" is unaffected.
+*/
+const DECORATIVE_MARKER_ONLY_RE = /^[•●○◦▪■□‣⁃·*\-–—]+$/;
+
+function isDecorativeMarkerOnly(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && DECORATIVE_MARKER_ONLY_RE.test(trimmed);
+}
+
+/*
+  Phase 2B Bug B - some resumes format every education record as its own
+  bullet. The three bullet vetoes below (this file's own, plus
+  looksLikeHeaderLine's) then make it impossible for ANY of them to
+  start an entry, so every record after the first collapses into the
+  first entry's details[].
+
+  Relaxing the veto outright would be unsafe: an ordinary detail bullet
+  ("Dean's List 2023", "Awarded a scholarship in 2020") would become a
+  fabricated school. So a bulleted line qualifies only on a conservative
+  COMBINATION of its own evidence - never one signal alone:
+
+    - it is genuinely a bullet, and has content once its marker is
+      removed (evaluated only; the stored text is never rewritten);
+    - it is short enough to be a header rather than prose;
+    - it is not a GPA or honours line, mirroring the same two exclusions
+      isNewEntryStart already applies to non-bulleted candidates;
+    - it carries its OWN date evidence; AND
+    - it carries its OWN degree or institution evidence.
+
+  Both regexes and the date test are the ones this file already uses for
+  non-bulleted candidates, so a bulleted record is held to the same
+  standard as an ordinary one, plus a mandatory date. Nothing here reads
+  a neighbouring line, an indent, or any resume-specific token.
+*/
+const MAX_BULLETED_ENTRY_LINE_LENGTH = 100;
+
+function hasStrongBulletedEntryEvidence(block: SemanticContentBlock): boolean {
+  if (block.blockType !== "bullet") return false;
+  const text = normalizeBulletPresentation(block.rawText, { blockType: block.blockType }).displayText.trim();
+  if (text.length === 0 || text.length > MAX_BULLETED_ENTRY_LINE_LENGTH) return false;
+  if (GPA_RE.test(text) || HONORS_RE.test(text)) return false;
+  if (!hasDateEvidence(text)) return false;
+  return DEGREE_KEYWORD_RE.test(text) || INSTITUTION_KEYWORD_RE.test(text);
+}
+
 export type EducationEntryRange = { headerBlockIndices: number[]; bodyBlockIndices: number[] };
 
 /*
@@ -88,7 +145,10 @@ export type EducationEntryRange = { headerBlockIndices: number[]; bodyBlockIndic
 function isNewEntryStart(blocks: SemanticContentBlock[], index: number): boolean {
   if (index >= blocks.length) return false;
   const block = blocks[index];
-  if (block.blockType === "bullet") return false;
+  /* Phase 2B Bug B - a bulleted candidate is judged by its own strong
+     evidence instead of being rejected outright. Returning here also
+     bypasses looksLikeHeaderLine, which rejects every bullet. */
+  if (block.blockType === "bullet") return hasStrongBulletedEntryEvidence(block);
   if (!looksLikeHeaderLine(block)) return false;
   if (GPA_RE.test(block.text) || HONORS_RE.test(block.text)) return false;
   if (hasDateEvidence(block.text)) return true;
@@ -109,7 +169,10 @@ function isNewEntryStart(blocks: SemanticContentBlock[], index: number): boolean
 */
 export function segmentEducationRanges(blocks: SemanticContentBlock[]): EducationEntryRange[] {
   if (blocks.length === 0) return [];
-  if (!blocks.some((b) => b.blockType !== "bullet" && hasDateEvidence(b.text))) {
+  /* Phase 2B Bug B - a resume whose education records are ALL bullets
+     has no non-bulleted dated line, so without this a qualifying
+     bulleted record could never segment. */
+  if (!blocks.some((b) => (b.blockType !== "bullet" && hasDateEvidence(b.text)) || hasStrongBulletedEntryEvidence(b))) {
     return [{ headerBlockIndices: [0], bodyBlockIndices: blocks.slice(1).map((_, i) => i + 1) }];
   }
 
@@ -123,7 +186,10 @@ export function segmentEducationRanges(blocks: SemanticContentBlock[]): Educatio
 
     let k = headerEnd + 1;
     while (k < n) {
-      if (blocks[k].blockType === "bullet") {
+      /* Phase 2B Bug B - an ordinary detail bullet still never ends the
+         current entry; only one carrying its own strong entry evidence
+         is allowed through to isNewEntryStart below. */
+      if (blocks[k].blockType === "bullet" && !hasStrongBulletedEntryEvidence(blocks[k])) {
         k++;
         continue;
       }
@@ -577,6 +643,10 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
     const details: StructuredTextValue[] = [...extraDetails];
     for (const block of bodyRunBlocks) {
       if (block.rawText.length === 0) continue;
+      /* Phase 2B Bug A - the emptiness guard above tests rawText, which
+         still carries the marker, so a marker-only block passes it and
+         reaches details[] as a literal glyph. */
+      if (isDecorativeMarkerOnly(block.rawText)) continue;
       if (GPA_RE.test(block.text)) continue;
       if (/\b(honou?rs?|dean'?s list|cum laude|distinction)\b/i.test(block.text)) {
         honors.push(makeValue(normalizeBulletPresentation(block.rawText, { blockType: block.blockType }).displayText, sectionId, block, 0.7));
