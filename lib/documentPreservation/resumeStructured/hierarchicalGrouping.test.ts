@@ -31,7 +31,12 @@ function check(label: string, actual: unknown, expected: unknown) {
   else fail++;
 }
 
-type LineSpec = { text: string; type?: SemanticBlockType; x?: number; weight?: number | string };
+/*
+  Phase 2A - `y` overrides the default one-line-per-index vertical
+  advance, so a same-Y / column-like geometry can be constructed for the
+  bullet-nesting same-Y guard's own catching negative case.
+*/
+type LineSpec = { text: string; type?: SemanticBlockType; x?: number; y?: number; weight?: number | string };
 
 function makeInputs(lines: LineSpec[]): { blocks: SemanticContentBlock[]; contentBlocks: { id: string; text: string; source: SourceTrace }[] } {
   const blocks: SemanticContentBlock[] = lines.map((l, i) => ({
@@ -41,7 +46,7 @@ function makeInputs(lines: LineSpec[]): { blocks: SemanticContentBlock[]; conten
     rawText: l.text,
     pageIndex: 0,
     sourceOrder: i,
-    bbox: l.x !== undefined ? { x: l.x, y: i * 20, width: 240, height: 12 } : undefined,
+    bbox: l.x !== undefined ? { x: l.x, y: l.y ?? i * 20, width: 240, height: 12 } : undefined,
     style: l.weight !== undefined ? { fontWeight: l.weight } : undefined,
     blockType: l.type ?? "paragraph",
   }));
@@ -348,6 +353,203 @@ function maxDepth(nodes: HierarchicalContentNode[]): number {
   ];
   const violations = verifyHierarchyOrderPreserved({ content, hierarchicalContent: swappedTree, hasHierarchicalStructure: true });
   check("order-verify swapped tree: exactly 3 violations (one per mismatched position)", violations.length, 3);
+}
+
+/*
+  ====================================================================
+  Phase 2A - bullet-under-bullet nesting.
+
+  Geometry model for these cases: subsection headings at x=50, first-
+  level bullets at x=70, second-level bullets at x=90 (a 20pt outline
+  level, comfortably past BULLET_CHILD_MIN_INDENT_DELTA), third level at
+  x=110. Lines advance 20pt vertically with height 12 unless a case
+  overrides `y` on purpose.
+  ====================================================================
+*/
+
+function childTexts(node: HierarchicalContentNode | undefined): string[] {
+  return (node?.children ?? []).map((c) => c.text);
+}
+
+// ==================== Phase 2A positive: parent bullet + 2 genuinely deeper bullets ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "5) FF-PCB Electrical Component Business", x: 50 },
+    { text: "LGES xEV Toyota program sensing-cable order.", type: "bullet", x: 70 },
+    { text: "Co-developed the ESS pilot program.", type: "bullet", x: 90 },
+    { text: "Leading pilot development of a CCS assembly.", type: "bullet", x: 90 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  const subheading = result.nodes[0];
+  check("2A nested: one subheading at top level", result.nodes.length, 1);
+  check("2A nested: subheading has exactly ONE direct bullet child", subheading?.children.length, 1);
+  check("2A nested: parent bullet text", subheading?.children[0]?.text, "LGES xEV Toyota program sensing-cable order.");
+  check("2A nested: parent bullet has exactly 2 children", childTexts(subheading?.children[0]), [
+    "Co-developed the ESS pilot program.",
+    "Leading pilot development of a CCS assembly.",
+  ]);
+  check("2A nested: parent bullet depth", subheading?.children[0]?.depth, 1);
+  check("2A nested: child bullet depth", subheading?.children[0]?.children[0]?.depth, 2);
+  check("2A nested: order invariant holds", verifyHierarchyOrderPreserved({ content: contentBlocks.map((c, i) => ({ ...c, kind: blocks[i].blockType === "bullet" ? ("bullet" as const) : ("paragraph" as const) })), hierarchicalContent: result.nodes, hasHierarchicalStructure: result.hasHierarchy }), []);
+}
+
+// ==================== Phase 2A positive: nesting closes when a parent-level bullet returns ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Programs", x: 50 },
+    { text: "Parent bullet one.", type: "bullet", x: 70 },
+    { text: "Child of parent one.", type: "bullet", x: 90 },
+    { text: "Parent bullet two.", type: "bullet", x: 70 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  const subheading = result.nodes[0];
+  check("2A close: subheading has 2 parent-level bullets", childTexts(subheading), ["Parent bullet one.", "Parent bullet two."]);
+  check("2A close: first parent keeps its single child", childTexts(subheading?.children[0]), ["Child of parent one."]);
+  check("2A close: returning bullet has no children", subheading?.children[1]?.children.length, 0);
+  check("2A close: returning bullet is back at depth 1", subheading?.children[1]?.depth, 1);
+}
+
+// ==================== Phase 2A positive: three bullet levels nest recursively ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Programs", x: 50 },
+    { text: "Level one.", type: "bullet", x: 70 },
+    { text: "Level two.", type: "bullet", x: 90 },
+    { text: "Level three.", type: "bullet", x: 110 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  const lvl1 = result.nodes[0]?.children[0];
+  const lvl2 = lvl1?.children[0];
+  const lvl3 = lvl2?.children[0];
+  check("2A 3-level: depth sequence", [lvl1?.depth, lvl2?.depth, lvl3?.depth], [1, 2, 3]);
+  check("2A 3-level: texts nest in order", [lvl1?.text, lvl2?.text, lvl3?.text], ["Level one.", "Level two.", "Level three."]);
+}
+
+// ==================== Phase 2A positive: a Phase 1 merged wrapped child stays ONE node at child depth ====================
+{
+  // Phase 1 has already rejoined the wrapped line, so this arrives as a
+  // single bullet block whose text is the full rejoined sentence.
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Programs", x: 50 },
+    { text: "Parent bullet.", type: "bullet", x: 70 },
+    { text: "Co-developed the ESS pilot and government-funded project management.", type: "bullet", x: 90 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  const parent = result.nodes[0]?.children[0];
+  check("2A wrapped child: exactly one child node", parent?.children.length, 1);
+  check("2A wrapped child: text is untouched by grouping", parent?.children[0]?.text, "Co-developed the ESS pilot and government-funded project management.");
+  check("2A wrapped child: sits at child depth", parent?.children[0]?.depth, 2);
+}
+
+// ==================== Phase 2A negative: same-indent bullets stay siblings ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Battery Development", x: 50 },
+    { text: "Led module design.", type: "bullet", x: 70 },
+    { text: "Reduced unit cost.", type: "bullet", x: 70 },
+    { text: "Owned supplier qualification.", type: "bullet", x: 70 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  check("2A siblings: all three remain direct children", childTexts(result.nodes[0]).length, 3);
+  check("2A siblings: none acquired children", result.nodes[0]?.children.map((c) => c.children.length), [0, 0, 0]);
+  check("2A siblings: all at depth 1", result.nodes[0]?.children.map((c) => c.depth), [1, 1, 1]);
+}
+
+// ==================== Phase 2A negative: tiny x jitter must NOT nest ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Battery Development", x: 50 },
+    { text: "First bullet.", type: "bullet", x: 70 },
+    // +4pt: real PDF coordinate jitter / kerning, far below a real outline level.
+    { text: "Second bullet, very slightly right.", type: "bullet", x: 74 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  check("2A jitter: both remain siblings", childTexts(result.nodes[0]).length, 2);
+  check("2A jitter: first bullet acquired no child", result.nodes[0]?.children[0]?.children.length, 0);
+}
+
+// ==================== Phase 2A negative: same-Y column neighbour with a LARGE x delta must NOT nest ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Key Metrics", x: 50, y: 0 },
+    // Both bullets share one visual row - a two-column/cell layout, not a list.
+    { text: "Total addressable market", type: "bullet", x: 70, y: 20 },
+    { text: "USD 4.2B", type: "bullet", x: 300, y: 20 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  check("2A same-Y: column neighbour is NOT nested", childTexts(result.nodes[0]).length, 2);
+  check("2A same-Y: left cell acquired no child", result.nodes[0]?.children[0]?.children.length, 0);
+  check("2A same-Y: both stay at depth 1", result.nodes[0]?.children.map((c) => c.depth), [1, 1]);
+}
+
+// ==================== Phase 2A negative: a new numbered subsection closes prior bullet nesting ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Programs", x: 50 },
+    { text: "Parent bullet.", type: "bullet", x: 70 },
+    { text: "Child bullet.", type: "bullet", x: 90 },
+    { text: "2. Operations", x: 50 },
+    { text: "Bullet under the second subsection.", type: "bullet", x: 70 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  check("2A next-subsection: two top-level subheadings", result.nodes.length, 2);
+  check("2A next-subsection: second subsection owns its own bullet", childTexts(result.nodes[1]), ["Bullet under the second subsection."]);
+  check("2A next-subsection: second subheading back at depth 0", result.nodes[1]?.depth, 0);
+  check("2A next-subsection: nested child stayed with the first parent", childTexts(result.nodes[0]?.children[0]), ["Child bullet."]);
+}
+
+// ==================== Phase 2A negative: a date-like row is not turned into bullet hierarchy ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Programs", x: 50 },
+    { text: "Parent bullet.", type: "bullet", x: 70 },
+    { text: "2019 - 2021", x: 90 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  /*
+    Catching case: the date line sits 20pt right of the bullet above it
+    and one line below, so it satisfies BOTH the indent threshold and the
+    vertical guard. The ONLY thing preventing it from becoming that
+    bullet's child is the candidate-is-a-bullet gate.
+  */
+  check("2A date row: stays a direct child of the subheading", childTexts(result.nodes[0]), ["Parent bullet.", "2019 - 2021"]);
+  check("2A date row: the bullet above it acquired no children", result.nodes[0]?.children[0]?.children.length, 0);
+  check("2A date row: date line remains a paragraph node", result.nodes[0]?.children[1]?.kind, "paragraph");
+  check("2A date row: date line stays at the subsection's own depth", result.nodes[0]?.children[1]?.depth, 1);
+}
+
+// ==================== Phase 2A negative: a paragraph never becomes a nesting parent ====================
+{
+  const { blocks, contentBlocks } = makeInputs([
+    { text: "1. Programs", x: 50 },
+    /*
+      Deliberately longer than MAX_SUBHEADING_LINE_LENGTH (60). A SHORT
+      unpunctuated line scores +1 for header shape and, together with
+      the +2 "next line is a more-indented bullet" and +1 baseline-indent
+      signals, would reach the pre-existing subheading threshold of 3 -
+      making the fixture a subheading rather than the paragraph this case
+      is about. Running past the length limit scores -1 instead, so this
+      line is a genuine paragraph under the unchanged production rules.
+    */
+    { text: "A plain description paragraph that runs well past the short header length limit.", x: 70 },
+    { text: "Bullet further right than the paragraph.", type: "bullet", x: 90 },
+  ]);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  check("2A paragraph parent: both stay direct children of the subheading", childTexts(result.nodes[0]).length, 2);
+  check("2A paragraph parent: paragraph acquired no children", result.nodes[0]?.children[0]?.children.length, 0);
+}
+
+// ==================== Phase 2A invariant: no text mutation anywhere in the tree ====================
+{
+  const lines: LineSpec[] = [
+    { text: "5) FF-PCB Electrical Component Business", x: 50 },
+    { text: "LGES xEV Toyota program sensing-cable order.", type: "bullet", x: 70 },
+    { text: "Co-developed the government-funded ESS pilot.", type: "bullet", x: 90 },
+    { text: "Leading pilot development of a CCS assembly.", type: "bullet", x: 90 },
+  ];
+  const { blocks, contentBlocks } = makeInputs(lines);
+  const result = buildHierarchicalContent(blocks, contentBlocks);
+  check("2A immutability: flattened texts equal input rawText in source order", flattenTexts(result.nodes), blocks.map((b) => b.rawText));
 }
 
 console.log(`\n--- ${pass} passed, ${fail} failed ---`);

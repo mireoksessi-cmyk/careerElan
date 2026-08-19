@@ -35,6 +35,31 @@ const MAX_SUBHEADING_LINE_LENGTH = 60;
 const SENTENCE_END_RE = /[.!?]$/;
 const NUMBERING_TRAILING_DOT_RE = /\.$/;
 
+/*
+  Phase 2A - bullet-under-bullet nesting only. How much further right a
+  bullet must start before it is treated as a CHILD of the bullet above
+  it rather than its sibling. Deliberately much larger than the +3 used
+  by the subheading score's "next line is a more-indented bullet"
+  corroborating signal: that +3 only has to notice that some indent
+  increase exists alongside an already-scoring heading candidate,
+  whereas this value is the sole evidence for creating a parent-child
+  link, so it has to clear PDF coordinate jitter and kerning noise on
+  its own. A real outline level is a tab or list indent (~11-18pt);
+  8pt sits below the smallest of those and far above any jitter, so a
+  genuine level is caught while same-level bullets that merely start a
+  point or two apart stay siblings.
+*/
+const BULLET_CHILD_MIN_INDENT_DELTA = 8;
+
+/*
+  Phase 2A same-Y guard. A block that is further right but still inside
+  the previous bullet's own vertical band is a horizontal neighbour - a
+  second column, a right-aligned date, a table-like cell - never a
+  nested child. Requiring the candidate to start at least half a line
+  below its would-be parent keeps column geometry out of the hierarchy.
+*/
+const BULLET_CHILD_MIN_VERTICAL_ADVANCE_RATIO = 0.5;
+
 const ARABIC_MARKER_RE = /^\(?(\d{1,3})[.)]\s+/;
 const ROMAN_MARKER_RE = /^\(?([IVXLCDM]{1,8})[.)]\s+/;
 const ALPHA_MARKER_RE = /^\(?([A-Za-z])[.)]\s+/;
@@ -151,8 +176,21 @@ export function buildHierarchicalContent(
   if (!isSubheading.some(Boolean)) return { nodes: [], hasHierarchy: false };
 
   const topLevel: HierarchicalContentNode[] = [];
-  type StackFrame = { node: HierarchicalContentNode | null; indent: number; depth: number };
-  const stack: StackFrame[] = [{ node: null, indent: -Infinity, depth: -1 }];
+  /*
+    Phase 2A - `kind` discriminates a frame opened by a subheading from
+    one opened by a bullet, so the bullet branch below can close bullet
+    frames without ever popping the subsection a bullet belongs to.
+    y/height are recorded for bullet frames only, for the same-Y guard.
+  */
+  type StackFrame = {
+    node: HierarchicalContentNode | null;
+    indent: number;
+    depth: number;
+    kind: "root" | "subheading" | "bullet";
+    y?: number;
+    height?: number;
+  };
+  const stack: StackFrame[] = [{ node: null, indent: -Infinity, depth: -1, kind: "root" }];
 
   function currentChildren(): HierarchicalContentNode[] {
     const top = stack[stack.length - 1];
@@ -178,8 +216,42 @@ export function buildHierarchicalContent(
         source: contentBlock.source,
       };
       currentChildren().push(node);
-      stack.push({ node, indent, depth });
+      stack.push({ node, indent, depth, kind: "subheading" });
       return;
+    }
+
+    /*
+      Phase 2A - a bullet indented well past the bullet above it is that
+      bullet's child, not its sibling. Only BULLET frames are closed
+      here; a subheading/root frame is never popped by a bullet, so
+      subsection membership is untouched. Every guard below fails
+      CLOSED - missing geometry, insufficient indent, or same-Y column
+      geometry all fall through to the pre-Phase-2A behaviour of
+      appending at the current subsection level.
+    */
+    const indent = block.bbox?.x;
+    const blockY = block.bbox?.y;
+
+    while (stack.length > 1) {
+      const frame = stack[stack.length - 1];
+      if (frame.kind !== "bullet") break;
+      const frameHeight = frame.height !== undefined && frame.height > 0 ? frame.height : 1;
+      const nestedUnderFrame =
+        /*
+          Phase 2A is bullet-UNDER-bullet only. The candidate itself must
+          be a real bullet: a paragraph, a date row or any other non-
+          bullet line indented past the bullet above it is not that
+          bullet's child, and falls through to the pre-Phase-2A
+          behaviour of sitting at the current subsection level.
+        */
+        kind === "bullet" &&
+        indent !== undefined &&
+        blockY !== undefined &&
+        frame.y !== undefined &&
+        indent >= frame.indent + BULLET_CHILD_MIN_INDENT_DELTA &&
+        blockY >= frame.y + frameHeight * BULLET_CHILD_MIN_VERTICAL_ADVANCE_RATIO;
+      if (nestedUnderFrame) break;
+      stack.pop();
     }
 
     const top = stack[stack.length - 1];
@@ -193,6 +265,15 @@ export function buildHierarchicalContent(
       source: contentBlock.source,
     };
     currentChildren().push(node);
+
+    /*
+      Only a real bullet with real geometry may become a parent: a
+      paragraph (including a Phase 1 wrapped continuation that stayed a
+      paragraph) never opens a nesting level.
+    */
+    if (kind === "bullet" && indent !== undefined && blockY !== undefined) {
+      stack.push({ node, indent, depth, kind: "bullet", y: blockY, height: block.bbox?.height });
+    }
   });
 
   return { nodes: topLevel, hasHierarchy: true };
