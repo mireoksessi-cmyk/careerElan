@@ -503,6 +503,35 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
         }
       } else {
         reasonCodes.push("single-line-header-no-date-evidence");
+        /*
+          Phase 2B-C2-S - semantic preservation only.
+
+          This branch resolves NOTHING: with no date anchor the whole
+          field-resolution body above is skipped, so the header line
+          survives only in rawHeaderText. That is not enough on its own,
+          because the renderer's fallback shows rawHeaderText ONLY while
+          the entry has no other structured content - and any body block
+          (a detail, a GPA line, an honours line) makes the entry count
+          as structured, switching the fallback off and taking this
+          line's meaning off the page with it.
+
+          So it is preserved through the SAME details channel every body
+          block already uses, with the same normalization and the same
+          source-traced value construction, appearing ahead of the body
+          lines in source order.
+
+          Gated on a body block existing, because that is exactly when
+          the fallback is suppressed: with no body block the entry stays
+          unstructured, the fallback still renders this line as the
+          entry's own header, and nothing here should change that.
+
+          Nothing structured was produced on this path, so this can
+          neither duplicate a resolved field nor a resolver remainder.
+        */
+        const unresolvedHeaderText = normalizeBulletPresentation(block.rawText, { blockType: block.blockType }).displayText.trim();
+        if (unresolvedHeaderText.length > 0 && bodyRunBlocks.some((b) => b.rawText.trim().length > 0)) {
+          extraDetails.push(makeValue(unresolvedHeaderText, sectionId, block, 0.6));
+        }
       }
     } else {
       /* Phase 5D.3C - Generic Multi-Line Academic Header Recovery
@@ -531,6 +560,31 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
          text of their own - excluded from field assignment, still
          preserved via rawHeaderText. */
       const candidateLines = allCandidateLines.filter((c) => !isPureLabelLine(c.text) && !isQualifierOnlyText(c.text));
+      /*
+        Phase 2B-C2-S - semantic preservation only, for the lines the
+        filter above just excluded.
+
+        Those lines stay excluded from field assignment exactly as
+        before: the comment above is right that they carry no
+        institution/degree/major text of their own. What it also says -
+        "still preserved via rawHeaderText" - is the part that no longer
+        holds, because the renderer's fallback shows rawHeaderText ONLY
+        while the entry has nothing else, and this branch has already
+        set a date and/or location by the time it runs.
+
+        The excluded set is derived from the filter's OWN result rather
+        than by re-testing the predicates, so the two can never drift,
+        and only `text` (the post-date-strip remainder) is preserved -
+        never the whole raw line, whose date is already structured.
+
+        Excluded lines are unreachable from locationCandidate/remaining
+        below, which read candidateLines only, so nothing preserved here
+        can also become an institution, credential or field of study.
+      */
+      for (const excluded of allCandidateLines) {
+        if (candidateLines.includes(excluded)) continue;
+        extraDetails.push(makeValue(excluded.text, sectionId, excluded.line.block, 0.6));
+      }
 
       const locationCandidate = candidateLines.find((c) => c.line.looksLikeLocationShape);
       if (locationCandidate) location = makeValue(locationCandidate.text, sectionId, locationCandidate.line.block, 0.7);

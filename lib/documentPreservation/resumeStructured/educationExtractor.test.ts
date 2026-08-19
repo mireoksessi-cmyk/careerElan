@@ -557,6 +557,177 @@ for (const detail of C1_DETAIL_LINES) {
   check(`${detail.label} remains a detail, not an entry`, entries.length, 1);
 }
 
+/*
+  ====================================================================
+  Phase 2B-C2-S - meaningful Education header text must never end up
+  represented ONLY in rawHeaderText, because the renderer's fallback is
+  switched off as soon as the entry has any other content. Storage is
+  not preservation; these tests assert the details channel.
+  ====================================================================
+*/
+
+function detailValues(entry: { details: { value: string }[] } | undefined): string[] {
+  return (entry?.details ?? []).map((d) => d.value);
+}
+
+// S1 - PRIMARY: the live post-C1 shape. rawHeaderText alone is NOT enough.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("– Example City, ST · 04/2027"),
+  ]);
+  check("S1 still exactly one entry (C1 unchanged)", entries.length, 1);
+  check("S1 unresolved header survives in details, ahead of the continuation", detailValues(entries[0]), [
+    "Generic Program (Example Polytechnic) Expected in",
+    "– Example City, ST · 04/2027",
+  ]);
+  checkTrue(
+    "S1 rawHeaderText is still the verbatim source line",
+    entries[0].rawHeaderText === "• Generic Program (Example Polytechnic) Expected in"
+  );
+}
+
+// S2 - storage is not preservation: the header must be in a RENDERED
+//      channel, not only on the object.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Unrecognised Program Phrase"),
+    block("– Example City, ST · 04/2027"),
+  ]);
+  /*
+    Corrected: this fixture's first line is NOT a bullet, so both lines
+    enter the header window and the multi-line branch force-assigns the
+    phrase to a structured field. It is therefore already visible, and
+    requiring it in details[] was wrong. Kept as the control proving a
+    normal non-excluded line stays structurally represented and is not
+    pushed into details merely because C2-S exists.
+  */
+  checkTrue(
+    "S2 non-excluded header line is structurally represented, not lost",
+    (entries[0].institution?.value ?? "") === "Unrecognised Program Phrase"
+  );
+  check("S2 it is not additionally duplicated into details", detailValues(entries[0]).includes("Unrecognised Program Phrase"), false);
+}
+
+// S3 - NO-DUPLICATION: a successfully structured header is never copied
+//      into details.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example University - M.S. in Engineering - 2020 - 2022"),
+    /* Corrected fixture: a plain paragraph of this shape is header-like,
+       so collectHeaderWindow absorbed it and no body block existed. A
+       bullet terminates the window, which is what this case needs. */
+    block("• Relevant coursework in control systems", "bullet"),
+  ]);
+  check("S3 structured header is not duplicated into details", detailValues(entries[0]), [
+    "Relevant coursework in control systems",
+  ]);
+  checkTrue("S3 the header still resolves an institution", (entries[0].institution?.value ?? "").length > 0);
+}
+
+// S4 - a multi-line header (the resolver-remainder path) is untouched by
+//      C2-S: no header line is preserved twice.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example University"),
+    block("M.S. in Engineering - 2020 - 2022"),
+    block("Relevant coursework in control systems"),
+  ]);
+  const values = detailValues(entries[0]);
+  check("S4 multi-line header emits no duplicated remainder", values.filter((v) => v === "Example University").length, 0);
+  checkTrue("S4 body detail is still present exactly once", values.filter((v) => v === "Relevant coursework in control systems").length === 1);
+}
+
+// S5 - NO-RISK case: with no body block the fallback still applies, so
+//      C2-S must NOT move the header into details.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block("Electrical Engineering Technology Diploma")]);
+  check("S5 unstructured single header with no body keeps details empty", detailValues(entries[0]), []);
+  checkTrue(
+    "S5 the header is still preserved verbatim for the renderer fallback",
+    entries[0].rawHeaderText === "Electrical Engineering Technology Diploma"
+  );
+}
+
+// S6 - body-detail regression: ordinary details keep their content,
+//      order and count.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• Relevant Coursework: Algorithms", "bullet"),
+    block("• Thesis: thermal management", "bullet"),
+    block("• Note: values converted for presentation", "bullet"),
+  ]);
+  check("S6 ordinary body details are unchanged", detailValues(entries[0]), [
+    "Relevant Coursework: Algorithms",
+    "Thesis: thermal management",
+    "Note: values converted for presentation",
+  ]);
+}
+
+// S7 - C1 metadata continuation is NOT newly structured (C2 forbidden).
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic)", "bullet"),
+    block("– Example City, ST · 04/2027"),
+  ]);
+  check("S7 continuation did not become a structured location", entries[0].location, undefined);
+  check("S7 continuation did not become a structured date", entries[0].dateRangeText, undefined);
+  checkTrue("S7 continuation is still a detail", detailValues(entries[0]).includes("– Example City, ST · 04/2027"));
+}
+
+// S8 - true multi-entry segmentation is unaffected.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University - 2014 - 2018"),
+    block("Riverside University - 2019 - 2021"),
+  ]);
+  check("S8 two real records still produce two entries", entries.length, 2);
+}
+
+// S9 - multi-line gap: a PURE LABEL line is excluded from field
+//      assignment, so it must survive through details exactly once.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    /* "Joint Program:" was mis-authored: cleanHeaderFragment strips the
+       trailing colon (DANGLING_SEPARATOR_RE), so the preserved remainder
+       is "Joint Program" and an assertion on the colon form matched
+       nothing. "Double Degree" is in the same PROGRAM_LABEL_RE
+       alternation, is 2 words, and carries no leading/trailing separator
+       character, so fixture and preserved text are identical. */
+    block("Double Degree"),
+    block("Example University - 2019 - 2021"),
+  ]);
+  check("S9 pure-label line survives exactly once in details", detailValues(entries[0]).filter((v) => v === "Double Degree").length, 1);
+  check("S9 pure-label line is not assigned as an institution", entries[0].institution?.value === "Double Degree", false);
+  checkTrue("S9 the real institution still resolves", (entries[0].institution?.value ?? "").length > 0);
+  checkTrue("S9 rawHeaderText still holds both source lines verbatim", entries[0].rawHeaderText.includes("Double Degree"));
+}
+
+// S10 - multi-line gap: a QUALIFIER-ONLY remainder ("Expected
+//       Graduation", left after its date is structured) is likewise
+//       excluded, so it must survive through details exactly once.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example University"),
+    block("Expected Graduation 2026"),
+  ]);
+  check("S10 qualifier-only remainder survives exactly once in details", detailValues(entries[0]).filter((v) => v === "Expected Graduation").length, 1);
+  checkTrue("S10 its date is still structured", (entries[0].dateRangeText?.value ?? "").includes("2026"));
+  check("S10 qualifier-only text is not assigned as a credential", entries[0].credential?.value === "Expected Graduation", false);
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {
