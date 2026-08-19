@@ -470,37 +470,91 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
           const segments = candidateText.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
           if (segments.length >= 2) {
             reasonCodes.push("single-line-header-comma-split");
-            /* Phase 5D.3D - the first comma segment may itself be a
-               same-line Double Degree ("B.Sc., M.Sc., Example
-               University" - 3 comma parts total, first two are both
-               degrees). Try multi-credential resolution on segment[0]
-               joined back with any OTHER leading degree-shaped
-               segments before falling to the pre-5D.3D positional
-               assignment. */
-            let consumedCount = 1;
-            const degreeRun: string[] = [segments[0]];
-            while (consumedCount < segments.length - 1 && segmentLooksLikeDegree(segments[consumedCount])) {
-              degreeRun.push(segments[consumedCount]);
-              consumedCount++;
-            }
-            if (degreeRun.length >= 2) {
-              reasonCodes.push("single-line-header-comma-multi-degree-run");
-              for (const d of degreeRun) {
-                const { credential, fieldOfStudy } = splitDegreeInMajor(d);
+            /*
+              Phase 2B-H2-A - everything below encodes ONE positional
+              contract, "Credential, [Field,] Institution", and applies
+              it without ever asking what the segments actually look
+              like. A real, source-proven line takes the OPPOSITE shape,
+              "Institution, descriptive suffix" (a cohort/class phrase
+              trailing the school), so segment[0] - carrying plain
+              institution evidence and no degree evidence at all - was
+              assigned as the credential, and the suffix became the
+              institution.
+
+              Both shapes are comma-separated, so only the segments own
+              evidence can separate them. This gate uses exactly the
+              signals this file already imports and already trusts
+              elsewhere, and requires ALL of them: exactly two segments
+              (the narrowest shape the source proves - three or more is
+              still the credential-first enumeration the positional
+              branch was written for); the left side looks like an
+              institution and does NOT look like a degree (that pair
+              alone is what every existing "Bachelor of ..., ..." shape
+              fails on); and the right side is not a second institution,
+              not a degree, not honours and not a GPA - the categories
+              this entry already resolves into fields of their own (the
+              GPA exclusion also prevents a duplicate, since extractGpa
+              scans the header blocks too).
+
+              The suffix has no structured category of its own here, and
+              in particular it is NOT a location: this repository defines
+              that shape through looksLikeLocation, which a bare
+              comma-free phrase cannot satisfy, and academicCompositeParser
+              deliberately re-gates its own comma result on exactly that
+              test because academic lines have this precise
+              false-positive shape. So it is preserved through the SAME
+              extraDetails/details[] channel every unclassified-but-
+              meaningful Education line already uses, with the same
+              makeValue provenance, instead of being pushed into a field
+              that would assert a meaning the source never states.
+              rawHeaderText is untouched and still carries the whole
+              line verbatim.
+            */
+            const isInstitutionWithDescriptiveSuffix =
+              segments.length === 2 &&
+              segmentLooksLikeInstitution(segments[0]) &&
+              !segmentLooksLikeDegree(segments[0]) &&
+              !segmentLooksLikeInstitution(segments[1]) &&
+              !segmentLooksLikeDegree(segments[1]) &&
+              !HONORS_RE.test(segments[1]) &&
+              !GPA_RE.test(segments[1]);
+            if (isInstitutionWithDescriptiveSuffix) {
+              reasonCodes.push("single-line-header-institution-descriptive-suffix");
+              institutionsAcc.push(makeValue(segments[0], sectionId, block, 0.65));
+              extraDetails.push(makeValue(segments[1], sectionId, block, 0.6));
+            } else {
+              /* Phase 5D.3D - the first comma segment may itself be a
+                 same-line Double Degree ("B.Sc., M.Sc., Example
+                 University" - 3 comma parts total, first two are both
+                 degrees). Try multi-credential resolution on segment[0]
+                 joined back with any OTHER leading degree-shaped
+                 segments before falling to the pre-5D.3D positional
+                 assignment. */
+              let consumedCount = 1;
+              const degreeRun: string[] = [segments[0]];
+              while (consumedCount < segments.length - 1 && segmentLooksLikeDegree(segments[consumedCount])) {
+                degreeRun.push(segments[consumedCount]);
+                consumedCount++;
+              }
+              if (degreeRun.length >= 2) {
+                reasonCodes.push("single-line-header-comma-multi-degree-run");
+                for (const d of degreeRun) {
+                  const { credential, fieldOfStudy } = splitDegreeInMajor(d);
+                  if (credential.length > 0) credentialsAcc.push(makeValue(credential, sectionId, block, 0.7));
+                  if (fieldOfStudy) fieldsOfStudyAcc.push(makeValue(fieldOfStudy, sectionId, block, 0.65));
+                }
+              } else {
+                const { credential, fieldOfStudy } = splitDegreeInMajor(segments[0]);
                 if (credential.length > 0) credentialsAcc.push(makeValue(credential, sectionId, block, 0.7));
                 if (fieldOfStudy) fieldsOfStudyAcc.push(makeValue(fieldOfStudy, sectionId, block, 0.65));
               }
-            } else {
-              const { credential, fieldOfStudy } = splitDegreeInMajor(segments[0]);
-              if (credential.length > 0) credentialsAcc.push(makeValue(credential, sectionId, block, 0.7));
-              if (fieldOfStudy) fieldsOfStudyAcc.push(makeValue(fieldOfStudy, sectionId, block, 0.65));
-            }
-            const remainderSegments = segments.slice(consumedCount);
-            if (remainderSegments.length >= 2) {
-              fieldsOfStudyAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
-              institutionsAcc.push(makeValue(remainderSegments.slice(1).join(", "), sectionId, block, 0.65));
-            } else if (remainderSegments.length === 1) {
-              institutionsAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
+              const remainderSegments = segments.slice(consumedCount);
+              if (remainderSegments.length >= 2) {
+                fieldsOfStudyAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
+                institutionsAcc.push(makeValue(remainderSegments.slice(1).join(", "), sectionId, block, 0.65));
+              } else if (remainderSegments.length === 1) {
+                institutionsAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
+              }
             }
           } else {
             /* No comma structure - try a same-line delimiter-based

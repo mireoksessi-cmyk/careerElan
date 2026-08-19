@@ -823,6 +823,84 @@ counter = 0;
   checkTrue("H1 inner glyph: the non-leading glyph is not globally stripped", h1StructuredFieldValues(entries[0]).concat(detailValues(entries[0])).join(" | ").includes(`${H1_MARKER} Honours Program`));
 }
 
+// --- Phase 2B-H2-A - institution + descriptive suffix comma shape ---
+// "Institution, descriptive suffix" is the OPPOSITE of the positional
+// "Credential, [Field,] Institution" contract the comma branch was
+// written for. The school must resolve as the institution, and the
+// suffix - which carries no structured category of its own - must be
+// preserved as a detail, never as a location/credential/field/second
+// institution/honour.
+const H2A_SUFFIX = "11th graduating class";
+
+// H2A-1 - PRIMARY: the source-proven shape, on a bulleted date-first line.
+counter = 0;
+{
+  const raw = `• 1986-1989 Example High School, ${H2A_SUFFIX}`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H2A primary: exactly one entry", entries.length, 1);
+  check("H2A primary: the school resolves as institution", entries[0].institution?.value, "Example High School");
+  check("H2A primary: institutions[0] is the school", entries[0].institutions[0]?.value, "Example High School");
+  check("H2A primary: institutions[] holds exactly the school", entries[0].institutions.map((v) => v.value), ["Example High School"]);
+  check("H2A primary: no credential is invented", entries[0].credential, undefined);
+  check("H2A primary: credentials[] stays empty", entries[0].credentials.length, 0);
+  check("H2A primary: no fieldOfStudy is invented", entries[0].fieldOfStudy, undefined);
+  check("H2A primary: fieldsOfStudy[] stays empty", entries[0].fieldsOfStudy.length, 0);
+  check("H2A primary: no location is invented", entries[0].location, undefined);
+  check("H2A primary: honors stays empty", entries[0].honors.length, 0);
+  check("H2A primary: the date is unchanged", entries[0].dateRangeText?.value, "1986-1989");
+  check("H2A primary: rawHeaderText remains verbatim", entries[0].rawHeaderText, raw);
+}
+
+// H2A-2 - the suffix lands in details EXACTLY once, and nowhere else.
+counter = 0;
+{
+  const raw = `• 1986-1989 Example High School, ${H2A_SUFFIX}`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H2A destination: suffix appears in details exactly once", detailValues(entries[0]).filter((v) => v === H2A_SUFFIX).length, 1);
+  check("H2A destination: suffix is not the institution", entries[0].institution?.value === H2A_SUFFIX, false);
+  check("H2A destination: suffix is not in institutions[]", entries[0].institutions.some((v) => v.value === H2A_SUFFIX), false);
+  check("H2A destination: suffix is not the credential", entries[0].credential?.value === H2A_SUFFIX, false);
+  check("H2A destination: suffix is not in credentials[]", entries[0].credentials.some((v) => v.value === H2A_SUFFIX), false);
+  check("H2A destination: suffix is not the fieldOfStudy", entries[0].fieldOfStudy?.value === H2A_SUFFIX, false);
+  check("H2A destination: suffix is not in fieldsOfStudy[]", entries[0].fieldsOfStudy.some((v) => v.value === H2A_SUFFIX), false);
+  check("H2A destination: suffix is not the location", entries[0].location?.value === H2A_SUFFIX, false);
+  check("H2A destination: suffix is not an honour", entries[0].honors.some((v) => v.value === H2A_SUFFIX), false);
+}
+
+// H2A-3 - the preserved suffix keeps the same source provenance every
+//         other structured value carries.
+counter = 0;
+{
+  const sourceBlock = block(`• 1986-1989 Example High School, ${H2A_SUFFIX}`, "bullet");
+  const entries = extractEducationEntries("s1", [sourceBlock]);
+  const suffixDetail = entries[0].details.find((d) => d.value === H2A_SUFFIX);
+  checkTrue("H2A provenance: the suffix detail exists", suffixDetail !== undefined);
+  check("H2A provenance: section id is traced", suffixDetail?.source.sourceSectionId, "s1");
+  check("H2A provenance: source block id is traced", suffixDetail?.source.sourceBlockIds, [sourceBlock.id]);
+  check("H2A provenance: source element ids are traced", suffixDetail?.source.sourceElementIds, sourceBlock.sourceElementIds);
+  checkTrue("H2A provenance: it is a real StructuredTextValue, not a bare string", typeof suffixDetail?.confidence === "number" && typeof suffixDetail?.extractionMethod === "string");
+}
+
+// H2A-4 - SAFETY: a two-segment CREDENTIAL-first line must keep the
+//         existing positional contract, not be re-read as
+//         institution + suffix.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block("Bachelor of Science, Example University (2015 - 2019)")]);
+  check("H2A safety: credential-first two-segment keeps its credential", entries[0].credential?.value, "Bachelor of Science");
+  check("H2A safety: credential-first two-segment keeps its institution", entries[0].institution?.value, "Example University");
+  check("H2A safety: its institution is not demoted to a detail", detailValues(entries[0]).includes("Example University"), false);
+}
+
+// H2A-5 - SAFETY: a trailing segment that IS a degree stays a degree,
+//         so an institution-first degree line is untouched.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block("• 2014 - 2018 Example University, B.S. in Mechanical Engineering", "bullet")]);
+  check("H2A safety: institution-first degree line is not treated as a suffix shape", entries[0].reasonCodes.includes("single-line-header-institution-descriptive-suffix"), false);
+  check("H2A safety: its degree text is not demoted to a detail", detailValues(entries[0]).includes("B.S. in Mechanical Engineering"), false);
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {
