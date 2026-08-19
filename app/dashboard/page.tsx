@@ -1056,6 +1056,46 @@ const [canonicalImportMessage, setCanonicalImportMessage] = useState<string | nu
 const [templateSelectorEnabled, setTemplateSelectorEnabled] = useState(false);
 const [availableTemplates, setAvailableTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
 /*
+  The direct-written (Career Memory) resume's own canonical template.
+  Unlike an uploaded resume it has no `resumes` row to hang a preference
+  on, so its effective template IS the profile default - see
+  lib/careerMemory/services/resolveResumeTemplate.ts's header comment,
+  which states exactly that. resumeTemplateResolutions cannot supply it:
+  that map is keyed by resume.id and its effect early-returns on
+  resumes.length === 0, so it never covers this row.
+
+  Deliberately starts null and stays null on any failure. null is not
+  "unknown, assume fine" here - it is the same thing the API returns for
+  "no canonical profile yet" and "never chose one", both of which mean
+  there is no template to render with, so the honest answer is to keep
+  Preview hidden rather than open a preview that silently falls back to a
+  template the user never picked.
+*/
+const [careerMemoryTemplateId, setCareerMemoryTemplateId] = useState<string | null>(null);
+/*
+  Whether the direct-written resume may be previewed at all. Both halves
+  are required: a preview built from an incomplete profile, or rendered
+  with a template the user never chose, is a preview of something they
+  did not author.
+
+  careerMemoryCompleted is the persisted career_memory.required_completed
+  the Career Memory editor writes from hasPersonalInfo() && hasExperience()
+  && hasSkills(). It is reused verbatim rather than recomputed here - a
+  second copy of those three rules in this file would be free to drift
+  from the editor's own, and this is already the flag auth routing and
+  find-jobs gate on.
+
+  A plain non-null check is the whole template rule: career_profiles.
+  default_template_id carries a DB CHECK admitting only NULL or the four
+  canonical ids (migration 20260808010000), so a non-null value cannot be
+  an unknown template and re-validating it here would mean importing the
+  registry for a constraint the database already enforces.
+
+  Scoped to this resume only - it is read exclusively inside the
+  `careerMemory &&` block below, so no uploaded-resume row can see it.
+*/
+const showCareerMemoryPreview = careerMemoryCompleted && careerMemoryTemplateId !== null;
+/*
   Large canonical preview loading state, keyed by the resolved iframe src
   rather than by template id: the same templateId can be re-requested with a
   different canonicalVersionId, which re-navigates the iframe back to a blank
@@ -1097,6 +1137,29 @@ useEffect(() => {
       const configData = configRes.ok ? await configRes.json() : { templateSelectorEnabled: false };
       if (cancelled) return;
       setTemplateSelectorEnabled(Boolean(configData.templateSelectorEnabled));
+
+      /*
+        Read BEFORE the templateSelectorEnabled early-return below, on
+        purpose. This endpoint is gated by auth alone, not by the canary
+        flag (see its own header comment: "auth is now the only generic
+        gate"), and the Career Memory row renders in every runtime - so
+        gating this read on the flag would leave careerMemoryTemplateId
+        permanently null wherever the selector is off, which the Preview
+        condition would then read as "no template selected".
+
+        Reuses the existing GET; no new endpoint, no RPC, no DB query.
+      */
+      try {
+        const preferenceRes = await fetch("/api/internal/canonical-career-memory/template-preference");
+        const preferenceData = preferenceRes.ok ? await preferenceRes.json() : null;
+        if (cancelled) return;
+        setCareerMemoryTemplateId(
+          typeof preferenceData?.defaultTemplateId === "string" ? preferenceData.defaultTemplateId : null
+        );
+      } catch {
+        if (!cancelled) setCareerMemoryTemplateId(null);
+      }
+
       if (!configData.templateSelectorEnabled) return;
 
       const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
@@ -3046,17 +3109,25 @@ Choose which resume and cover letter will be used when generating your applicati
       </label>
 
       <div className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={() =>
-            setPreviewAsset({
-              type: "career-memory-resume",
-            })
-          }
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
-        >
-          Preview
-        </button>
+        {/*
+          Visibility only - the button itself, its onClick, its preview
+          asset type and the renderer behind it are untouched. Edit stays
+          unconditional, so a user whose profile is not ready yet still
+          has the one control that lets them finish it.
+        */}
+        {showCareerMemoryPreview && (
+          <button
+            type="button"
+            onClick={() =>
+              setPreviewAsset({
+                type: "career-memory-resume",
+              })
+            }
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+          >
+            Preview
+          </button>
+        )}
 
         <button
           type="button"
