@@ -315,6 +315,116 @@ counter = 0;
   check("R6 a qualifying bulleted entry still traces to its source block", entries[0]?.source.sourceBlockIds, ["block-p0-b0"]);
 }
 
+/*
+  ====================================================================
+  Phase 2B-final - a marker-only block must carry zero semantic content
+  ANYWHERE in Education, not only in details[]. The header path is the
+  catching one: "•" satisfies looksLikeHeaderLine, so isNewEntryStart's
+  next-line date lookahead could promote it and collectHeaderWindow
+  could absorb it into an entry header.
+  ====================================================================
+*/
+
+function allEducationText(entries: { rawHeaderText: string; details: { value: string }[] }[]): string {
+  return entries.map((e) => `${e.rawHeaderText}|${e.details.map((d) => d.value).join("|")}`).join("||");
+}
+
+// F1 - CATCHING: marker immediately before an ordinary dated non-bullet entry.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("•"),
+    block("Northbridge University, School of Engineering - 2014 - 2018"),
+  ]);
+  check("F1 marker before dated header creates no extra entry", entries.length, 1);
+  check("F1 marker is absent from rawHeaderText", entries[0].rawHeaderText.includes("•"), false);
+  check("F1 marker is absent from details", allEducationText(entries).includes("•"), false);
+  check("F1 the real entry still resolves its date", entries[0].dateRangeText?.value, "2014 - 2018");
+  checkTrue("F1 the real entry still resolves an institution", (entries[0].institution?.value ?? "").length > 0);
+}
+
+// F2 - marker immediately before a strong bulleted EducationEntry.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("•"),
+    block("• 2019 - 2021 Central Technical Institute", "bullet"),
+  ]);
+  check("F2 marker before a bulleted entry creates no extra entry", entries.length, 1);
+  /*
+    Precise orphan check. A blanket "no bullet character anywhere" would
+    be wrong here: rawHeaderText is verbatim by contract, so the
+    surviving entry legitimately keeps its OWN leading marker. What must
+    not happen is the orphan being absorbed as an extra header line -
+    "•\n• 2019 - 2021 Central Technical Institute". Asserting the exact
+    header text catches that and nothing else.
+  */
+  check("F2 orphan marker was not absorbed into the entry header", entries[0].rawHeaderText, "• 2019 - 2021 Central Technical Institute");
+}
+
+// F3 - marker in an ordinary body/detail position.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("•"),
+  ]);
+  check("F3 marker in body position produces no detail", entries[0].details.length, 0);
+}
+
+// F4 - marker inside the header window, the extraDetails-producing path.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("•"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+  ]);
+  check("F4 marker between header lines creates no extra entry", entries.length, 1);
+  check("F4 marker never reaches rawHeaderText or extraDetails", allEducationText(entries).includes("•"), false);
+  checkTrue("F4 the header still resolves a credential", (entries[0].credential?.value ?? "").length > 0);
+}
+
+// F5 - consecutive marker-only blocks before a valid entry.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("•"),
+    block("▪"),
+    block("Northbridge University, School of Engineering - 2014 - 2018"),
+  ]);
+  check("F5 consecutive markers create no entries", entries.length, 1);
+  check("F5 no marker survives anywhere", /[•▪]/.test(allEducationText(entries)), false);
+}
+
+// F6 - marker between two valid entries.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University, School of Engineering - 2014 - 2018"),
+    block("•"),
+    block("Riverside Polytechnic, School of Computing - 2019 - 2021"),
+  ]);
+  check("F6 marker between entries leaves exactly two entries", entries.length, 2);
+  check("F6 no marker survives between entries", allEducationText(entries).includes("•"), false);
+}
+
+// F7 - marker + REAL content is never dropped by the whole-line rule.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Northbridge University"),
+    block("B.S. in Mechanical Engineering - 2014 - 2018"),
+    block("• Relevant Coursework", "bullet"),
+    block("• Thesis: thermal management", "bullet"),
+  ]);
+  check("F7 marker + real content survives as details", entries[0].details.map((d) => d.value), [
+    "Relevant Coursework",
+    "Thesis: thermal management",
+  ]);
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {

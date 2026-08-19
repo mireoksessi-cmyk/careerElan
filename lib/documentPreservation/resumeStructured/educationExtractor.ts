@@ -355,11 +355,33 @@ function extractGpa(sectionId: string, blocks: SemanticContentBlock[]): Structur
 }
 
 export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticContentBlock[]): EducationEntry[] {
-  const ranges = segmentEducationRanges(bodyBlocks);
+  /*
+    Phase 2B-final - a marker-only block carries zero semantic content,
+    so it is removed before ANY Education classification runs, not just
+    before details[].
+
+    The details-loop filter added with the marker rule is too late for
+    one source-proven path: looksLikeHeaderLine("•") is true (it is not
+    a bullet, is under the length cap, has no sentence terminator and is
+    one word), so isNewEntryStart promotes such a block through its
+    next-line date lookahead, and collectHeaderWindow then absorbs it
+    into an entry's header window - where it reaches rawHeaderText and
+    never passes through the body loop at all.
+
+    Filtering here rather than guarding each call site is not a
+    stylistic choice: collectHeaderWindow lives in headerWindow.ts,
+    which this change may not touch, so the array it receives is the
+    only place the header path can be covered. All four index lookups
+    below read from this same filtered array, so the ranges returned by
+    segmentEducationRanges stay in sync; each retained block keeps its
+    own id, sourceOrder and sourceElementIds untouched.
+  */
+  const blocks = bodyBlocks.filter((b) => !isDecorativeMarkerOnly(b.rawText));
+  const ranges = segmentEducationRanges(blocks);
 
   return ranges.map((range, index) => {
-    const headerBlocks = range.headerBlockIndices.map((i) => bodyBlocks[i]);
-    const bodyRunBlocks = range.bodyBlockIndices.map((i) => bodyBlocks[i]);
+    const headerBlocks = range.headerBlockIndices.map((i) => blocks[i]);
+    const bodyRunBlocks = range.bodyBlockIndices.map((i) => blocks[i]);
     const reasonCodes: string[] = [];
 
     const credentialsAcc: StructuredTextValue[] = [];
@@ -456,7 +478,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       /* Phase 5D.3C - Generic Multi-Line Academic Header Recovery
          Hardening, extended in Phase 5D.3D for Double Degree/Double
          Major/Joint Program spanning SEPARATE window lines. */
-      const classified = classifyWindow(bodyBlocks, range.headerBlockIndices);
+      const classified = classifyWindow(blocks, range.headerBlockIndices);
       const { dateLines } = classified;
 
       if (dateLines.length > 0) {
