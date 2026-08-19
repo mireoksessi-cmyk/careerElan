@@ -16,6 +16,7 @@
 */
 import { supabaseAdmin } from "../../supabaseAdmin";
 import { listAllAuthUsers, startOfUtcMonth, type AuthUserSummary } from "./shared";
+import { entitlementEmailHmac } from "../../security/generatePackageEntitlementIdentity";
 
 export type AdminUsersFilter = {
   provider?: string;
@@ -141,12 +142,44 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
   if (userError || !userResult?.user) return null;
   const user = userResult.user;
 
+  /*
+    Stage 2C - transient entitlement digest for the usage read below. Derived
+    from the auth User already fetched above, never stored, never logged and
+    never returned in AdminUserDetail. No claim is created or touched: the
+    read wrapper only SELECTs an existing claim.
+
+    Null when the address is absent or the secret is unavailable - see the
+    usage read for why that deliberately yields no usage figure rather than a
+    per-uuid one.
+  */
+  let emailHmac: string | null = null;
+
+  if (user.email) {
+    try {
+      emailHmac = entitlementEmailHmac(user.email);
+    } catch {
+      emailHmac = null;
+    }
+  }
+
   const [{ data: cm }, { data: resumes }, { data: apps }, { data: proSub }, { data: quota }, { data: profileRow }, { data: quotaOverrideRow }] = await Promise.all([
     supabaseAdmin.from("career_memory").select("required_completed, selected_resume_id, resume_template").eq("user_id", userId).maybeSingle(),
     supabaseAdmin.from("resumes").select("id").eq("user_id", userId),
     supabaseAdmin.from("applications").select("created_at, generation_status, generation_error_code, generation_completed_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(100),
     supabaseAdmin.from("subscriptions").select("plan_key, status").eq("user_id", userId).in("status", ["active", "trialing"]).maybeSingle(),
-    supabaseAdmin.rpc("get_generate_package_usage", { p_user_id: userId, p_limit: 3 }),
+    /*
+      Stage 2C - usage is read through the entitlement owner, matching
+      enforcement. p_user_id stays this account's own uuid so the plan limit
+      still resolves from its subscription / admin override; only the usage
+      side follows the digest to the founding owner. When the digest could
+      not be derived the read is skipped entirely rather than falling back to
+      a per-uuid figure that would be knowingly wrong for a recreated
+      account - remainingGenerateAllowance then stays null, which this
+      function's contract already means as "unavailable".
+    */
+    emailHmac
+      ? supabaseAdmin.rpc("get_generate_package_usage_for_entitlement", { p_user_id: userId, p_email_hmac: emailHmac, p_limit: 3 })
+      : Promise.resolve({ data: null }),
     supabaseAdmin.from("profiles").select("suspended_at, suspended_reason").eq("id", userId).maybeSingle(),
     supabaseAdmin.from("admin_user_quota_overrides").select("monthly_generate_limit").eq("user_id", userId).maybeSingle(),
   ]);
