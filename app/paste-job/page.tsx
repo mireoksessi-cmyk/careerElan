@@ -4032,68 +4032,90 @@ async function downloadDocx() {
               generationPhase === "pending" && elapsed >= 90;
             const isVeryLong =
               generationPhase === "pending" && elapsed >= 120;
-            const percent =
-              generationPhase === "submitting"
-                ? 5
-                : (progressInfo?.progress ?? 10);
-            const stageLabel =
+            /*
+              The prominent line is about the WHOLE operation, not any one
+              backend step, so it stays true for the entire wait: the
+              canonical engine reports a single stage ("claimed") for ~94%
+              of a generation, so a step-by-step headline would be claiming
+              detail the backend never sends.
+
+              progressInfo?.progress is deliberately no longer read here.
+              Its value is real and server-computed, but on the canonical
+              engine it only ever reaches 20 and then stops, so showing it
+              as a completion figure told the user "one fifth done" while
+              the work was in fact nearly finished. Nothing about how that
+              number is produced, polled or stored changed - it is simply
+              no longer presented as completion.
+            */
+            const headline =
               generationPhase === "submitting"
                 ? "Submitting your request..."
                 : generationPhase === "poll_timeout"
                   ? "Still processing on our servers..."
-                  : STAGE_LABELS[progressInfo?.stage ?? "queued"];
+                  : "Career Élan is writing your resume and cover letter.";
+            /*
+              Still the real, worker-reported stage - factual, never a
+              percentage, and demoted to the small status line now that it
+              no longer has to carry the headline.
+            */
+            const stageLabel =
+              STAGE_LABELS[progressInfo?.stage ?? "queued"];
 
             return (
               <>
-                <div className="flex items-center justify-between gap-4 rounded-lg bg-white/95 px-2.5 py-1.5 text-xs font-bold text-indigo-950">
-                  {/*
-                    Presentational only - the existing /logo.png already used
-                    elsewhere on this page, placed beside the stage label so the
-                    wait reads as Career Élan doing the work. No behaviour,
-                    timing, percentage or state transition is affected.
-                  */}
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Image
-                      src="/logo.png"
-                      alt="Career Élan"
-                      width={72}
-                      height={27}
-                      className="h-4 w-auto shrink-0"
-                    />
-                    <span className="truncate">{stageLabel}</span>
-                  </span>
-                  <span>
-                    {generationPhase === "poll_timeout"
-                      ? ""
-                      : `${percent}%`}
-                  </span>
+                {/*
+                  Presentational only - the existing /logo.png already used
+                  elsewhere on this page, now leading the loading card so the
+                  wait reads as Career Élan doing the work. No behaviour,
+                  timing or state transition is affected.
+                */}
+                <div className="flex items-center gap-3 rounded-lg bg-white/95 px-2.5 py-2 text-indigo-950">
+                  <Image
+                    src="/logo.png"
+                    alt="Career Élan"
+                    width={120}
+                    height={45}
+                    className="h-6 w-auto shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold">{headline}</p>
+                    <p className="truncate text-[11px] font-semibold text-indigo-950/70">
+                      Preparing a tailored package for this role.
+                    </p>
+                  </div>
                 </div>
 
                 {/*
-                  Real, worker-reported percentage width - never advanced by
-                  a client-side timer (see progressInfo's own comment
-                  above). The "generating" stage is the one long-running
-                  step (the actual OpenAI call), so it additionally gets an
-                  animated shimmer overlay layered on top of its real
-                  55% width - otherwise the bar would look frozen for
-                  however long that step actually takes, which is honest
-                  about the percentage but not about "is this still
-                  working."
+                  Indeterminate by design. The previous bar was determinate,
+                  driven by the server-reported percentage - but on the
+                  canonical engine that percentage stops at 20 and stays
+                  there for the whole generation, so the bar sat frozen at
+                  one fifth and then vanished at completion without ever
+                  filling. An honest "still working" animation is better
+                  than a completion figure the backend cannot support.
+
+                  Built from segments that pulse on a stagger rather than a
+                  sliding highlight: Tailwind's built-in animate-pulse is
+                  already used on this page, so this needs no new keyframe,
+                  no global CSS, no dependency and no new component. Only
+                  the per-segment delay/duration are inline. Segments never
+                  fill progressively, so nothing here can be read as a
+                  percentage, and the track never reads as "complete".
                 */}
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
-                  <div
-                    className={`h-full rounded-full bg-white transition-[width] duration-500 ${
-                      progressInfo?.stage === "generating"
-                        ? "animate-pulse"
-                        : ""
-                    }`}
-                    style={{
-                      width:
-                        generationPhase === "poll_timeout"
-                          ? "100%"
-                          : `${percent}%`,
-                    }}
-                  />
+                <div
+                  className="mt-2 flex h-2 gap-1 overflow-hidden rounded-full bg-white/20"
+                  aria-hidden="true"
+                >
+                  {[0, 1, 2, 3].map((segment) => (
+                    <span
+                      key={segment}
+                      className="h-full flex-1 animate-pulse rounded-full bg-white"
+                      style={{
+                        animationDelay: `${segment * 180}ms`,
+                        animationDuration: "1400ms",
+                      }}
+                    />
+                  ))}
                 </div>
 
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/90 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-950">
@@ -4104,7 +4126,16 @@ async function downloadDocx() {
                         ? "This is taking longer than usual. The server is still working."
                         : isTakingLonger
                           ? "This is taking a bit longer than expected."
-                          : "Real-time stage from our servers"}
+                          : /*
+                              The real worker-reported stage, unchanged in
+                              content and still sourced from the status
+                              endpoint. It used to sit above the bar next
+                              to a percentage; the old placeholder here
+                              ("Real-time stage from our servers") only
+                              described that label, so with the label moved
+                              down the stage text itself belongs here.
+                            */
+                            stageLabel}
                   </span>
 
                   <span className="whitespace-nowrap">
