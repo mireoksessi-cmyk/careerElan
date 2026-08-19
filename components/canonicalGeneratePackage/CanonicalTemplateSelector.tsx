@@ -165,6 +165,34 @@ export default function CanonicalTemplateSelector({ applicationId }: { applicati
 
   if (!enabled || !status) return null;
 
+  /*
+    Which cards to show. A completed canonical generation produced exactly
+    ONE template, so offering the other three here presented options that
+    were never generated for this application - and, because /preview never
+    persists, a switch could hand the user a download that disagreed with
+    what applications.selected_template_id records.
+
+    Matched against the RAW status.selected_template_id, deliberately NOT
+    activeTemplateId. activeTemplateId carries a `?? "professional-ats"`
+    fallback that exists purely so preview/download have something to
+    resolve on an older row; treating that fallback as evidence of a
+    selection would label pre-selected_template_id rows "Professional ATS"
+    when nothing recorded that. The raw column is the only proof.
+
+    find() gives all three required behaviours in one expression:
+      - a known id            -> [that template], the single card
+      - NULL / absent         -> undefined -> the full four-card list, the
+                                 existing behaviour older rows already had
+      - an unknown/invalid id -> undefined -> same safe fallback, never a
+                                 fabricated "selected" card
+
+    TEMPLATES itself is untouched: every definition stays, and this is the
+    only place the list is narrowed.
+  */
+  const generatedTemplate =
+    TEMPLATES.find((tpl) => tpl.id === status.selected_template_id) ?? null;
+  const visibleTemplates = generatedTemplate ? [generatedTemplate] : TEMPLATES;
+
   return (
     <div className="mt-4 rounded-2xl border border-purple-100 bg-purple-50/40 p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -179,8 +207,20 @@ export default function CanonicalTemplateSelector({ applicationId }: { applicati
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {TEMPLATES.map((tpl) => (
+      {/*
+        Same grid, same card markup - only the column count responds, so a
+        lone generated template fills the row instead of sitting as a stray
+        quarter-width tile. The four-card fallback keeps its original
+        2/4-column layout exactly.
+      */}
+      <div
+        className={`grid gap-2 ${
+          visibleTemplates.length === 1
+            ? "grid-cols-1"
+            : "grid-cols-2 sm:grid-cols-4"
+        }`}
+      >
+        {visibleTemplates.map((tpl) => (
           <button
             key={tpl.id}
             onClick={() => handleSelectTemplate(tpl.id)}
