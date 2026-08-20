@@ -74,7 +74,7 @@ function main() {
 
   const withEducation = minimalResume({
     education: [
-      { id: "edu-1", institution: "", credential: "", fieldOfStudy: "", location: "", institutions: ["Central College"], credentials: ["Bachelor of Arts"], fieldsOfStudy: ["History", "Political Science"], dateRangeText: "2010 - 2014", gpa: "", honors: ["Dean's List"], details: [], rawHeaderText: "" },
+      { id: "edu-1", institution: "", credential: "", fieldOfStudy: "", location: "", institutions: ["Central College"], credentials: ["Bachelor of Arts"], fieldsOfStudy: ["History", "Political Science"], dateQualifierText: "", dateRangeText: "2010 - 2014", gpa: "", honors: ["Dean's List"], details: [], rawHeaderText: "" },
     ],
   });
   const eduFragments = expectedFragmentsForResume(withEducation);

@@ -252,6 +252,17 @@ export type EducationEntry = {
   endDateText?: StructuredTextValue;
   dateRangeText?: StructuredTextValue;
 
+  /*
+    Text the source placed in the date's own qualifier position -
+    "Expected in 04/2027", "Anticipated 2027". It qualifies the date and
+    means nothing apart from it, so details[] (rendered as trailing
+    descriptive lines) put it on the wrong side of the entry and lost the
+    relation. Verbatim source text like every other ...Text field here; no
+    status enum, and nothing about which words may appear - only the
+    extractor's structural evidence decides what lands here.
+  */
+  dateQualifierText?: StructuredTextValue;
+
   gpa?: StructuredTextValue;
   honors: StructuredTextValue[];
   details: StructuredTextValue[];

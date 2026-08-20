@@ -420,6 +420,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
     const institutionsAcc: StructuredTextValue[] = [];
     const extraDetails: StructuredTextValue[] = [];
     let location: StructuredTextValue | undefined;
+    let dateQualifierText: StructuredTextValue | undefined;
     let dateRangeText: StructuredTextValue | undefined;
     let startDateText: StructuredTextValue | undefined;
     let endDateText: StructuredTextValue | undefined;
@@ -673,7 +674,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
                   the line simply ends at the bracket.
                 */
                 const datedTrailing = datedParenthetical[3].trim();
-                if (datedTrailing.length > 0) extraDetails.push(makeValue(datedTrailing, sectionId, block, 0.6));
+                if (datedTrailing.length > 0) dateQualifierText = makeValue(datedTrailing, sectionId, block, 0.6);
               } else {
                 reasonCodes.push("single-line-header-whole-remainder-as-institution");
                 institutionsAcc.push(makeValue(segments[0] ?? primary, sectionId, block, 0.6));
@@ -1106,6 +1107,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       location,
       startDateText,
       endDateText,
+      dateQualifierText,
       dateRangeText,
       gpa,
       honors,

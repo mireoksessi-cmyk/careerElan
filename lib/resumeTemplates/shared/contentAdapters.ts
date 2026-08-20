@@ -123,6 +123,7 @@ export type NormalizedEducationEntry = {
   institutions: string[];
   credentials: string[];
   fieldsOfStudy: string[];
+  dateQualifierText: string;
   dateRangeText: string;
   gpa: string;
   honors: string[];
@@ -234,6 +235,9 @@ function normalizeEducation(entry: EducationEntry): NormalizedEducationEntry {
     institutions: textValues(entry.institutions),
     credentials: textValues(entry.credentials),
     fieldsOfStudy: textValues(entry.fieldsOfStudy),
+    /* Qualifies the date rather than standing on its own - carried
+       beside it so a template can render the two as one unit. */
+    dateQualifierText: textValue(entry.dateQualifierText),
     dateRangeText: textValue(entry.dateRangeText),
     gpa: textValue(entry.gpa),
     honors: textValues(entry.honors),
@@ -342,6 +346,7 @@ function hasStructuredEducationFields(e: NormalizedEducationEntry): boolean {
     e.institutions.length > 0 ||
     e.credentials.length > 0 ||
     e.fieldsOfStudy.length > 0 ||
+    nonBlank(e.dateQualifierText) ||
     nonBlank(e.dateRangeText) ||
     nonBlank(e.gpa) ||
     e.honors.length > 0 ||

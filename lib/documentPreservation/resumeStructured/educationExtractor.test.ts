@@ -1260,7 +1260,7 @@ async function main() {
     check("C3D real source: fieldOfStudy stays undefined", entries[0].fieldOfStudy, undefined);
     check("C3D real source: the inline date is unchanged", entries[0].dateRangeText?.value, "04/2027");
     check("C3D real source: the location drops its fullwidth separator", entries[0].location?.value, "Toronto, ON");
-    check("C3D real source: the trailing qualifier survives in details", detailValues(entries[0]), ["Expected in"]);
+    check("C3D real source: the trailing qualifier becomes the date qualifier", entries[0].dateQualifierText?.value, "Expected in");
     check("C3D real source: rawHeaderText is the verbatim source line", entries[0].rawHeaderText, REAL_LINE);
     checkTrue("C3D real source: \"Expected in\" survives in rawHeaderText", entries[0].rawHeaderText.includes("Expected in"));
     check("C3D real source: it no longer falls to whole-remainder-as-institution", entries[0].reasonCodes.includes("single-line-header-whole-remainder-as-institution"), false);
@@ -1315,13 +1315,15 @@ async function main() {
   counter = 0;
   {
     const entries = extractEducationEntries("s1", [block(REAL_LINE, "bullet")]);
-    check("C3D qualifier: the trailing remainder survives in details exactly once", detailValues(entries[0]).filter((v) => v === "Expected in").length, 1);
-    check("C3D qualifier: details carries the remainder alone", detailValues(entries[0]), ["Expected in"]);
+    check("C3D qualifier: the trailing remainder becomes the structured date qualifier", entries[0].dateQualifierText?.value, "Expected in");
+    check("C3D qualifier: it is NOT also left in details - that would render twice", detailValues(entries[0]), []);
+    check("C3D qualifier: its provenance is the block the date came from", entries[0].dateQualifierText?.source.sourceBlockIds, entries[0].dateRangeText?.source.sourceBlockIds);
     check("C3D qualifier: it is not repeated as a credential", entries[0].credential?.value, "Law Clerk");
     check("C3D qualifier: it is not repeated as an institution", entries[0].institution?.value, "Seneca Polytechnic");
     check("C3D qualifier: the structured date is untouched", entries[0].dateRangeText?.value, "04/2027");
     check("C3D qualifier: the structured location is untouched", entries[0].location?.value, "Toronto, ON");
     check("C3D qualifier: the whole source line is never duplicated into details", detailValues(entries[0]).some((v) => v.includes("Seneca Polytechnic")), false);
+    check("C3D qualifier: nothing is duplicated between the qualifier and the date", entries[0].dateQualifierText?.value === entries[0].dateRangeText?.value, false);
     check("C3D qualifier: rawHeaderText is still the verbatim source", entries[0].rawHeaderText, REAL_LINE);
   }
 
@@ -1329,7 +1331,8 @@ async function main() {
   counter = 0;
   {
     const entries = extractEducationEntries("s1", [block("\u2022 Law Clerk (Seneca Polytechnic) Part-time 04/2027 \uFF0D Toronto, ON", "bullet")]);
-    check("C3D qualifier generic: an unrelated trailing remainder is preserved too", detailValues(entries[0]), ["Part-time"]);
+    check("C3D qualifier generic: an unrelated trailing remainder is carried the same way", entries[0].dateQualifierText?.value, "Part-time");
+    check("C3D qualifier generic: no vocabulary is involved - details stay empty", detailValues(entries[0]), []);
     check("C3D qualifier generic: credential still resolves", entries[0].credential?.value, "Law Clerk");
     check("C3D qualifier generic: institution still resolves", entries[0].institution?.value, "Seneca Polytechnic");
   }
@@ -1338,7 +1341,8 @@ async function main() {
   counter = 0;
   {
     const entries = extractEducationEntries("s1", [block("\u2022 Law Clerk (Seneca Polytechnic) 04/2027 \uFF0D Toronto, ON", "bullet")]);
-    check("C3D qualifier: a line ending at the bracket adds no detail", detailValues(entries[0]), []);
+    check("C3D qualifier: a line ending at the bracket has no qualifier", entries[0].dateQualifierText, undefined);
+    check("C3D qualifier: and adds no detail", detailValues(entries[0]), []);
     check("C3D qualifier: and no blank detail is created", detailValues(entries[0]).some((v) => v.trim().length === 0), false);
     check("C3D qualifier: credential still resolves", entries[0].credential?.value, "Law Clerk");
     check("C3D qualifier: institution still resolves", entries[0].institution?.value, "Seneca Polytechnic");
@@ -1350,8 +1354,18 @@ async function main() {
       counter = 0;
       const entries = extractEducationEntries("s1", [block(`\u2022 ${text} Expected in 04/2027 \uFF0D Toronto, ON`, "bullet")]);
       check(`C3D qualifier negative ${text}: no parenthetical route`, entries[0].reasonCodes.includes("single-line-header-credential-parenthetical-institution"), false);
-      check(`C3D qualifier negative ${text}: no qualifier detail leaks out`, detailValues(entries[0]).includes("Expected in"), false);
+      check(`C3D qualifier negative ${text}: no qualifier is invented`, entries[0].dateQualifierText, undefined);
     }
+  }
+
+  // Ordinary details must never be reclassified as date qualifiers just
+  // because they sit on the same line as a date.
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s1", [block("\u2022 1986\u20131989 Cheonan Bukil High School, 11th graduating class", "bullet")]);
+    check("C3D ordinary detail: a comma suffix stays an ordinary detail", detailValues(entries[0]), ["11th graduating class"]);
+    check("C3D ordinary detail: it never becomes a date qualifier", entries[0].dateQualifierText, undefined);
+    checkTrue("C3D ordinary detail: its date is still structured", (entries[0].dateRangeText?.value ?? "").includes("1986"));
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

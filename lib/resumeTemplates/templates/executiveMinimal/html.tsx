@@ -208,7 +208,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             {eduFallback && <div style={{ fontWeight: 700, color: colors.heading }}>{eduFallback}</div>}
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontWeight: 700, color: colors.heading }}>{edu.institution || edu.institutions.join(" / ")}</span>
-              <span style={{ color: colors.muted, fontSize: "0.9em" }}>{edu.dateRangeText}</span>
+              <span style={{ color: colors.muted, fontSize: "0.9em" }}>{[edu.dateQualifierText, edu.dateRangeText].filter(Boolean).join(" ")}</span>
             </div>
             <div style={{ color: colors.text }}>{edu.credentials.join(", ") || edu.credential}</div>
             {edu.fieldsOfStudy.length > 0 && <div style={{ color: colors.muted, fontSize: "0.9em" }}>{edu.fieldsOfStudy.join(" & ")}</div>}

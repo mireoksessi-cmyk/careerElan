@@ -45,6 +45,7 @@ function educationEntry(overrides: Partial<NormalizedEducationEntry>): Normalize
     institutions: [],
     credentials: [],
     fieldsOfStudy: [],
+    dateQualifierText: "",
     dateRangeText: "",
     gpa: "",
     honors: [],

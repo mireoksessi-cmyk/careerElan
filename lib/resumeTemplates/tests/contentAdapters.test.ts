@@ -146,6 +146,22 @@ function main() {
   check("education location: each entry keeps its own location", twoEntries.education.map((e) => e.location), ["Toronto, ON", "Ottawa, ON"]);
   check("education location: entry order is unchanged", twoEntries.education.map((e) => e.id), ["edu-a", "edu-b"]);
 
+  // --- Education date qualifier ---
+  // Carried beside the date so a template can render "Expected in 04/2027"
+  // as one unit; absent it must normalize to "" like every other field.
+  const qualified = normalizeResume({ ...fixture, education: [{ ...fixture.education[0], dateQualifierText: sv("Expected in") }] });
+  check("education qualifier: the source value survives normalization", qualified.education[0].dateQualifierText, "Expected in");
+  check("education qualifier: an absent qualifier normalizes to empty string", normalized.education[0].dateQualifierText, "");
+  check("education qualifier: adding it leaves every other education field untouched", { ...qualified.education[0], dateQualifierText: undefined }, { ...normalized.education[0], dateQualifierText: undefined });
+
+  // A qualifier alone is real content - the entry must not be filtered away.
+  const qualifierOnly = normalizeResume({
+    ...fixture,
+    education: [{ ...fixture.education[0], institution: undefined, credential: undefined, fieldOfStudy: undefined, institutions: [], credentials: [], fieldsOfStudy: [], location: undefined, dateRangeText: undefined, gpa: undefined, honors: [], details: [], rawHeaderText: "", dateQualifierText: sv("Expected in") }],
+  });
+  check("education qualifier: a qualifier-only entry is kept, not filtered away", qualifierOnly.education.length, 1);
+  check("education qualifier: and that entry still carries its qualifier", qualifierOnly.education[0]?.dateQualifierText, "Expected in");
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

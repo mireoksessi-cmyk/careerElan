@@ -404,6 +404,11 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
   const field = val(entry.fieldOfStudy);
   const location = val(entry.location);
   const dateRange = val(entry.dateRangeText);
+  /* A date qualifier reads as part of the date, never as a separate
+     fact, so the two are joined into one contact-line part. With no
+     qualifier this is exactly the date string as before. */
+  const dateQualifier = val(entry.dateQualifierText);
+  const datePart = dateQualifier && dateRange ? `${dateQualifier} ${dateRange}` : dateQualifier || dateRange;
   const gpa = val(entry.gpa);
   /* Phase 5D.3D - Generic Academic Composite Parsing. entry.credentials/
      institutions[0] always equals entry.credential/institution (see
@@ -424,7 +429,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
      fieldsOfStudy) falls through to the existing singular `field`. */
   const multiFieldDisplay = resolveMultiFieldOfStudyDisplay(entry);
   const fieldDisplay = multiFieldDisplay ?? field;
-  const hasAnyStructuredField = credential || institution || fieldDisplay || location || dateRange || gpa || items.length > 0;
+  const hasAnyStructuredField = credential || institution || fieldDisplay || location || datePart || gpa || items.length > 0;
   return (
     <div data-block-id={block.id} data-block-kind="education-entry" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && (
@@ -435,7 +440,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
               {credentials.map((c, i) => (
                 <div key={i} data-multi-credential-index={i}>{fieldsOfStudy[i] ? `${c} — ${fieldsOfStudy[i]}` : c}</div>
               ))}
-              {(location || dateRange || gpa) && <div>{joinContact([location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+              {(location || datePart || gpa) && <div>{joinContact([location, datePart, gpa ? `GPA: ${gpa}` : undefined])}</div>}
             </>
           ) : (
             <>
@@ -446,7 +451,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
                   {institution}
                 </strong>
               )}
-              {(fieldDisplay || location || dateRange || gpa) && <div>{joinContact([fieldDisplay, location, dateRange, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+              {(fieldDisplay || location || datePart || gpa) && <div>{joinContact([fieldDisplay, location, datePart, gpa ? `GPA: ${gpa}` : undefined])}</div>}
             </>
           )}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
