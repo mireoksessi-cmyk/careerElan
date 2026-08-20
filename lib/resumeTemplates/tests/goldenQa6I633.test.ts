@@ -364,6 +364,86 @@ async function main() {
     checkTrue(`[AI-Q/Part-E] ${id}: sparse fixture (real mode, un-completed) never shows the demo-mode placeholder marker 'YOUR NAME'`, sectionAbsent(sparseResults[id].text, "YOUR NAME"));
   }
 
+  /* ============================================================
+     Education metadata order. Every template stacks the same facts
+     differently, but the date and the place it happened are one
+     metadata block and are read date-first - which is also the order
+     the sources this was checked against use. Executive Minimal
+     already did this; it is asserted here only so a future change to
+     any one template cannot drift away from the other three.
+     Positions come from normalized visible text, so a template is free
+     to lay the block out however it likes as long as the reading order
+     holds.
+     ============================================================ */
+  const eduOrderTv = (value: string) => ({ value, confidence: 1, extractionMethod: "explicit-label" as const, source: { sourceSectionId: "sec-edu", sourceBlockIds: [], sourceElementIds: [] } });
+  /* The fixture's own identity line carries a location too, so a
+     document-wide search reads the header's place name instead of the
+     entry's. Anchoring on the entry's institution - a token no other
+     part of this fixture uses - keeps every assertion below inside the
+     Education entry being tested. */
+  const eduRegion = (text: string) => {
+    const start = text.indexOf("Seneca Polytechnic");
+    return start < 0 ? "" : text.slice(start);
+  };
+  const eduOrderBase = buildStandardFixture();
+  const eduOrderEntry = {
+    ...eduOrderBase.education[0],
+    id: "edu-order",
+    institution: eduOrderTv("Seneca Polytechnic"),
+    credential: eduOrderTv("Law Clerk"),
+    fieldOfStudy: undefined,
+    institutions: [eduOrderTv("Seneca Polytechnic")],
+    credentials: [eduOrderTv("Law Clerk")],
+    fieldsOfStudy: [],
+    dateQualifierText: eduOrderTv("Expected in"),
+    dateRangeText: eduOrderTv("04/2027"),
+    location: eduOrderTv("Toronto, ON"),
+    gpa: undefined,
+    honors: [],
+    details: [eduOrderTv("11th graduating class")],
+    rawHeaderText: "Law Clerk (Seneca Polytechnic) Expected in 04/2027 - Toronto, ON",
+  };
+
+  const qualifiedResults = await renderHtmlAllTemplates({ ...eduOrderBase, education: [eduOrderEntry] }, "edu-order-qualified");
+  for (const id of TEMPLATE_IDS) {
+    const text = eduRegion(qualifiedResults[id].text);
+    checkTrue(`[AI-EDU] ${id}: the Education entry is found`, text.length > 0);
+    checkTrue(`[AI-EDU] ${id}: the qualifier stays joined to its date`, text.includes("Expected in 04/2027"));
+    checkTrue(`[AI-EDU] ${id}: the date block is read before the location`, text.indexOf("04/2027") < text.indexOf("Toronto, ON"));
+    checkTrue(`[AI-EDU] ${id}: an ordinary detail still trails the metadata`, text.indexOf("Toronto, ON") < text.indexOf("11th graduating class"));
+    check(`[AI-EDU] ${id}: the qualifier is rendered once`, text.split("Expected in").length - 1, 1);
+    check(`[AI-EDU] ${id}: the date is rendered once`, text.split("04/2027").length - 1, 1);
+    check(`[AI-EDU] ${id}: the location is rendered once`, text.split("Toronto, ON").length - 1, 1);
+  }
+
+  // Same order with no qualifier at all - the rule is about the date
+  // block, not about any particular word preceding it.
+  const plainResults = await renderHtmlAllTemplates(
+    { ...eduOrderBase, education: [{ ...eduOrderEntry, id: "edu-order-plain", dateQualifierText: undefined, dateRangeText: eduOrderTv("2020 - 2024"), details: [] }] },
+    "edu-order-plain"
+  );
+  for (const id of TEMPLATE_IDS) {
+    const text = eduRegion(plainResults[id].text);
+    checkTrue(`[AI-EDU] ${id}: an unqualified date is still read before the location`, text.indexOf("2020 - 2024") < text.indexOf("Toronto, ON"));
+    checkTrue(`[AI-EDU] ${id}: no qualifier is invented when there is none`, !text.includes("Expected in"));
+  }
+
+  // Either half alone must still render - neither is conditional on the other.
+  const dateOnlyResults = await renderHtmlAllTemplates(
+    { ...eduOrderBase, education: [{ ...eduOrderEntry, id: "edu-order-date-only", dateQualifierText: undefined, location: undefined, details: [] }] },
+    "edu-order-date-only"
+  );
+  const locationOnlyResults = await renderHtmlAllTemplates(
+    { ...eduOrderBase, education: [{ ...eduOrderEntry, id: "edu-order-location-only", dateQualifierText: undefined, dateRangeText: undefined, details: [] }] },
+    "edu-order-location-only"
+  );
+  for (const id of TEMPLATE_IDS) {
+    checkTrue(`[AI-EDU] ${id}: a date with no location still renders`, eduRegion(dateOnlyResults[id].text).includes("04/2027"));
+    checkTrue(`[AI-EDU] ${id}: and the entry itself shows no location`, !eduRegion(dateOnlyResults[id].text).includes("Toronto, ON"));
+    checkTrue(`[AI-EDU] ${id}: a location with no date still renders`, eduRegion(locationOnlyResults[id].text).includes("Toronto, ON"));
+    checkTrue(`[AI-EDU] ${id}: and the entry itself shows no date`, !eduRegion(locationOnlyResults[id].text).includes("04/2027"));
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   await closeSharedBrowser();
   if (fail > 0) process.exit(1);

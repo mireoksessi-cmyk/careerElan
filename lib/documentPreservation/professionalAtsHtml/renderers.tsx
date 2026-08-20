@@ -440,7 +440,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
               {credentials.map((c, i) => (
                 <div key={i} data-multi-credential-index={i}>{fieldsOfStudy[i] ? `${c} — ${fieldsOfStudy[i]}` : c}</div>
               ))}
-              {(location || datePart || gpa) && <div>{joinContact([location, datePart, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+              {(location || datePart || gpa) && <div>{joinContact([datePart, location, gpa ? `GPA: ${gpa}` : undefined])}</div>}
             </>
           ) : (
             <>
@@ -451,7 +451,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
                   {institution}
                 </strong>
               )}
-              {(fieldDisplay || location || datePart || gpa) && <div>{joinContact([fieldDisplay, location, datePart, gpa ? `GPA: ${gpa}` : undefined])}</div>}
+              {(fieldDisplay || location || datePart || gpa) && <div>{joinContact([fieldDisplay, datePart, location, gpa ? `GPA: ${gpa}` : undefined])}</div>}
             </>
           )}
           {!hasAnyStructuredField && <RawHeaderFallback rawHeaderText={entry.rawHeaderText} />}
