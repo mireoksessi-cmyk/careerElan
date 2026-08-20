@@ -1023,8 +1023,8 @@ counter = 0;
   check("C2 primary: the unresolved header is still preserved", detailValues(entries[0]).includes("Generic Program (Example Polytechnic) Expected in"), true);
   check("C2 primary: the full continuation line is still preserved", detailValues(entries[0]).includes("– Example City, ST · 04/2027"), true);
   check("C2 primary: rawHeaderText holds the header line only", entries[0].rawHeaderText, "• Generic Program (Example Polytechnic) Expected in");
-  check("C2 primary: C3 is untouched - no credential invented", entries[0].credential, undefined);
-  check("C2 primary: C3 is untouched - no institution invented", entries[0].institution, undefined);
+  check("C2 primary: C3 is untouched - no credential invented", entries[0].credential?.value, "Generic Program");
+  check("C2 primary: C3 is untouched - no institution invented", entries[0].institution?.value, "Example Polytechnic");
   check("C2 primary: C3 is untouched - no fieldOfStudy invented", entries[0].fieldOfStudy, undefined);
 }
 
@@ -1133,6 +1133,90 @@ counter = 0;
   check("C2 later body: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
   check("C2 later body: no date is structured from a later block", entries[0].dateRangeText, undefined);
   check("C2 later body: the later line is still preserved", detailValues(entries[0]).includes("– Example City, ST · 04/2027"), true);
+}
+
+// --- Phase 2B-C3 - Credential / Program (Institution) ---
+// A bracketed suffix only becomes the institution when it carries
+// positive institution evidence of its own. Specializations, honours,
+// statuses, places and plain descriptions are refused, as are reversed
+// shapes and acronym-only brackets (deferred).
+const C3_ROUTE = "single-line-header-credential-parenthetical-institution";
+const C3_CONT = "– Example City, ST · 04/2027";
+
+// C3-1 - PRIMARY: credential (institution) with a trailing qualifier.
+counter = 0;
+{
+  const header = block("• Law Clerk (Seneca Polytechnic) Expected in", "bullet");
+  const cont = block("– Toronto, ON · 04/2027");
+  const entries = extractEducationEntries("s1", [header, cont]);
+  check("C3 primary: still exactly one entry", entries.length, 1);
+  check("C3 primary: took the parenthetical-institution route", entries[0].reasonCodes.includes(C3_ROUTE), true);
+  check("C3 primary: the left side becomes the credential", entries[0].credential?.value, "Law Clerk");
+  check("C3 primary: credentials[] holds only that credential", entries[0].credentials.map((v) => v.value), ["Law Clerk"]);
+  check("C3 primary: the bracketed school becomes the institution", entries[0].institution?.value, "Seneca Polytechnic");
+  check("C3 primary: institutions[] holds only that institution", entries[0].institutions.map((v) => v.value), ["Seneca Polytechnic"]);
+  check("C3 primary: fieldOfStudy stays undefined", entries[0].fieldOfStudy, undefined);
+  check("C3 primary: location stays undefined", entries[0].location, undefined);
+  check("C3 primary: the C2 continuation date is unchanged", entries[0].dateRangeText?.value, "04/2027");
+  check("C3 primary: the C2 date provenance is still the continuation block", entries[0].dateRangeText?.source.sourceBlockIds, [cont.id]);
+  check("C3 primary: credential provenance is the header block", entries[0].credential?.source.sourceBlockIds, [header.id]);
+  check("C3 primary: institution provenance is the header block", entries[0].institution?.source.sourceBlockIds, [header.id]);
+  check("C3 primary: the preserved header line is unchanged", detailValues(entries[0]).includes("Law Clerk (Seneca Polytechnic) Expected in"), true);
+  check("C3 primary: the preserved continuation line is unchanged", detailValues(entries[0]).includes("– Toronto, ON · 04/2027"), true);
+  checkTrue("C3 primary: \"Expected in\" survives in the preserved detail", detailValues(entries[0]).some((v) => v.includes("Expected in")));
+  check("C3 primary: rawHeaderText remains verbatim", entries[0].rawHeaderText, "• Law Clerk (Seneca Polytechnic) Expected in");
+}
+
+// C3-2 - no trailing qualifier.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic)", "bullet"),
+    block(C3_CONT),
+  ]);
+  check("C3 no-suffix: credential resolves", entries[0].credential?.value, "Generic Program");
+  check("C3 no-suffix: institution resolves", entries[0].institution?.value, "Example Polytechnic");
+  check("C3 no-suffix: fieldOfStudy stays undefined", entries[0].fieldOfStudy, undefined);
+}
+
+// C3-3 - a school/faculty name is institution-shaped under current evidence.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Law Clerk (School of Legal Studies)", "bullet"),
+    block(C3_CONT),
+  ]);
+  check("C3 school name: credential resolves", entries[0].credential?.value, "Law Clerk");
+  check("C3 school name: institution resolves", entries[0].institution?.value, "School of Legal Studies");
+}
+
+// C3-4..13 - NEGATIVES: a bracketed suffix without positive institution
+//            evidence, or a reversed shape, is never classified.
+counter = 0;
+{
+  const negatives: Array<[string, string]> = [
+    ["specialization", "M.S. in Engineering (Machine Vision)"],
+    ["AI specialization", "B.S. in Computer Science (Artificial Intelligence)"],
+    ["honours", "Program (Honours)"],
+    ["degree honours", "Bachelor of Science (Honours)"],
+    ["expected date", "Degree (Expected 2027)"],
+    ["location", "Program (Toronto, ON)"],
+    ["modality", "Certificate (Online)"],
+    ["descriptive", "Program (Accelerated)"],
+    ["reversed institution-first", "Seneca Polytechnic (Law Clerk)"],
+    ["institution + location", "University of Toronto (Toronto, ON)"],
+    ["MIT acronym", "B.S. (MIT)"],
+    ["KAIST acronym", "M.S. (KAIST)"],
+    ["multiple groups", "Program (Example Polytechnic) (Honours)"],
+  ];
+  for (const [label, text] of negatives) {
+    counter = 0;
+    const entries = extractEducationEntries("s1", [block(text, "bullet"), block(C3_CONT)]);
+    const inner = text.slice(text.indexOf("(") + 1, text.indexOf(")"));
+    check(`C3 negative ${label}: the parenthetical route did NOT fire`, entries[0].reasonCodes.includes(C3_ROUTE), false);
+    check(`C3 negative ${label}: the bracket text never becomes the institution`, entries[0].institution?.value === inner, false);
+    check(`C3 negative ${label}: the bracket text never becomes the credential`, entries[0].credential?.value === inner, false);
+  }
 }
 
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");

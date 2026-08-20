@@ -730,6 +730,62 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
             if (continuationAnchor.endDateText) endDateText = makeValue(continuationAnchor.endDateText, sectionId, continuationCandidate, 0.65);
           }
         }
+
+        /*
+          Phase 2B-C3 - some records name the award first and put the
+          school in brackets after it ("Generic Program (Example
+          Polytechnic)"). This branch resolves nothing, so both halves
+          were left unclassified even though the line states them
+          plainly.
+
+          A bracketed suffix is NOT automatically a school. The same
+          syntax carries a specialization ("(Machine Vision)"), an
+          honour ("(Honours)"), a status ("(Expected 2027)"), a place
+          ("(Toronto, ON)") and plain descriptions ("(Online)",
+          "(Accelerated)") - and negative evidence cannot separate those
+          last two from a school, because they look identical to every
+          predicate here. So the bracket content must EARN the
+          institution role with the positive institution evidence this
+          file already trusts; that single requirement is what refuses
+          every one of those shapes at once, with the honours, date and
+          location tests kept as independent second gates.
+
+          The left side is only required to exist and to not itself be
+          institution-shaped. It is deliberately NOT required to look
+          like a degree: the real source line reads "Law Clerk", a
+          diploma title that carries no degree keyword, and demanding
+          one would refuse exactly the case this fixes. The
+          not-institution test is what refuses the reversed shapes -
+          "<School> (<Program>)" and "<School> (<City, ST>)" - where the
+          school is on the left and the brackets hold something else.
+
+          Exactly one bracket group is required, with nothing bracketed
+          inside it. A line with two groups, or nested ones, is left
+          unresolved rather than guessed at, and any trailing text after
+          the group ("Expected in") is neither consumed nor rewritten -
+          it stays preserved through the details the branch above
+          already wrote, exactly as rawHeaderText keeps the whole line.
+          Only credential and institution are set here; the date this
+          entry has already come from the continuation line above, and
+          fieldOfStudy and location stay untouched.
+        */
+        const parentheticalMatch = anchor.beforeText.match(/^([^()]*[^\s()])\s*\(([^()]+)\)\s*([^()]*)$/);
+        if (parentheticalMatch) {
+          const parentheticalLeft = parentheticalMatch[1].trim();
+          const parentheticalInner = parentheticalMatch[2].trim();
+          if (
+            parentheticalLeft.length > 0 &&
+            !segmentLooksLikeInstitution(parentheticalLeft) &&
+            segmentLooksLikeInstitution(parentheticalInner) &&
+            !HONORS_RE.test(parentheticalInner) &&
+            !hasDateEvidence(parentheticalInner) &&
+            !looksLikeLocation(parentheticalInner)
+          ) {
+            reasonCodes.push("single-line-header-credential-parenthetical-institution");
+            credentialsAcc.push(makeValue(parentheticalLeft, sectionId, block, 0.65));
+            institutionsAcc.push(makeValue(parentheticalInner, sectionId, block, 0.65));
+          }
+        }
       }
     } else {
       /* Phase 5D.3C - Generic Multi-Line Academic Header Recovery
