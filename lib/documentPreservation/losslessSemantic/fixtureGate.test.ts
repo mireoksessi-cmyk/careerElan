@@ -145,6 +145,33 @@ async function main() {
     f6.sections.some((s) => s.rawText.includes("Power BI")) && f6.sections.some((s) => s.rawText.includes("Advanced"))
   );
 
+  // --- Phase 3C negative-evidence fixtures ---
+  // Two single-column resumes that only LOOK columnar. They exist so a
+  // future page-column/region detector has real PDFs it must never
+  // misclassify; there is no such detector yet, so what is asserted here
+  // is the fixtures' own validity: the geometry really is the intended
+  // shape, and the current pipeline reads them as ordinary one-flow
+  // resumes with no content lost.
+  const railText = (doc: LosslessResumeDocument) => doc.sections.map((sec) => sec.rawText).join("\n");
+
+  const n2 = await runFixture({ file: "single-column-right-metadata-rail.pdf", format: "pdf" });
+  const n2Text = railText(n2);
+  checkTrue("N2 rail: repeated right-side dates survive extraction", ["2023", "2020", "2018"].every((t) => n2Text.includes(t)));
+  checkTrue("N2 rail: right-side locations survive extraction", ["Toronto, ON", "Ottawa, ON", "Montreal, QC"].every((t) => n2Text.includes(t)));
+  checkTrue("N2 rail: left/main entry text survives extraction", ["Senior Reliability Engineer", "Northwind Instruments", "Gamma Precision Works"].every((t) => n2Text.includes(t)));
+  checkTrue("N2 rail: full-width bullet bodies survive extraction", n2Text.includes("automated regression harness") && n2Text.includes("accelerated life-test procedures"));
+  check("N2 rail: the expected single-column section order is recovered", n2.sections.map((sec) => sec.normalizedType), ["custom", "custom", "summary", "experience", "education", "skills"]);
+  checkTrue("N2 rail: every section heading sits in the main left flow, none in the right rail", n2.sections.every((sec) => sec.blocks[0]?.bbox === undefined || sec.blocks[0].bbox.x < 200));
+
+  const n3 = await runFixture({ file: "single-column-local-skills-grid.pdf", format: "pdf" });
+  const n3Text = railText(n3);
+  checkTrue("N3 grid: Skills grid label cells survive extraction", ["Programming:", "CAD:", "Simulation:"].every((t) => n3Text.includes(t)));
+  checkTrue("N3 grid: Skills grid value cells survive extraction", ["Python, Java", "CATIA V5, NX", "ANSYS"].every((t) => n3Text.includes(t)));
+  checkTrue("N3 grid: single-column content above the grid survives", n3Text.includes("thermal management assemblies") && n3Text.includes("Harrow Components"));
+  checkTrue("N3 grid: single-column Education below the grid survives", n3Text.includes("Westbrook University") && n3Text.includes("finite element analysis"));
+  check("N3 grid: Skills is followed by Education in the recovered order", n3.sections.map((sec) => sec.normalizedType), ["custom", "custom", "summary", "experience", "skills", "education"]);
+  check("N3 grid: exactly one Skills section owns the whole grid", n3.sections.filter((sec) => sec.normalizedType === "skills").length, 1);
+
   await closeSharedBrowser();
 
   console.log("\n--- Fixture Pass/Fail Matrix ---");
