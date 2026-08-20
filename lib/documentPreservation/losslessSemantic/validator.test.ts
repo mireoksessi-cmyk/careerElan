@@ -240,8 +240,55 @@ async function main() {
   checkTrue("V-H: the undeclared page's own violation is reported", undeclaredReport.orderViolations.some((v) => v.afterId === victims[0].id && v.beforeId === victims[1].id));
   check("V-H: nothing else was damaged - only order", [undeclaredReport.missingElementIds.length, undeclaredReport.duplicateElementIds.length, undeclaredReport.missingTextSpans.length, undeclaredReport.inventedTextSpans.length], [0, 0, 0, 0]);
 
-  const pagesReversed = { ...twoPageDoc, sections: [...twoPageDoc.sections].reverse() };
-  check("V-N: a cross-page regression is never authorized by a declaration", validateLosslessDocument(pagesReversed, twoPageLayout, twoPageDeclaration).passed, false);
+  /*
+    V-N is about ONE thing: a page reappearing after a later page. Not a
+    declaration mismatch, not a within-page swap - those are V-C..V-J and
+    V-H, and if V-N failed for either of those reasons it would prove
+    nothing new. So the page-1 declaration stays exactly correct here and
+    page 1's own block order is left untouched; the single change is that
+    one page-2 block ends up observed BEFORE the page-1 blocks that follow
+    it, which is a 2 -> 1 transition and nothing else.
+
+    The section straddling the page break is the narrowest place to do
+    that: moving its first page-2 block to the front of that section
+    leaves both pages' internal orders intact, so neither page gains a
+    violation of its own and the only thing left to fail on is the page
+    regression itself.
+  */
+  const straddling = multiPageDoc.sections.find((s) => new Set(s.blocks.map((b) => b.pageIndex)).size > 1);
+  const carriedBack = straddling?.blocks.find((b) => b.pageIndex === 2);
+  const originalObserved = observedBlocks(multiPageDoc);
+
+  checkTrue("V-N setup: the fixture carries blocks on both page 1 and page 2", [1, 2].every((page) => originalObserved.some((b) => b.pageIndex === page)));
+  checkTrue("V-N setup: the document is valid BEFORE the corruption", multiPageDoc.validation.passed);
+  checkTrue("V-N setup: no page regression exists yet", !originalObserved.some((b, i) => i > 0 && b.pageIndex < originalObserved[i - 1].pageIndex));
+  checkTrue("V-N setup: a section straddles the page break and carries a page-2 block", straddling !== undefined && carriedBack !== undefined);
+
+  const pageRegressed: LosslessResumeDocument = {
+    ...multiPageDoc,
+    sections: multiPageDoc.sections.map((s) =>
+      s === straddling ? { ...s, blocks: [carriedBack as SemanticContentBlock, ...s.blocks.filter((b) => b !== carriedBack)] } : s
+    ),
+  };
+  const regressedObserved = observedBlocks(pageRegressed);
+  const regressionAt = regressedObserved.findIndex((b, i) => i > 0 && b.pageIndex < regressedObserved[i - 1].pageIndex);
+
+  checkTrue("V-N setup: the observed order really did change", regressedObserved.map((b) => b.id).join() !== originalObserved.map((b) => b.id).join());
+  check("V-N setup: no block was gained or lost", regressedObserved.length, originalObserved.length);
+  checkTrue(
+    "V-N setup: the traversal now contains a real page-2 -> page-1 transition",
+    regressionAt > 0 && regressedObserved[regressionAt - 1].pageIndex === 2 && regressedObserved[regressionAt].pageIndex === 1
+  );
+  check("V-N setup: page 1's own declared order is still exactly intact", regressedObserved.filter((b) => b.pageIndex === 1).map((b) => b.id), [...(multiPageDeclaration.get(1) ?? [])]);
+  check("V-N setup: page 2's own internal order is still exactly intact", regressedObserved.filter((b) => b.pageIndex === 2).map((b) => b.id), originalObserved.filter((b) => b.pageIndex === 2).map((b) => b.id));
+
+  const pageRegressedReport = validateLosslessDocument(pageRegressed, multiPageLayout, multiPageDeclaration);
+  check("V-N: a cross-page regression is never authorized by a declaration", pageRegressedReport.passed, false);
+  checkTrue(
+    "V-N: the page regression itself is what is reported",
+    pageRegressedReport.orderViolations.some((v) => v.beforeId === carriedBack?.id && v.afterId === regressedObserved[regressionAt]?.id)
+  );
+  check("V-N: nothing but order was disturbed", [pageRegressedReport.missingElementIds.length, pageRegressedReport.duplicateElementIds.length, pageRegressedReport.missingTextSpans.length, pageRegressedReport.inventedTextSpans.length], [0, 0, 0, 0]);
 
   await closeSharedBrowser();
 
