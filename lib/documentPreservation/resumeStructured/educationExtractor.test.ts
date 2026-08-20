@@ -901,6 +901,106 @@ counter = 0;
   check("H2A safety: its degree text is not demoted to a detail", detailValues(entries[0]).includes("B.S. in Mechanical Engineering"), false);
 }
 
+// --- Phase 2B-H2-B - Institution <dash> Credential in Field ---
+// The school comes FIRST and its degree follows a spaced dash. The
+// composite must decompose into institution + credential + field, and
+// must NOT fire when the right side lacks real degree evidence or the
+// left side is itself a degree.
+const H2B_DASH = "—";
+const H2B_ROUTE = "single-line-header-institution-credential-composite";
+
+// H2B-1 - PRIMARY: B.S. composite.
+counter = 0;
+{
+  const raw = `• 1990–1994 Example Institute ${H2B_DASH} B.S. in Precision Engineering`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H2B B.S.: exactly one entry", entries.length, 1);
+  check("H2B B.S.: took the composite route", entries[0].reasonCodes.includes(H2B_ROUTE), true);
+  check("H2B B.S.: institution is the school alone", entries[0].institution?.value, "Example Institute");
+  check("H2B B.S.: institutions[] holds only the school", entries[0].institutions.map((v) => v.value), ["Example Institute"]);
+  check("H2B B.S.: credential is the degree alone", entries[0].credential?.value, "B.S.");
+  check("H2B B.S.: credentials[] holds only the degree", entries[0].credentials.map((v) => v.value), ["B.S."]);
+  check("H2B B.S.: fieldOfStudy is the major", entries[0].fieldOfStudy?.value, "Precision Engineering");
+  check("H2B B.S.: fieldsOfStudy[] holds only the major", entries[0].fieldsOfStudy.map((v) => v.value), ["Precision Engineering"]);
+  check("H2B B.S.: no location is invented", entries[0].location, undefined);
+  check("H2B B.S.: the date is unchanged", entries[0].dateRangeText?.value, "1990–1994");
+  check("H2B B.S.: details stay empty", detailValues(entries[0]), []);
+  check("H2B B.S.: rawHeaderText remains verbatim", entries[0].rawHeaderText, raw);
+  check("H2B B.S.: the whole composite is never an institution", entries[0].institutions.some((v) => v.value.includes(H2B_DASH)), false);
+  check("H2B B.S.: the institution is not glued into the credential", entries[0].credentials.some((v) => v.value.includes("Example Institute")), false);
+}
+
+// H2B-2 - PRIMARY: M.S. composite; the parenthetical stays inside the field.
+counter = 0;
+{
+  const raw = `• 1994–1996 Example Institute ${H2B_DASH} M.S. in Automation and Design Engineering (Machine Vision)`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H2B M.S.: exactly one entry", entries.length, 1);
+  check("H2B M.S.: took the composite route", entries[0].reasonCodes.includes(H2B_ROUTE), true);
+  check("H2B M.S.: institution is the school alone", entries[0].institution?.value, "Example Institute");
+  check("H2B M.S.: credential is the degree alone", entries[0].credential?.value, "M.S.");
+  check("H2B M.S.: the parenthetical stays inside fieldOfStudy", entries[0].fieldOfStudy?.value, "Automation and Design Engineering (Machine Vision)");
+  check("H2B M.S.: the date is unchanged", entries[0].dateRangeText?.value, "1994–1996");
+  check("H2B M.S.: rawHeaderText remains verbatim", entries[0].rawHeaderText, raw);
+}
+
+// H2B-3 - ACRONYM: proves positive institution-keyword evidence is NOT
+//         required on the left side.
+counter = 0;
+{
+  const raw = `• 2018–2022 ABC ${H2B_DASH} B.S. in Engineering`;
+  const entries = extractEducationEntries("s1", [block(raw, "bullet")]);
+  check("H2B acronym: took the composite route without an institution keyword", entries[0].reasonCodes.includes(H2B_ROUTE), true);
+  check("H2B acronym: institution is the acronym", entries[0].institution?.value, "ABC");
+  check("H2B acronym: credential is the degree", entries[0].credential?.value, "B.S.");
+  check("H2B acronym: fieldOfStudy is the major", entries[0].fieldOfStudy?.value, "Engineering");
+  check("H2B acronym: rawHeaderText remains verbatim", entries[0].rawHeaderText, raw);
+}
+
+// H2B-4 - PROVENANCE: every value the composite produces traces to the
+//         one source block it came from.
+counter = 0;
+{
+  const sourceBlock = block(`• 1990–1994 Example Institute ${H2B_DASH} B.S. in Precision Engineering`, "bullet");
+  const entries = extractEducationEntries("s1", [sourceBlock]);
+  check("H2B provenance: institution section id", entries[0].institution?.source.sourceSectionId, "s1");
+  check("H2B provenance: institution block id", entries[0].institution?.source.sourceBlockIds, [sourceBlock.id]);
+  check("H2B provenance: institution element ids", entries[0].institution?.source.sourceElementIds, sourceBlock.sourceElementIds);
+  check("H2B provenance: credential block id", entries[0].credential?.source.sourceBlockIds, [sourceBlock.id]);
+  check("H2B provenance: fieldOfStudy block id", entries[0].fieldOfStudy?.source.sourceBlockIds, [sourceBlock.id]);
+  checkTrue("H2B provenance: values are real StructuredTextValues", typeof entries[0].institution?.confidence === "number" && typeof entries[0].credential?.extractionMethod === "string");
+}
+
+// H2B-5 - NEGATIVE, decisive collision: Degree <dash> Degree in Field.
+//         The right side satisfies every degree signal, so only the
+//         left-not-degree condition can refuse it.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block(`B.S. ${H2B_DASH} M.S. in Engineering (2019 - 2021)`)]);
+  check("H2B negative degree-degree: the composite route did NOT fire", entries[0].reasonCodes.includes(H2B_ROUTE), false);
+  check("H2B negative degree-degree: a degree never becomes the institution", entries[0].institution?.value === "B.S.", false);
+  check("H2B negative degree-degree: its date is still structured", entries[0].dateRangeText?.value, "2019 - 2021");
+}
+
+// H2B-6 - NEGATIVE: Institution <dash> Department. The right side has no
+//         degree evidence at all.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block(`Example University ${H2B_DASH} Department of Physics (2015 - 2019)`)]);
+  check("H2B negative department: the composite route did NOT fire", entries[0].reasonCodes.includes(H2B_ROUTE), false);
+  check("H2B negative department: a department never becomes a credential", entries[0].credential?.value === "Department of Physics", false);
+  check("H2B negative department: a department never becomes a fieldOfStudy", entries[0].fieldOfStudy?.value === "Department of Physics", false);
+}
+
+// H2B-7 - NEGATIVE: Degree <dash> Field. Locks the corrected conclusion
+//         that this shape is excluded by RIGHT-side evidence alone.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [block(`B.S. ${H2B_DASH} Precision Engineering (2015 - 2019)`)]);
+  check("H2B negative degree-field: the composite route did NOT fire", entries[0].reasonCodes.includes(H2B_ROUTE), false);
+  check("H2B negative degree-field: a bare major never becomes a credential", entries[0].credential?.value === "Precision Engineering", false);
+}
+
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");
 
 async function checkRealFixture(fileName: string, format: "pdf" | "docx", expectedMinEntries: number) {

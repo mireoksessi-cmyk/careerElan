@@ -556,6 +556,60 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
                 institutionsAcc.push(makeValue(remainderSegments[0], sectionId, block, 0.65));
               }
             }
+          } else if (
+            /*
+              Phase 2B-H2-B - a real, source-proven Education shape puts
+              the school FIRST and its degree after a dash: "Institution
+              <dash> Credential in Field". No delimiter set in this
+              repository gives a dash that meaning - the only dash-aware
+              splitter is location-gated - so the whole line fell to the
+              whole-remainder fallback below and became one institution,
+              losing the credential and the major entirely.
+
+              All three conditions are required, and all three are read
+              from evidence this file already imports:
+
+              BOUNDARY - exactly ONE explicitly space-separated dash. The
+              spacing is the safety signal: every other dash in the
+              Education corpus is a date separator already consumed by
+              stripDateAnchor, and a hyphenated organisation name carries
+              no surrounding spaces. Requiring exactly two parts refuses
+              an ambiguous multi-dash line rather than guessing.
+
+              RIGHT - genuine degree evidence, and not merely a keyword:
+              the existing degree test must pass AND the existing
+              "Degree in Major" decomposition must actually yield a
+              field. That pair is what separates a credential expression
+              from a department, a campus, a location or ordinary prose.
+
+              LEFT - non-empty and NOT itself degree-shaped. This is the
+              condition that refuses "Degree <dash> Degree in Field",
+              where the right side legitimately satisfies everything
+              above and only the left side reveals the line is not an
+              institution composite. It is deliberately a NEGATIVE test:
+              requiring positive institution evidence here would reject
+              every acronym institution, which carries none.
+
+              The right side is then handed to the SAME credential
+              resolver the fallback below already uses, so degree/field
+              parsing is reused rather than reimplemented, and the
+              generic multi-credential gate below is left untouched -
+              relaxing it globally would turn every plain institution
+              line into a credential.
+            */
+            ((parts) =>
+              parts.length === 2 &&
+              parts[0].length > 0 &&
+              !segmentLooksLikeDegree(parts[0]) &&
+              segmentLooksLikeDegree(parts[1]) &&
+              splitDegreeInMajor(parts[1]).fieldOfStudy !== undefined)(candidateText.split(/\s+[-\u2013\u2014]\s+/))
+          ) {
+            const compositeParts = candidateText.split(/\s+[-\u2013\u2014]\s+/);
+            reasonCodes.push("single-line-header-institution-credential-composite");
+            institutionsAcc.push(makeValue(compositeParts[0], sectionId, block, 0.65));
+            const compositeCredResult = resolveCredentialsFromText(compositeParts[1], sectionId, block, hasReinforcingLabel, 0.68);
+            credentialsAcc.push(...compositeCredResult.credentials);
+            fieldsOfStudyAcc.push(...compositeCredResult.fieldsOfStudy);
           } else {
             /* No comma structure - try a same-line delimiter-based
                multi-credential split (slash/pipe/semicolon/ampersand/
