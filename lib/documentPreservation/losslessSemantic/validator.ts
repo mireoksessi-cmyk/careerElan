@@ -70,7 +70,8 @@ function buildElementById(layoutResult: LayoutAnalysisResult): Map<string, Eleme
 
 export function validateLosslessDocument(
   doc: LosslessResumeDocument,
-  layoutResult: LayoutAnalysisResult
+  layoutResult: LayoutAnalysisResult,
+  intentionalPageOrder?: ReadonlyMap<number, readonly string[]>
 ): LosslessValidationReport {
   const warnings: string[] = [];
   const elementById = buildElementById(layoutResult);
@@ -142,12 +143,83 @@ export function validateLosslessDocument(
     }
   }
 
+  /*
+    --- D2. Exact declared-permutation authorization ---
+
+    A layer that intentionally reorders blocks within a page (the
+    region-ordering step, on genuinely multi-column pages) breaks D by
+    construction. It may declare the COMPLETE final block-id order of
+    each page it permuted, and those violations then stop failing the
+    gate - but only after this block re-derives that page's canonical
+    order from the blocks' own sourceOrder and confirms the assembled
+    document matches the declaration exactly, id for id, position for
+    position.
+
+    A declaration is therefore not permission. Marking a page as
+    reordered grants nothing by itself: one extra swap, one missing or
+    extra block, one duplicated id, one violation on a page nobody
+    declared, or a declaration for a page that was not actually
+    permuted, and authorization collapses to false and the gate stays
+    red. Every condition fails closed, and a page sequence that went
+    BACKWARDS is never authorizable whatever was declared.
+
+    D itself is untouched: violations are still detected and reported
+    verbatim, so validation.orderViolations remains an honest record of
+    physical divergence from source order. Only whether those exact,
+    pre-declared violations invalidate `passed` changes - and with no
+    declaration supplied, behaviour is identical to none of this
+    existing.
+  */
+  const declaredPageOrderVerified = ((): boolean => {
+    if (intentionalPageOrder === undefined || intentionalPageOrder.size === 0) return false;
+
+    const actualByPage = new Map<number, string[]>();
+    for (const block of allBlocks) {
+      const seen = actualByPage.get(block.pageIndex);
+      if (seen === undefined) actualByPage.set(block.pageIndex, [block.id]);
+      else seen.push(block.id);
+    }
+
+    for (let i = 1; i < allBlocks.length; i++) {
+      const prev = allBlocks[i - 1];
+      const curr = allBlocks[i];
+      // A page that went backwards is never an authorizable permutation.
+      if (curr.pageIndex < prev.pageIndex) return false;
+      const pageWasDeclared = intentionalPageOrder.has(curr.pageIndex);
+      if (curr.pageIndex === prev.pageIndex && curr.sourceOrder < prev.sourceOrder && !pageWasDeclared) return false;
+    }
+
+    for (const [pageIndex, declared] of [...intentionalPageOrder]) {
+      const actual = actualByPage.get(pageIndex);
+      if (actual === undefined) return false;
+      if (new Set(declared).size !== declared.length) return false;
+      if (new Set(actual).size !== actual.length) return false;
+      if (declared.length !== actual.length) return false;
+      if (declared.some((id, position) => id !== actual[position])) return false;
+
+      // Canonical order is re-derived here from the blocks' own immutable
+      // sourceOrder - never taken from the caller.
+      const canonical = allBlocks
+        .filter((b) => b.pageIndex === pageIndex)
+        .slice()
+        .sort((a, b) => a.sourceOrder - b.sourceOrder)
+        .map((b) => b.id);
+      if (declared.length !== canonical.length) return false;
+      const canonicalIds = new Set(canonical);
+      if (declared.some((id) => !canonicalIds.has(id))) return false;
+      // A page that was not actually permuted has nothing to authorize.
+      if (declared.every((id, position) => id === canonical[position])) return false;
+    }
+
+    return true;
+  })();
+
   const passed =
     missingElementIds.length === 0 &&
     duplicateElementIds.length === 0 &&
     missingTextSpans.length === 0 &&
     inventedTextSpans.length === 0 &&
-    orderViolations.length === 0;
+    (orderViolations.length === 0 || declaredPageOrderVerified);
 
   return {
     passed,

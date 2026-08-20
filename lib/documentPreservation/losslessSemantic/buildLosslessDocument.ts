@@ -8,6 +8,7 @@
 import type { LayoutAnalysisResult } from "../layoutAnalysis/types";
 import { adaptLayoutToBlocks } from "./blockAdapter";
 import { detectSectionBoundaries } from "./sectionBoundaryDetector";
+import { orderBlocksForSectionDetection } from "./preSectionRegionOrdering";
 import { classifySection } from "./classifier";
 import { normalizeHeadingForMatching } from "./textNormalize";
 import { sectionId } from "./ids";
@@ -30,7 +31,11 @@ export function buildLosslessResumeDocument(
   layoutResult: LayoutAnalysisResult,
   source: LosslessDocumentSource
 ): LosslessResumeDocument {
-  const { blocks } = adaptLayoutToBlocks(layoutResult);
+  const { blocks: adaptedBlocks } = adaptLayoutToBlocks(layoutResult);
+  const intentionalPageOrder = new Map<number, readonly string[]>();
+  const blocks = orderBlocksForSectionDetection(adaptedBlocks, (pageIndex, orderedBlockIds) => {
+    intentionalPageOrder.set(pageIndex, orderedBlockIds);
+  });
   const boundaries = detectSectionBoundaries(blocks);
 
   const identityBlocks = boundaries.identityBlockIndices.map((i) => blocks[i]);
@@ -91,6 +96,6 @@ export function buildLosslessResumeDocument(
     },
   };
 
-  document.validation = validateLosslessDocument(document, layoutResult);
+  document.validation = validateLosslessDocument(document, layoutResult, intentionalPageOrder);
   return document;
 }

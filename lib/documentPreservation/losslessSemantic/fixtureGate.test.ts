@@ -16,6 +16,9 @@ import path from "node:path";
 import { analyzeDocument } from "../layoutAnalysis";
 import { closeSharedBrowser } from "../sharedBrowser";
 import { buildLosslessResumeDocument } from "./buildLosslessDocument";
+import { adaptLayoutToBlocks } from "./blockAdapter";
+import { orderBlocksForSectionDetection } from "./preSectionRegionOrdering";
+import { buildStructuredResume } from "../resumeStructured/buildStructuredResume";
 import type { LosslessResumeDocument } from "./types";
 
 let pass = 0;
@@ -171,6 +174,66 @@ async function main() {
   checkTrue("N3 grid: single-column Education below the grid survives", n3Text.includes("Westbrook University") && n3Text.includes("finite element analysis"));
   check("N3 grid: Skills is followed by Education in the recovered order", n3.sections.map((sec) => sec.normalizedType), ["custom", "custom", "summary", "experience", "skills", "education"]);
   check("N3 grid: exactly one Skills section owns the whole grid", n3.sections.filter((sec) => sec.normalizedType === "skills").length, 1);
+
+  /*
+    --- Phase 3C: conservative multi-column / sidebar region ordering ---
+
+    Six real fixtures whose two physical columns each open sections of
+    their own, and seven that only look columnar. The engine has no way to
+    tell them apart by geometry alone, so what is checked here is the
+    decision itself: fires or refuses, on real PDFs. For the six positives
+    the lossless gate must STILL pass - the reorder is intentional and
+    exactly declared, not an excuse to lose content - and for the seven
+    negatives the returned sequence must be the input sequence, block for
+    block.
+  */
+  async function phase3c(file: string) {
+    const layout = await analyzeDocument("resume", "pdf", fs.readFileSync(path.join(FIXTURES_DIR, file)));
+    const { blocks } = adaptLayoutToBlocks(layout);
+    const ordered = orderBlocksForSectionDetection(blocks);
+    const doc = buildLosslessResumeDocument(layout, { fileName: file, fileType: "pdf" });
+    return { blocks, ordered, fired: ordered !== blocks, doc, model: buildStructuredResume(doc) };
+  }
+
+  for (const file of [
+    "regtest3-two-column-pdf.pdf",
+    "generated-sidebar-professional.pdf",
+    "bench/resume-B-junior-canva.pdf",
+    "bench/resume-D-mid-canva.pdf",
+    "bench/resume-F-senior-canva.pdf",
+    "canva-pdf-resume.pdf",
+  ]) {
+    const { blocks, ordered, fired, doc } = await phase3c(file);
+    checkTrue(`Phase 3C ${file}: multi-column layout is recognised`, fired);
+    checkTrue(`Phase 3C ${file}: the order really changed from row-major`, ordered.map((b) => b.id).join() !== blocks.map((b) => b.id).join());
+    check(`Phase 3C ${file}: output is a permutation - nothing gained or lost`, ordered.map((b) => b.id).slice().sort(), blocks.map((b) => b.id).slice().sort());
+    checkTrue(`Phase 3C ${file}: the lossless gate still passes on the reordered document`, doc.validation.passed);
+    check(`Phase 3C ${file}: every source element is still represented`, doc.validation.representedElementCount, doc.validation.sourceElementCount);
+    check(`Phase 3C ${file}: no content was lost or invented`, [doc.validation.missingElementIds.length, doc.validation.duplicateElementIds.length, doc.validation.missingTextSpans.length, doc.validation.inventedTextSpans.length], [0, 0, 0, 0]);
+  }
+
+  for (const file of [
+    "generated-table-resume.pdf",
+    "single-column-right-metadata-rail.pdf",
+    "single-column-local-skills-grid.pdf",
+    "standard-pdf-resume.pdf",
+    "bench/resume-A-junior-ats.pdf",
+    "bench/resume-C-mid-ats.pdf",
+    "bench/resume-E-senior-ats.pdf",
+  ]) {
+    const { blocks, ordered, fired, doc } = await phase3c(file);
+    check(`Phase 3C ${file}: refused - not treated as page columns`, fired, false);
+    check(`Phase 3C ${file}: the exact input sequence is returned`, ordered.map((b) => b.id), blocks.map((b) => b.id));
+    checkTrue(`Phase 3C ${file}: ordinary validator behaviour is unchanged`, doc.validation.passed && doc.validation.orderViolations.length === 0);
+  }
+
+  // The local Skills grid must survive as Phase 3A semantics, not as columns.
+  const gridGroups = (await phase3c("single-column-local-skills-grid.pdf")).model.skillGroups;
+  check("Phase 3C N3: Phase 3A skill groups are exactly preserved", gridGroups.map((g) => ({ label: g.label, skills: g.skills })), [
+    { label: "Programming", skills: ["Python", "Java"] },
+    { label: "CAD", skills: ["CATIA V5", "NX"] },
+    { label: "Simulation", skills: ["ANSYS"] },
+  ]);
 
   await closeSharedBrowser();
 
