@@ -217,10 +217,9 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
       new evidence is introduced: the boundary is Phase 1's existing
       classification, and hasIdentitySignal still has to find an actual
       contact channel in the collected blocks, so a leading run of plain
-      prose cannot promote itself into an identity. Every collected
-      section is recorded, because each one must be skipped below or its
-      text would render twice - once as identity, once as its own custom
-      section.
+      prose cannot promote itself into an identity. A section identity
+      actually took something from is skipped below, or its text would
+      render twice - once as identity, once as its own custom section.
     */
     const leadingUnnamedSections = [];
     for (const section of document.sections) {
@@ -229,8 +228,48 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
     }
     const identityCandidateBlocks = leadingUnnamedSections.flatMap((section) => section.blocks);
     if (leadingUnnamedSections.length > 0 && hasIdentitySignal(identityCandidateBlocks)) {
-      model.identity = extractIdentity(leadingUnnamedSections[0].id, identityCandidateBlocks);
-      for (const section of leadingUnnamedSections) identitySourceSectionIds.add(section.id);
+      /*
+        extractIdentity takes ONE section id for a whole block list,
+        which held for every caller before this window existed. Here the
+        blocks come from several sections, so one id stamps every value
+        with the first of them and loses the rest - the name would claim
+        to have been found in the section the contact line sits in, and
+        the sections it silently spoke for would look unrepresented.
+
+        Extraction still runs exactly once over the whole window,
+        because which block becomes the name and which becomes the
+        headline is decided by position across the combined list;
+        calling per section would change what gets extracted, not just
+        where it says it came from. So ownership is recorded before the
+        call and each value's trace is corrected after it, using the
+        block that value already points at. Nothing is invented - both
+        ids already exist - and a value whose block cannot be resolved
+        keeps the provenance it arrived with.
+
+        The consumed set is then read back off those corrected traces,
+        which makes "skipped from customSections" and "traced by
+        identity" the same set by construction. A leading section that
+        contributed nothing stays an ordinary custom section: it is only
+        a candidate, and suppressing it would drop text identity never
+        took.
+      */
+      const identity = extractIdentity(leadingUnnamedSections[0].id, identityCandidateBlocks);
+      const sectionIdByBlockId = new Map<string, string>();
+      for (const section of leadingUnnamedSections) {
+        for (const block of section.blocks) sectionIdByBlockId.set(block.id, section.id);
+      }
+      for (const field of Object.values(identity)) {
+        const values = Array.isArray(field) ? field : field ? [field] : [];
+        for (const value of values) {
+          const owningSectionId = value.source.sourceBlockIds
+            .map((blockId) => sectionIdByBlockId.get(blockId))
+            .find((sectionId) => sectionId !== undefined);
+          if (owningSectionId === undefined) continue;
+          value.source = { ...value.source, sourceSectionId: owningSectionId };
+          identitySourceSectionIds.add(owningSectionId);
+        }
+      }
+      model.identity = identity;
     }
   }
 

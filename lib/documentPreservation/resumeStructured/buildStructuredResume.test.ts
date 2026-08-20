@@ -10,6 +10,7 @@ import { closeSharedBrowser } from "../sharedBrowser";
 import { buildLosslessResumeDocument } from "../losslessSemantic/buildLosslessDocument";
 import { buildStructuredResume } from "./buildStructuredResume";
 import type { LosslessResumeDocument, LosslessResumeSection, SemanticContentBlock } from "../losslessSemantic/types";
+import type { ResumeIdentity } from "./types";
 
 let pass = 0;
 let fail = 0;
@@ -168,6 +169,77 @@ async function main() {
     ]));
     check("identity window: no contact signal means no invented identity", model.identity, undefined);
     check("identity window: and that leading material is preserved as custom sections instead", model.customSections.length, 2);
+  }
+
+  /* ============================================================
+     Identity provenance across the window. The window can span several
+     leading sections, so each value has to keep the section its own
+     block came from - one id for the whole window would say the name
+     was found in the section the contact line sits in, and would also
+     claim identity consumed sections it took nothing from. The values
+     themselves must not move; only where they say they came from.
+     ============================================================ */
+  const identityTracedSectionIds = (identity: ResumeIdentity | undefined): string[] => {
+    if (!identity) return [];
+    const ids = new Set<string>();
+    for (const field of Object.values(identity)) {
+      const values = Array.isArray(field) ? field : field ? [field] : [];
+      for (const value of values) ids.add(value.source.sourceSectionId);
+    }
+    return [...ids].sort();
+  };
+
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN"]),
+      identitySection(1, "custom", null, ["SENIOR PRODUCT MANAGER"]),
+      identitySection(2, "custom", null, ["Vancouver, BC | 604-555-0134 | alex.chen@mail.test"]),
+      identitySection(3, "summary", "SUMMARY", ["SUMMARY", "Product leader with a decade of experience."]),
+    ]));
+    // Unchanged content - the repair is provenance only.
+    check("identity provenance: the name is still read from the first section", model.identity?.fullName?.value, "ALEX CHEN");
+    check("identity provenance: the headline is still read from the second", model.identity?.headline?.value, "SENIOR PRODUCT MANAGER");
+    check("identity provenance: the email is still read from the third", model.identity?.email?.value, "alex.chen@mail.test");
+    check("identity provenance: the phone is still read from the third", model.identity?.phone?.value, "604-555-0134");
+    // ...and every value now points back at the section it came from.
+    check("identity provenance: the name traces the section it was found in", model.identity?.fullName?.source.sourceSectionId, "idsec-0");
+    check("identity provenance: the headline traces its own section, not the name's", model.identity?.headline?.source.sourceSectionId, "idsec-1");
+    check("identity provenance: the email traces the contact section", model.identity?.email?.source.sourceSectionId, "idsec-2");
+    check("identity provenance: the phone traces the contact section", model.identity?.phone?.source.sourceSectionId, "idsec-2");
+    check("identity provenance: the location traces the contact section", model.identity?.location?.source.sourceSectionId, "idsec-2");
+    // Block-level provenance is untouched by the section correction.
+    check("identity provenance: the name still traces its own block", model.identity?.fullName?.source.sourceBlockIds, ["idb-0"]);
+    check("identity provenance: every contributing section is represented", identityTracedSectionIds(model.identity), ["idsec-0", "idsec-1", "idsec-2"]);
+    check("identity provenance: and no contributing section is emitted as custom content too", model.customSections.length, 0);
+    // The same thing seen through the validator: a section identity
+    // speaks for has to count as covered, and one contact section
+    // yielding several fields must not read as duplicate coverage.
+    check("identity provenance: the validator counts every identity section as covered", model.validation.missingSectionIds, []);
+    check("identity provenance: no section is left needing a custom entry", model.validation.missingCustomSections, []);
+    check("identity provenance: several fields from one section do not double-count its blocks", model.validation.duplicateBlockIds, []);
+    check("identity provenance: and no block is left unrepresented", model.validation.missingBlockIds, []);
+    check("identity provenance: so the whole model validates", model.validation.passed, true);
+  }
+
+  // A leading section identity took nothing from is only a candidate.
+  // Suppressing it would drop text that never reached identity, so it
+  // stays an ordinary custom section.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN"]),
+      identitySection(1, "custom", null, [""]),
+      identitySection(2, "custom", null, ["Vancouver, BC | 604-555-0134 | alex.chen@mail.test"]),
+      identitySection(3, "summary", "SUMMARY", ["SUMMARY", "Product leader with a decade of experience."]),
+    ]));
+    check("identity provenance: a contributing section before the gap is still traced", model.identity?.fullName?.source.sourceSectionId, "idsec-0");
+    check("identity provenance: the contact section past the gap is still reached", model.identity?.email?.source.sourceSectionId, "idsec-2");
+    check("identity provenance: a section identity took nothing from is not claimed", identityTracedSectionIds(model.identity), ["idsec-0", "idsec-2"]);
+    check("identity provenance: that section survives as its own custom section", model.customSections.length, 1);
+    check("identity provenance: and it is exactly the one identity passed over", model.customSections[0]?.source.sourceSectionId, "idsec-1");
+    check("identity provenance: the passed-over section is covered by its own custom entry", model.validation.missingSectionIds, []);
+    check("identity provenance: and the model with a gap in the window still validates", model.validation.passed, true);
   }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);

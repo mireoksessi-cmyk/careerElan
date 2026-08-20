@@ -25,14 +25,30 @@ function collectAllTraces(model: ResumeStructuredModel): SourceTrace[] {
     // A single Phase 1 block (e.g. one pipe-delimited "email | phone |
     // linkedin" contact line) legitimately produces several identity
     // fields that each trace back to that same block - not a coverage
-    // duplicate. Merge all of identity's field traces into one before
-    // counting, same rationale as the bullets exclusion above.
-    const identityFieldTraces: SourceTrace[] = [];
+    // duplicate. Merge identity's field traces before counting, same
+    // rationale as the bullets exclusion above.
+    //
+    // Merged per source section rather than all into one. Identity can
+    // be recovered from a header split across several leading sections,
+    // and a SourceTrace carries a single sourceSectionId - so one merge
+    // over the lot keeps only the first section (mergeTraces takes
+    // traces[0]'s, which is right for one section and cannot express
+    // more) and the others would read as unrepresented to A below, even
+    // though identity is exactly what represents them. Grouping loses
+    // none of the duplicate protection: a block belongs to one section,
+    // so every value drawn from that block lands in the same group and
+    // the block is still counted once.
+    const identityTracesBySection = new Map<string, SourceTrace[]>();
+    const collectIdentityTrace = (trace: SourceTrace) => {
+      const group = identityTracesBySection.get(trace.sourceSectionId);
+      if (group) group.push(trace);
+      else identityTracesBySection.set(trace.sourceSectionId, [trace]);
+    };
     for (const v of Object.values(model.identity)) {
-      if (Array.isArray(v)) v.forEach((tv: StructuredTextValue) => identityFieldTraces.push(tv.source));
-      else if (v && typeof v === "object" && "source" in v) identityFieldTraces.push((v as StructuredTextValue).source);
+      if (Array.isArray(v)) v.forEach((tv: StructuredTextValue) => collectIdentityTrace(tv.source));
+      else if (v && typeof v === "object" && "source" in v) collectIdentityTrace((v as StructuredTextValue).source);
     }
-    if (identityFieldTraces.length > 0) traces.push(mergeTraces(...identityFieldTraces));
+    for (const group of identityTracesBySection.values()) traces.push(mergeTraces(...group));
   }
   if (model.professionalSummary) traces.push(model.professionalSummary.source);
   for (const g of model.skillGroups) traces.push(g.source);
