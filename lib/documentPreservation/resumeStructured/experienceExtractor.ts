@@ -75,7 +75,41 @@ export function segmentEntryRanges(blocks: SemanticContentBlock[]): EntryRange[]
     if (block.blockType === "bullet") return false;
     if (isDateRangeLine(block.text)) return true;
     const next = blocks[index + 1];
-    return looksLikeHeaderLine(block) && next !== undefined && next.blockType !== "bullet" && isDateRangeLine(next.text);
+    if (looksLikeHeaderLine(block) && next !== undefined && next.blockType !== "bullet" && isDateRangeLine(next.text)) return true;
+    return isStackedRoleHeader(index);
+  }
+
+  /*
+    A header stacked over three lines - role, then organization, then
+    the date on its own. The two-line shapes above cannot see it: the
+    line after the role is the organization, not a date, so the role
+    either falls out as a date-less entry of its own or is swallowed as
+    body text by the entry above it, and every job loses its title.
+
+    Shape alone is far too weak to claim it. Three short unpunctuated
+    lines before a date line are also exactly what ordinary description
+    prose looks like in a resume that uses no bullets, and reading the
+    last two sentences of one job as the title and employer of the next
+    is a worse failure than the one being fixed. So the document has to
+    show that the first line is a title and not a sentence: it must be
+    set LARGER than the organization line beneath it, which is what a
+    stacked header does and what running prose never does. Both sizes
+    have to be known - absent that evidence the shape is left alone
+    rather than guessed at. The comparison is between two lines of the
+    same document, so no point size is assumed anywhere.
+  */
+  function isStackedRoleHeader(index: number): boolean {
+    if (index + 2 >= n) return false;
+    const roleLine = blocks[index];
+    const organizationLine = blocks[index + 1];
+    const dateLine = blocks[index + 2];
+    if (!looksLikeHeaderLine(roleLine) || isDateRangeLine(roleLine.text)) return false;
+    if (organizationLine.blockType === "bullet" || !looksLikeHeaderLine(organizationLine) || isDateRangeLine(organizationLine.text)) return false;
+    if (dateLine.blockType === "bullet" || !isDateRangeLine(dateLine.text)) return false;
+    const roleFontSize = roleLine.style?.fontSize;
+    const organizationFontSize = organizationLine.style?.fontSize;
+    if (typeof roleFontSize !== "number" || typeof organizationFontSize !== "number") return false;
+    return roleFontSize > organizationFontSize;
   }
 
   /*
@@ -104,6 +138,9 @@ export function segmentEntryRanges(blocks: SemanticContentBlock[]): EntryRange[]
     if (!isDateRangeLine(blocks[i].text) && i + 1 < n && blocks[i + 1].blockType !== "bullet" && isDateRangeLine(blocks[i + 1].text) && looksLikeHeaderLine(blocks[i])) {
       headerEnd = i + 1;
       headerBlockIndices.push(i + 1);
+    } else if (isStackedRoleHeader(i)) {
+      headerEnd = i + 2;
+      headerBlockIndices.push(i + 1, i + 2);
     } else if (isDateFirstTwoLineHeader(i)) {
       headerEnd = i + 1;
       headerBlockIndices.push(i + 1);
@@ -219,6 +256,32 @@ function buildFieldsFromHeader(
       dateRangeText: dateValue,
       startDateText: startValue,
       endDateText: endValue,
+      reasonCodes,
+    };
+  }
+
+  /*
+    Stacked three-line header - role, organization[, location], date.
+    Only segmentEntryRanges' own isStackedRoleHeader groups this shape,
+    and it has already established the typographic evidence, so each
+    line simply goes to the parser that already owns it.
+  */
+  if (headerBlocks.length === 3) {
+    const [roleBlock, organizationBlock, stackedDateBlock] = headerBlocks;
+    const stackedDateParts = extractDateParts(stackedDateBlock.text);
+    if (!stackedDateParts) {
+      reasonCodes.push("three-line-header-missing-expected-date");
+      return { reasonCodes };
+    }
+    const { organization, location } = splitOrganizationLocation(organizationBlock.rawText);
+    reasonCodes.push("three-line-header-role-organization-date");
+    return {
+      role: makeValue(roleBlock.rawText, sectionId, roleBlock, 0.75),
+      organization: makeValue(organization, sectionId, organizationBlock, 0.75),
+      location: location ? makeValue(location, sectionId, organizationBlock, 0.7) : undefined,
+      dateRangeText: makeValue(stackedDateParts.dateRangeText, sectionId, stackedDateBlock, 0.85),
+      startDateText: stackedDateParts.startDateText ? makeValue(stackedDateParts.startDateText, sectionId, stackedDateBlock, 0.8) : undefined,
+      endDateText: stackedDateParts.endDateText ? makeValue(stackedDateParts.endDateText, sectionId, stackedDateBlock, 0.8) : undefined,
       reasonCodes,
     };
   }

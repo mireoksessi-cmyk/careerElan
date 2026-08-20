@@ -235,6 +235,98 @@ async function checkRealFixture(fileName: string, format: "pdf" | "docx", expect
   }
 }
 
+
+/* --- Stacked header: ROLE / ORGANIZATION / DATE on three lines ---
+   The line after the role is the organization rather than a date, so
+   none of the two-line shapes above can see this one. What licenses it
+   is that the role is set larger than the organization beneath it -
+   running prose is uniform, so the same three-line shape in flat
+   typography must stay untouched. */
+let stackedCounter = 0;
+function sizedBlock(text: string, fontSize: number | undefined, blockType: SemanticContentBlock["blockType"] = "paragraph"): SemanticContentBlock {
+  const i = stackedCounter++;
+  return { id: `block-p9-b${i}`, sourceElementIds: [`el-p9-e${i}`], text, rawText: text, pageIndex: 9, sourceOrder: i, blockType, ...(fontSize === undefined ? {} : { style: { fontSize } }) };
+}
+
+stackedCounter = 0;
+const stackedOne = [
+  sizedBlock("Principal Widget Steward", 12),
+  sizedBlock("Vermilion Widget Collective - Riverton, ON", 10),
+  sizedBlock("06/2020 - Current", 10),
+  sizedBlock("Rebuilt the intake pipeline", 9, "bullet"),
+  sizedBlock("Cut turnaround by a third", 9, "bullet"),
+];
+const stackedOneRanges = segmentEntryRanges(stackedOne);
+const stackedOneEntries = extractExperienceEntries("s-stack", stackedOne, false);
+check("stacked header: the three header lines form ONE entry", stackedOneRanges.length, 1);
+check("stacked header: the header window covers all three lines", stackedOneRanges[0].headerBlockIndices, [0, 1, 2]);
+check("stacked header: exactly one entry is produced", stackedOneEntries.length, 1);
+check("stacked header: the role comes from the first line", stackedOneEntries[0].role?.value, "Principal Widget Steward");
+check("stacked header: the organization comes from the second", stackedOneEntries[0].organization?.value, "Vermilion Widget Collective");
+check("stacked header: the location is split by the existing parser", stackedOneEntries[0].location?.value, "Riverton, ON");
+check("stacked header: the date comes from the third", stackedOneEntries[0].dateRangeText?.value, "06/2020 - Current");
+check("stacked header: bullets still bind to the entry", stackedOneEntries[0].bullets.length, 2);
+check("stacked header: no header line leaks into the body as a paragraph", stackedOneEntries[0].descriptionParagraphs.length, 0);
+check("stacked header: the role traces its own block", stackedOneEntries[0].role?.source.sourceBlockIds, [stackedOne[0].id]);
+check("stacked header: rawHeaderText keeps all three lines", stackedOneEntries[0].rawHeaderText, "Principal Widget Steward\nVermilion Widget Collective - Riverton, ON\n06/2020 - Current");
+checkTrue("stacked header: role and organization both resolved, so the entry is not uncertain", !stackedOneEntries[0].isUncertain);
+
+// Repeated shape - the second role must open its own entry rather than
+// becoming a trailing paragraph of the first, which is exactly how the
+// titles were being lost.
+stackedCounter = 0;
+const stackedTwo = [
+  sizedBlock("Principal Widget Steward", 12),
+  sizedBlock("Vermilion Widget Collective - Riverton, ON", 10),
+  sizedBlock("06/2020 - Current", 10),
+  sizedBlock("Rebuilt the intake pipeline", 9, "bullet"),
+  sizedBlock("Junior Widget Steward", 12),
+  sizedBlock("Cobalt Widget Partners - Riverton, ON", 10),
+  sizedBlock("07/2014 - 04/2016", 10),
+  sizedBlock("Prepared the quarterly ledger", 9, "bullet"),
+];
+const stackedTwoEntries = extractExperienceEntries("s-stack2", stackedTwo, false);
+check("stacked header: two stacked headers make exactly two entries", stackedTwoEntries.length, 2);
+check("stacked header: the first entry keeps its own role", stackedTwoEntries[0].role?.value, "Principal Widget Steward");
+check("stacked header: the second role opens the second entry", stackedTwoEntries[1].role?.value, "Junior Widget Steward");
+check("stacked header: the second organization binds correctly", stackedTwoEntries[1].organization?.value, "Cobalt Widget Partners");
+check("stacked header: the second date binds correctly", stackedTwoEntries[1].dateRangeText?.value, "07/2014 - 04/2016");
+check("stacked header: the second role never becomes a paragraph of the first", stackedTwoEntries[0].descriptionParagraphs.length, 0);
+check("stacked header: each entry keeps its own bullet", [stackedTwoEntries[0].bullets.length, stackedTwoEntries[1].bullets.length], [1, 1]);
+
+// Uniform typography - the same three-line shape in running prose. The
+// rule must stay dormant here, or two description sentences would be
+// read as the next job's title and employer.
+stackedCounter = 0;
+const flatProse = [
+  sizedBlock("Grew the northern account book steadily", 11),
+  sizedBlock("Coordinated with the design team each season", 11),
+  sizedBlock("2018 to 2020", 11),
+  sizedBlock("Trained the incoming cohort", 11, "bullet"),
+];
+const flatRanges = segmentEntryRanges(flatProse);
+checkTrue("stacked header: uniform typography does NOT open a three-line header", flatRanges[0].headerBlockIndices.length < 3);
+check("stacked header: uniform prose keeps its existing segmentation", flatRanges.map((r) => r.headerBlockIndices), [[0], [1, 2]]);
+
+// No font evidence at all - the shape alone must never be enough.
+stackedCounter = 0;
+const noStyle = [
+  sizedBlock("Principal Widget Steward", undefined),
+  sizedBlock("Vermilion Widget Collective - Riverton, ON", undefined),
+  sizedBlock("06/2020 - Current", undefined),
+];
+const noStyleRanges = segmentEntryRanges(noStyle);
+checkTrue("stacked header: with no font sizes the three-line header is not claimed", noStyleRanges[0].headerBlockIndices.length < 3);
+
+// A role NOT larger than its organization is not a stacked header either.
+stackedCounter = 0;
+const roleSmaller = [
+  sizedBlock("Principal Widget Steward", 10),
+  sizedBlock("Vermilion Widget Collective - Riverton, ON", 12),
+  sizedBlock("06/2020 - Current", 10),
+];
+checkTrue("stacked header: a role smaller than its organization is not claimed", segmentEntryRanges(roleSmaller)[0].headerBlockIndices.length < 3);
+
 async function main() {
   await checkRealFixture("bench/resume-A-junior-ats.pdf", "pdf", 1, true);
   await checkRealFixture("bench/resume-C-mid-ats.pdf", "pdf", 5, false);
