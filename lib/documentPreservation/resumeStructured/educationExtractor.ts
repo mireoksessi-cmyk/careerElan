@@ -655,6 +655,25 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
                 reasonCodes.push("single-line-header-credential-parenthetical-institution");
                 credentialsAcc.push(makeValue(datedLeft, sectionId, block, 0.65));
                 institutionsAcc.push(makeValue(datedInner, sectionId, block, 0.65));
+                /*
+                  Whatever the author wrote AFTER the bracket is real text
+                  this line resolved into no field of its own - a status
+                  ("Expected in"), a mode, a note. Left dropped it was gone
+                  from the page entirely: rawHeaderText carries it, but the
+                  renderers' raw fallback is off by design once an entry has
+                  structured fields, so nothing would ever show it.
+
+                  Preserved the way every other unresolved Education
+                  remainder in this file already is - the same extraDetails
+                  channel at the same 0.6 confidence the descriptive-suffix
+                  branch above uses, which is also what makes a qualifier-
+                  only remainder survive on the multi-line path. Only the
+                  remainder, never the bracket or its left side, so nothing
+                  already structured is repeated; and nothing at all when
+                  the line simply ends at the bracket.
+                */
+                const datedTrailing = datedParenthetical[3].trim();
+                if (datedTrailing.length > 0) extraDetails.push(makeValue(datedTrailing, sectionId, block, 0.6));
               } else {
                 reasonCodes.push("single-line-header-whole-remainder-as-institution");
                 institutionsAcc.push(makeValue(segments[0] ?? primary, sectionId, block, 0.6));
