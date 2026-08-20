@@ -167,9 +167,97 @@ export function classifyWrappedContinuation(prev: SemanticContentBlock, next: Se
   return { decision: "separate", confidence: 0.5, reasonCodes: ["uncertain-defaults-to-separate"] };
 }
 
+/*
+  Phase 3A - Colon-Marked Spatial Skill Grid. Some resumes lay a skills
+  section out as a two-column grid rather than as "Category: a, b" on one
+  line:
+
+      Programming:      Python, Java
+      CAD:              CATIA V5, NX
+      Simulation:       ANSYS
+
+  Phase 1 keeps each cell as its own block whenever the gutter is wider
+  than its line-merge rule, so the category and its members arrive as
+  separate blocks and the existing textual route - which needs the colon
+  AND the members in ONE block - never fires. Every cell then falls
+  through to the plain-list path and the categories end up flattened in
+  among the skills they were labelling.
+
+  What makes this recoverable is that geometry is asked to establish only
+  ONE thing: which cells share a row. The semantic role is proven
+  separately, by the trailing colon the author wrote - the same evidence
+  the existing textual route already trusts, merely split across two
+  blocks by the layout. Position alone is never treated as category
+  evidence: an unmarked grid, and in particular two independent skill
+  columns ("Python | Leadership"), carry no colon and are left to the
+  existing behaviour untouched, because nothing observable distinguishes
+  them from a genuine category grid.
+
+  The geometric tests are deliberately constant-free, so this introduces
+  no tolerance to tune and nothing to overfit:
+
+    - two cells share a row when their vertical extents actually OVERLAP;
+    - the two columns are proven disjoint when every left cell ends
+      before every right cell begins;
+    - and the grid must repeat, since a lone horizontal pair is
+      indistinguishable from an ordinary two-part line.
+
+  Every block in the section must participate in exactly one such
+  two-cell row. A section that is only partly grid-shaped is refused
+  outright rather than half-claimed, which also guarantees no block loses
+  its coverage. Bullets, headings, blocks without geometry and blocks
+  from another page are all excluded before any of this runs. Nothing
+  here mutates a block: the source text, bbox, ids and order are read
+  only, and the whole line survives in the section's blocks exactly as
+  before.
+*/
+function detectColonMarkedSkillGrid(sectionId: string, blocks: SemanticContentBlock[]): SkillGroup[] | null {
+  if (blocks.length < 4) return null;
+  if (blocks.some((b) => b.blockType === "bullet" || !b.bbox)) return null;
+  if (blocks.some((b) => b.pageIndex !== blocks[0].pageIndex)) return null;
+
+  const cells = [...blocks].sort((a, b) => a.bbox!.y - b.bbox!.y || a.bbox!.x - b.bbox!.x);
+  const rows: SemanticContentBlock[][] = [];
+  for (const cell of cells) {
+    const currentRow = rows[rows.length - 1];
+    const anchor = currentRow?.[0];
+    const overlapsAnchor =
+      anchor !== undefined &&
+      cell.bbox!.y < anchor.bbox!.y + anchor.bbox!.height &&
+      anchor.bbox!.y < cell.bbox!.y + cell.bbox!.height;
+    if (overlapsAnchor) currentRow.push(cell);
+    else rows.push([cell]);
+  }
+
+  if (rows.length < 2) return null;
+  if (rows.some((row) => row.length !== 2)) return null;
+
+  const lefts = rows.map((row) => row[0]);
+  const rights = rows.map((row) => row[1]);
+  const leftmostRightEdge = Math.min(...rights.map((r) => r.bbox!.x));
+  if (lefts.some((l) => l.bbox!.x + l.bbox!.width > leftmostRightEdge)) return null;
+
+  const groups: SkillGroup[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const labelText = lefts[i].text.trim();
+    const valueText = rights[i].text.trim();
+    if (!labelText.endsWith(":")) return null;
+    const label = labelText.slice(0, -1).trim();
+    if (label.length === 0 || valueText.length === 0) return null;
+    const skills = splitSkillList(valueText);
+    if (skills.length === 0) return null;
+    groups.push({ label, skills, source: traceFromBlocks(sectionId, [lefts[i], rights[i]]) });
+  }
+  return groups;
+}
+
 export function extractSkillGroups(sectionId: string, bodyBlocks: SemanticContentBlock[]): SkillGroup[] {
   const relevant = bodyBlocks.filter((b) => b.blockType !== "heading" && b.rawText.length > 0);
   if (relevant.length === 0) return [];
+
+  // --- 0. Phase 3A spatial colon-marked grid (see above) ---
+  const spatialGrid = detectColonMarkedSkillGrid(sectionId, relevant);
+  if (spatialGrid) return spatialGrid;
 
   // --- 1. Table/level-row shape ---
   const levelMatches = relevant.filter((b) => LEVEL_SUFFIX_RE.test(stripBullet(b.text)));
