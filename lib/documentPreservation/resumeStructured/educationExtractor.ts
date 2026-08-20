@@ -622,11 +622,63 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
               credentialsAcc.push(...credResult.credentials);
               fieldsOfStudyAcc.push(...credResult.fieldsOfStudy);
             } else {
-              reasonCodes.push("single-line-header-whole-remainder-as-institution");
-              institutionsAcc.push(makeValue(segments[0] ?? primary, sectionId, block, 0.6));
+              /*
+                Phase 2B-C3 recognises "Credential (Institution)" - but it
+                sits in the no-date arm below, so a header carrying its date
+                INLINE ("Law Clerk (Seneca Polytechnic) Expected in 04/2027
+                - Toronto, ON", the real shape 5D.3B's own comment above
+                already names) could never reach it and fell straight to the
+                whole-remainder default, gluing credential, school and a
+                trailing qualifier into one institution string.
+
+                This is C3's test applied to the dated path's own candidate,
+                not a second parenthetical parser: same regex, same three
+                positive/negative guards, same confidences, same reason code.
+                The bracket contents must still EARN the institution role, so
+                "(Machine Vision)", "(Honours)", "(Co-op)" and a reversed
+                "<School> (<Program>)" are refused here exactly as they are
+                below. The trailing group is what keeps "Expected in" out of
+                both fields while rawHeaderText keeps the line verbatim.
+              */
+              const datedParenthetical = candidateText.match(/^([^()]*[^\s()])\s*\(([^()]+)\)\s*([^()]*)$/);
+              const datedLeft = datedParenthetical ? datedParenthetical[1].trim() : "";
+              const datedInner = datedParenthetical ? datedParenthetical[2].trim() : "";
+              if (
+                datedParenthetical !== null &&
+                datedLeft.length > 0 &&
+                !segmentLooksLikeInstitution(datedLeft) &&
+                segmentLooksLikeInstitution(datedInner) &&
+                !HONORS_RE.test(datedInner) &&
+                !hasDateEvidence(datedInner) &&
+                !looksLikeLocation(datedInner)
+              ) {
+                reasonCodes.push("single-line-header-credential-parenthetical-institution");
+                credentialsAcc.push(makeValue(datedLeft, sectionId, block, 0.65));
+                institutionsAcc.push(makeValue(datedInner, sectionId, block, 0.65));
+              } else {
+                reasonCodes.push("single-line-header-whole-remainder-as-institution");
+                institutionsAcc.push(makeValue(segments[0] ?? primary, sectionId, block, 0.6));
+              }
             }
           }
-          if (secondary.length > 0) location = makeValue(secondary, sectionId, block, 0.5);
+          if (secondary.length > 0) {
+            /*
+              Whatever sits on the far side of the date is the location
+              candidate, and stripDateAnchor hands it over still carrying
+              the glyph that separated the two - for the ASCII/en/em dash
+              and pipe it already removes them, but a fullwidth hyphen
+              (U+FF0D, what the real source actually uses) or a middle dot
+              survives and became part of the value, e.g. "- Toronto, ON".
+
+              Anchored to the START of the candidate and limited to those
+              separator characters, so internal punctuation is untouched:
+              "Winston-Salem, NC" and "Saint-Jean-sur-Richelieu, QC" keep
+              every hyphen they came with. A candidate that is nothing but
+              a separator yields no location rather than an empty one.
+            */
+            const locationCandidate = secondary.replace(/^[\s\-\u2013\u2014\uFF0D|\u00B7]+/, "").trim();
+            if (locationCandidate.length > 0) location = makeValue(locationCandidate, sectionId, block, 0.5);
+          }
         } else {
           reasonCodes.push("single-line-header-empty-after-date-strip");
         }

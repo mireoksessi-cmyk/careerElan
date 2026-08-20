@@ -1243,6 +1243,70 @@ async function main() {
   await checkRealFixture("google-docs-resume.docx", "docx", 1);
   await closeSharedBrowser();
 
+  // --- Phase 2B-C3D - dated single-line "Credential (Institution)" ---
+  // The real source line from an actual resume: the date sits INLINE, so
+  // this header used to miss C3 entirely and became one glued institution
+  // string with the location still wearing its separator glyph.
+  const REAL_LINE = "\u2022 Law Clerk (Seneca Polytechnic) Expected in 04/2027 \uFF0D Toronto, ON";
+
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s1", [block(REAL_LINE, "bullet")]);
+    check("C3D real source: exactly one entry", entries.length, 1);
+    check("C3D real source: the left side becomes the credential", entries[0].credential?.value, "Law Clerk");
+    check("C3D real source: the bracketed school becomes the institution", entries[0].institution?.value, "Seneca Polytechnic");
+    check("C3D real source: credentials[] holds only that credential", entries[0].credentials.map((v) => v.value), ["Law Clerk"]);
+    check("C3D real source: institutions[] holds only that institution", entries[0].institutions.map((v) => v.value), ["Seneca Polytechnic"]);
+    check("C3D real source: fieldOfStudy stays undefined", entries[0].fieldOfStudy, undefined);
+    check("C3D real source: the inline date is unchanged", entries[0].dateRangeText?.value, "04/2027");
+    check("C3D real source: the location drops its fullwidth separator", entries[0].location?.value, "Toronto, ON");
+    check("C3D real source: details stay empty for this single-line shape", detailValues(entries[0]), []);
+    check("C3D real source: rawHeaderText is the verbatim source line", entries[0].rawHeaderText, REAL_LINE);
+    checkTrue("C3D real source: \"Expected in\" survives in rawHeaderText", entries[0].rawHeaderText.includes("Expected in"));
+    check("C3D real source: it no longer falls to whole-remainder-as-institution", entries[0].reasonCodes.includes("single-line-header-whole-remainder-as-institution"), false);
+    check("C3D real source: it took the parenthetical-institution route", entries[0].reasonCodes.includes("single-line-header-credential-parenthetical-institution"), true);
+  }
+
+  // C3D separators - the leading glyph is never part of the location.
+  {
+    for (const [label, sep] of [["ascii hyphen", "-"], ["en dash", "\u2013"], ["em dash", "\u2014"], ["pipe", "|"], ["fullwidth hyphen", "\uFF0D"], ["middle dot", "\u00B7"]] as Array<[string, string]>) {
+      counter = 0;
+      const entries = extractEducationEntries("s1", [block(`\u2022 Law Clerk (Seneca Polytechnic) Expected in 04/2027 ${sep} Toronto, ON`, "bullet")]);
+      check(`C3D separator ${label}: location is the place alone`, entries[0].location?.value, "Toronto, ON");
+      check(`C3D separator ${label}: the date is still resolved`, entries[0].dateRangeText?.value, "04/2027");
+    }
+  }
+
+  // C3D internal punctuation must survive - only a LEADING separator goes.
+  {
+    for (const [label, place] of [["Winston-Salem", "Winston-Salem, NC"], ["Saint-Jean-sur-Richelieu", "Saint-Jean-sur-Richelieu, QC"]] as Array<[string, string]>) {
+      counter = 0;
+      const entries = extractEducationEntries("s1", [block(`\u2022 Law Clerk (Seneca Polytechnic) 04/2027 \uFF0D ${place}`, "bullet")]);
+      check(`C3D hyphenated ${label}: every internal hyphen is preserved`, entries[0].location?.value, place);
+    }
+  }
+
+  // C3D negatives - a dated header must not classify what no-date C3 refuses.
+  {
+    const negatives: Array<[string, string]> = [
+      ["specialization", "M.S. in Automation and Design Engineering (Machine Vision)"],
+      ["honours", "Computer Science (Honours)"],
+      ["degree honours", "Bachelor of Science (Honours)"],
+      ["modality", "Engineering (Co-op)"],
+      ["reversed institution-first", "Seneca Polytechnic (Law Clerk)"],
+      ["institution + location", "University Name (Toronto, ON)"],
+      ["MIT acronym", "B.S. (MIT)"],
+    ];
+    for (const [label, text] of negatives) {
+      counter = 0;
+      const entries = extractEducationEntries("s1", [block(`\u2022 ${text} 04/2027 \uFF0D Toronto, ON`, "bullet")]);
+      const inner = text.slice(text.indexOf("(") + 1, text.indexOf(")"));
+      check(`C3D negative ${label}: the parenthetical route did NOT fire`, entries[0].reasonCodes.includes("single-line-header-credential-parenthetical-institution"), false);
+      check(`C3D negative ${label}: the bracket text never becomes the institution`, entries[0].institution?.value === inner, false);
+      check(`C3D negative ${label}: the date is still resolved`, entries[0].dateRangeText?.value, "04/2027");
+    }
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }
