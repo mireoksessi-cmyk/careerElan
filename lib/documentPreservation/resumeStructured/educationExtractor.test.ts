@@ -680,7 +680,7 @@ counter = 0;
     block("– Example City, ST · 04/2027"),
   ]);
   check("S7 continuation did not become a structured location", entries[0].location, undefined);
-  check("S7 continuation did not become a structured date", entries[0].dateRangeText, undefined);
+  check("S7 continuation date is now structured (C2)", entries[0].dateRangeText?.value, "04/2027");
   checkTrue("S7 continuation is still a detail", detailValues(entries[0]).includes("– Example City, ST · 04/2027"));
 }
 
@@ -999,6 +999,140 @@ counter = 0;
   const entries = extractEducationEntries("s1", [block(`B.S. ${H2B_DASH} Precision Engineering (2015 - 2019)`)]);
   check("H2B negative degree-field: the composite route did NOT fire", entries[0].reasonCodes.includes(H2B_ROUTE), false);
   check("H2B negative degree-field: a bare major never becomes a credential", entries[0].credential?.value === "Precision Engineering", false);
+}
+
+// --- Phase 2B-C2 - continuation-metadata date consumption ---
+// A header with no date of its own may take the date from the single
+// continuation line C1 already attached to it - but only when what is
+// left of that line after the date is nothing or a location. Prose that
+// merely mentions a year is refused.
+const C2_ROUTE = "single-line-header-continuation-date";
+
+// C2-1 - PRIMARY: marker + location + date continuation.
+counter = 0;
+{
+  const header = block("• Generic Program (Example Polytechnic) Expected in", "bullet");
+  const cont = block("– Example City, ST · 04/2027");
+  const entries = extractEducationEntries("s1", [header, cont]);
+  check("C2 primary: still exactly one entry", entries.length, 1);
+  check("C2 primary: took the continuation-date route", entries[0].reasonCodes.includes(C2_ROUTE), true);
+  check("C2 primary: the continuation date is structured", entries[0].dateRangeText?.value, "04/2027");
+  check("C2 primary: date provenance points at the continuation block", entries[0].dateRangeText?.source.sourceBlockIds, [cont.id]);
+  check("C2 primary: date provenance element ids come from the continuation block", entries[0].dateRangeText?.source.sourceElementIds, cont.sourceElementIds);
+  check("C2 primary: location stays undefined", entries[0].location, undefined);
+  check("C2 primary: the unresolved header is still preserved", detailValues(entries[0]).includes("Generic Program (Example Polytechnic) Expected in"), true);
+  check("C2 primary: the full continuation line is still preserved", detailValues(entries[0]).includes("– Example City, ST · 04/2027"), true);
+  check("C2 primary: rawHeaderText holds the header line only", entries[0].rawHeaderText, "• Generic Program (Example Polytechnic) Expected in");
+  check("C2 primary: C3 is untouched - no credential invented", entries[0].credential, undefined);
+  check("C2 primary: C3 is untouched - no institution invented", entries[0].institution, undefined);
+  check("C2 primary: C3 is untouched - no fieldOfStudy invented", entries[0].fieldOfStudy, undefined);
+}
+
+// C2-2 - the presentation marker is not required.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("Example City, ST · 04/2027"),
+  ]);
+  check("C2 unmarked: the continuation date is structured", entries[0].dateRangeText?.value, "04/2027");
+  check("C2 unmarked: location stays undefined", entries[0].location, undefined);
+  check("C2 unmarked: the continuation line is still preserved", detailValues(entries[0]).includes("Example City, ST · 04/2027"), true);
+}
+
+// C2-3 - a date-only continuation leaves an empty remainder.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("04/2027"),
+  ]);
+  check("C2 date-only: the continuation date is structured", entries[0].dateRangeText?.value, "04/2027");
+  check("C2 date-only: no location is invented", entries[0].location, undefined);
+  check("C2 date-only: the continuation line is still preserved", detailValues(entries[0]).includes("04/2027"), true);
+}
+
+// C2-4 - marker + date only.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("– 04/2027"),
+  ]);
+  check("C2 marker+date: the continuation date is structured", entries[0].dateRangeText?.value, "04/2027");
+  check("C2 marker+date: no location is invented", entries[0].location, undefined);
+  check("C2 marker+date: the continuation line is still preserved", detailValues(entries[0]).includes("– 04/2027"), true);
+}
+
+// C2-5 - NEGATIVE: a header that already has its own date is never
+//        supplemented or overridden by a body year.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("Example University - 2019 - 2021"),
+    block("Note: values converted for presentation in 2026"),
+  ]);
+  check("C2 dated header: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
+  check("C2 dated header: its own date is untouched", entries[0].dateRangeText?.value, "2019 - 2021");
+}
+
+// C2-6 - NEGATIVE: note-like prose containing a year, under an undated
+//        header, must not supply a date.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("Note: values converted for presentation in 2026"),
+  ]);
+  check("C2 note prose: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
+  check("C2 note prose: no date is structured", entries[0].dateRangeText, undefined);
+}
+
+// C2-7 - NEGATIVE: an honours line carrying a year.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("Dean's List 2023"),
+  ]);
+  check("C2 honour: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
+  check("C2 honour: no date is structured", entries[0].dateRangeText, undefined);
+}
+
+// C2-8 - NEGATIVE: award prose carrying a year.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("Awarded a scholarship in 2020"),
+  ]);
+  check("C2 award prose: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
+  check("C2 award prose: no date is structured", entries[0].dateRangeText, undefined);
+}
+
+// C2-9 - NEGATIVE: descriptive prose carrying a year.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("Exchange semester 2019"),
+  ]);
+  check("C2 exchange prose: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
+  check("C2 exchange prose: no date is structured", entries[0].dateRangeText, undefined);
+}
+
+// C2-10 - NEGATIVE: only the FIRST body block is eligible; a later
+//         date-bearing line is never scanned.
+counter = 0;
+{
+  const entries = extractEducationEntries("s1", [
+    block("• Generic Program (Example Polytechnic) Expected in", "bullet"),
+    block("• Member of the student engineering society", "bullet"),
+    block("– Example City, ST · 04/2027"),
+  ]);
+  check("C2 later body: the continuation route did NOT fire", entries[0].reasonCodes.includes(C2_ROUTE), false);
+  check("C2 later body: no date is structured from a later block", entries[0].dateRangeText, undefined);
+  check("C2 later body: the later line is still preserved", detailValues(entries[0]).includes("– Example City, ST · 04/2027"), true);
 }
 
 const FIXTURES_DIR = path.resolve(__dirname, "../../../fixtures/resumes");

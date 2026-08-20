@@ -36,6 +36,7 @@ import { entryId } from "./ids";
 import { hasDateEvidence, stripDateAnchor } from "./dateRangeParsing";
 import { parseInlineCompositeHeader } from "./academicCompositeParser";
 import { normalizeBulletPresentation } from "./bulletPresentation";
+import { looksLikeLocation } from "./splitOrganizationLocation";
 import {
   splitMultiValueSegment,
   splitDegreeInMajor,
@@ -659,6 +660,75 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
         const unresolvedHeaderText = normalizeBulletPresentation(block.rawText, { blockType: block.blockType }).displayText.trim();
         if (unresolvedHeaderText.length > 0 && bodyRunBlocks.some((b) => b.rawText.trim().length > 0)) {
           extraDetails.push(makeValue(unresolvedHeaderText, sectionId, block, 0.6));
+        }
+
+        /*
+          Phase 2B-C2 - a record's own second line often carries nothing
+          but location and/or date ("- Example City, ST - 04/2027"), and
+          C1 already keeps that line inside THIS range. But the header
+          above it has no date of its own, so the branch resolved
+          nothing at all and the record's only date stayed buried inside
+          a detail string - structured nowhere.
+
+          Only the DATE is taken, and only from a candidate that clears
+          every one of the following. Each signal already exists in this
+          file; none is relaxed, and none is new vocabulary:
+
+            - the candidate is bodyRunBlocks[0], i.e. the line
+              immediately continuing this header, inside the SAME range
+              C1 already segmented. Scanning further body blocks was
+              proven unsafe: an ordinary note, honour or award line that
+              merely mentions a year would supply a date.
+            - this branch itself proves the header carries no date, so
+              this can only ever fill an empty field, never override or
+              supplement a real header date.
+            - isContinuationMetadataLine already agrees the line is
+              metadata rather than a new record (its C1 contract, called
+              here and otherwise untouched).
+            - it is neither GPA- nor honours-shaped, using the same two
+              tests the body loop below already applies.
+            - it yields a real date under the existing date parser.
+            - and, decisively, what is LEFT of the line once its date is
+              removed is either nothing at all or recognisably a
+              location. That is what separates true metadata from prose:
+              "Awarded a scholarship in 2020" and "Exchange semester
+              2019" leave a sentence fragment behind and are refused,
+              while "- Example City, ST - 04/2027" and a bare "04/2027"
+              are accepted. The trailing presentation middle dot is
+              ignored for that judgement only - stripDateAnchor's own
+              cleanup does not list it, and it would otherwise defeat
+              the location test on the exact shape this fixes.
+
+          looksLikeLocation is used ONLY as that eligibility evidence.
+          location itself stays undefined: this repository's adapter has
+          no education location field, so structuring it would render in
+          one template and vanish in three. The continuation line
+          therefore also stays in details[] verbatim, exactly as the
+          body loop already places it - accepting that the date reads
+          twice rather than risking the loss of its location text.
+        */
+        const continuationCandidate = bodyRunBlocks[0];
+        if (
+          continuationCandidate !== undefined &&
+          isContinuationMetadataLine(continuationCandidate) &&
+          !GPA_RE.test(continuationCandidate.text) &&
+          !HONORS_RE.test(continuationCandidate.text)
+        ) {
+          const continuationAnchor = stripDateAnchor(continuationCandidate.text);
+          const continuationRemainder = [continuationAnchor.beforeText, continuationAnchor.afterText]
+            .filter((t) => t.length > 0)
+            .join(" ")
+            .replace(/\s*\u00b7\s*$/, "")
+            .trim();
+          if (
+            continuationAnchor.dateRangeText.length > 0 &&
+            (continuationRemainder.length === 0 || looksLikeLocation(continuationRemainder))
+          ) {
+            reasonCodes.push("single-line-header-continuation-date");
+            dateRangeText = makeValue(continuationAnchor.dateRangeText, sectionId, continuationCandidate, 0.7);
+            if (continuationAnchor.startDateText) startDateText = makeValue(continuationAnchor.startDateText, sectionId, continuationCandidate, 0.65);
+            if (continuationAnchor.endDateText) endDateText = makeValue(continuationAnchor.endDateText, sectionId, continuationCandidate, 0.65);
+          }
         }
       }
     } else {
