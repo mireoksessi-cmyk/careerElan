@@ -192,14 +192,45 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
     },
   };
 
-  let identitySourceSectionId: string | null = null;
+  const identitySourceSectionIds = new Set<string>();
   if (document.identityBlocks.length > 0) {
     model.identity = extractIdentity("identity", document.identityBlocks);
   } else {
-    const first = document.sections[0];
-    if (first && first.normalizedType === "custom" && hasIdentitySignal(first.blocks)) {
-      model.identity = extractIdentity(first.id, first.blocks);
-      identitySourceSectionId = first.id;
+    /*
+      Phase 1 hands over identityBlocks only when something precedes the
+      first heading it detected - and a resume's name is built to be the
+      most prominent line on the page, so it very often scores as that
+      first heading itself and leaves the list empty. The fallback below
+      is what recovers identity in that case.
+
+      It used to read section[0] alone, which works while the name and
+      the contact line stay together in one leading section. It breaks
+      on the equally ordinary header that stacks a professional title
+      between them: name, title and contact then land in TWO leading
+      sections, and the contact - the only thing hasIdentitySignal can
+      key on - sits in the second one, unreachable. Identity came back
+      undefined and the whole resume was refused as unrenderable.
+
+      So the window is the leading run of sections Phase 1 could not
+      name - it ends at the first section that carries a real canonical
+      type, which is the document's own first true section boundary. No
+      new evidence is introduced: the boundary is Phase 1's existing
+      classification, and hasIdentitySignal still has to find an actual
+      contact channel in the collected blocks, so a leading run of plain
+      prose cannot promote itself into an identity. Every collected
+      section is recorded, because each one must be skipped below or its
+      text would render twice - once as identity, once as its own custom
+      section.
+    */
+    const leadingUnnamedSections = [];
+    for (const section of document.sections) {
+      if (section.normalizedType !== "custom") break;
+      leadingUnnamedSections.push(section);
+    }
+    const identityCandidateBlocks = leadingUnnamedSections.flatMap((section) => section.blocks);
+    if (leadingUnnamedSections.length > 0 && hasIdentitySignal(identityCandidateBlocks)) {
+      model.identity = extractIdentity(leadingUnnamedSections[0].id, identityCandidateBlocks);
+      for (const section of leadingUnnamedSections) identitySourceSectionIds.add(section.id);
     }
   }
 
@@ -227,7 +258,7 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
   const sections = consumedBlockIds.size > 0 ? document.sections.map((s) => ({ ...s, blocks: s.blocks.filter((b) => !consumedBlockIds.has(b.id)) })) : document.sections;
 
   for (const section of sections) {
-    if (section.id === identitySourceSectionId) continue;
+    if (identitySourceSectionIds.has(section.id)) continue;
     const body = bodyBlocksOf(section);
 
     switch (section.normalizedType) {

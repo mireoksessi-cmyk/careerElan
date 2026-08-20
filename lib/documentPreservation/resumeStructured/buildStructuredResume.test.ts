@@ -9,6 +9,7 @@ import { analyzeDocument } from "../layoutAnalysis";
 import { closeSharedBrowser } from "../sharedBrowser";
 import { buildLosslessResumeDocument } from "../losslessSemantic/buildLosslessDocument";
 import { buildStructuredResume } from "./buildStructuredResume";
+import type { LosslessResumeDocument, LosslessResumeSection, SemanticContentBlock } from "../losslessSemantic/types";
 
 let pass = 0;
 let fail = 0;
@@ -89,6 +90,85 @@ async function main() {
   check("determinism: repeat build yields byte-identical validation report", model1.validation, model2.validation);
 
   await closeSharedBrowser();
+
+  /* ============================================================
+     Fallback identity window. Phase 1 leaves identityBlocks empty
+     whenever the name itself scored as the first heading, which is
+     common - so these cover what the fallback then has to do with the
+     leading sections it is left with. Built as documents rather than
+     PDFs so the window logic is exercised directly, without depending
+     on how any particular file happens to be scored.
+     ============================================================ */
+  let identityBlockCounter = 0;
+  const identityBlock = (text: string): SemanticContentBlock => {
+    const i = identityBlockCounter++;
+    return { id: `idb-${i}`, sourceElementIds: [`ide-${i}`], text, rawText: text, pageIndex: 1, sourceOrder: i, blockType: "paragraph" };
+  };
+  const identitySection = (index: number, normalizedType: LosslessResumeSection["normalizedType"], heading: string | null, texts: string[]): LosslessResumeSection => ({
+    id: `idsec-${index}`,
+    originalHeading: heading,
+    normalizedHeading: heading ? heading.toLowerCase() : null,
+    normalizedType,
+    displayHeading: heading,
+    sourceOrder: index,
+    startPageIndex: 1,
+    endPageIndex: 1,
+    blocks: texts.map(identityBlock),
+    rawText: texts.join("\n"),
+    isUncertain: normalizedType === "custom",
+    reasonCodes: [],
+    confidence: normalizedType === "custom" ? 0.3 : 0.9,
+    classificationMethod: normalizedType === "custom" ? "fallback" : "dictionary",
+  });
+  const identityDocument = (sections: LosslessResumeSection[]): LosslessResumeDocument => ({
+    schemaVersion: "1.0.0",
+    source: { fileName: "identity-window.pdf", fileType: "pdf", pageCount: 1 },
+    identityBlocks: [],
+    sections,
+    unassignedBlocks: [],
+    validation: { passed: true, sourceElementCount: 0, representedElementCount: 0, missingElementIds: [], duplicateElementIds: [], missingTextSpans: [], inventedTextSpans: [], orderViolations: [], warnings: [] },
+  });
+
+  // A header split across two leading sections - name, then title with
+  // the contact line. The contact is in the SECOND section.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN"]),
+      identitySection(1, "custom", null, ["SENIOR PRODUCT MANAGER", "Vancouver, BC | 604-555-0134 | alex.chen@mail.test"]),
+      identitySection(2, "summary", "SUMMARY", ["SUMMARY", "Product leader with a decade of experience."]),
+    ]));
+    checkTrue("identity window: a header split across two leading sections still yields identity", model.identity !== undefined);
+    check("identity window: the name is taken from the first leading section", model.identity?.fullName?.value, "ALEX CHEN");
+    checkTrue("identity window: the contact from the second leading section is reached", (model.identity?.email?.value ?? "").includes("alex.chen@mail.test"));
+    check("identity window: neither leading section is also emitted as custom content", model.customSections.length, 0);
+    check("identity window: the first canonical section is untouched", model.professionalSummary !== undefined, true);
+  }
+
+  // The already-working shape: name and contact in ONE leading section.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["DANA WHITFIELD", "Toronto, ON | 416-555-0199 | dana@mail.test"]),
+      identitySection(1, "summary", "SUMMARY", ["SUMMARY", "Reliability engineer."]),
+    ]));
+    checkTrue("identity window: the single-section header still yields identity", model.identity !== undefined);
+    check("identity window: single-section name unchanged", model.identity?.fullName?.value, "DANA WHITFIELD");
+    check("identity window: single-section header is not duplicated as custom content", model.customSections.length, 0);
+  }
+
+  // No contact channel anywhere in the leading run - identity must NOT
+  // be manufactured just because several unnamed sections lead.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["PROMINENT LINE"]),
+      identitySection(1, "custom", null, ["SECOND PROMINENT LINE"]),
+      identitySection(2, "summary", "SUMMARY", ["SUMMARY", "Some summary text."]),
+    ]));
+    check("identity window: no contact signal means no invented identity", model.identity, undefined);
+    check("identity window: and that leading material is preserved as custom sections instead", model.customSections.length, 2);
+  }
 
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
