@@ -132,6 +132,100 @@ async function main() {
   const summaryHeadingBlock = makeBlock({ sourceOrder: 0, text: "Professional Summary", rawText: "Professional Summary" });
   check("a known alias heading ('Professional Summary') IS scored as a heading candidate", scoreHeadingCandidates([summaryHeadingBlock]).length, 1);
 
+
+  /*
+    Section tier vs entry tier. A resume sets its section titles at one
+    size and the entry titles inside them at a smaller one, and both are
+    larger than body text - so the size the document's own alias-matched
+    headings use is what tells the two apart. Built synthetically so the
+    rule is exercised directly, with enough body blocks that the median
+    body size is unambiguous.
+  */
+  const tierBody = (order: number, size: number) =>
+    makeBlock({ sourceOrder: order, text: `Body prose line ${order} carrying ordinary sentence content for the median.`, rawText: `Body prose line ${order} carrying ordinary sentence content for the median.`, style: { fontSize: size } });
+  const tierHeading = (order: number, text: string, size: number) =>
+    makeBlock({ sourceOrder: order, text, rawText: text, style: { fontSize: size } });
+  const candidateTexts = (bs: SemanticContentBlock[]) => scoreHeadingCandidates(bs).map((c) => bs[c.blockIndex].text);
+
+  // Alias sections at 14, an entry title at 11, a genuine custom section
+  // at 14, over body text at 10.
+  const tierBlocks: SemanticContentBlock[] = [
+    tierHeading(0, "Professional Summary", 14),
+    tierBody(1, 10), tierBody(2, 10), tierBody(3, 10),
+    tierHeading(4, "Work History", 14),
+    tierHeading(5, "Senior Widget Wrangler", 11),
+    tierBody(6, 10), tierBody(7, 10), tierBody(8, 10),
+    tierHeading(9, "SELECTED PRESS", 14),
+    tierBody(10, 10), tierBody(11, 10), tierBody(12, 10),
+  ];
+  const tierCandidates = scoreHeadingCandidates(tierBlocks);
+  const tierTexts = tierCandidates.map((c) => tierBlocks[c.blockIndex].text);
+  // The custom heading must be earning its place typographically, not lexically.
+  check("section tier: the custom heading is genuinely unaliased", tierCandidates.find((c) => tierBlocks[c.blockIndex].text === "SELECTED PRESS")?.reasonCodes.includes("known-heading-alias"), false);
+  checkTrue("section tier: an alias section heading is kept", tierTexts.includes("Professional Summary"));
+  checkTrue("section tier: every alias section heading is kept", tierTexts.includes("Work History"));
+  checkTrue("section tier: an unaliased heading at the section tier is kept", tierTexts.includes("SELECTED PRESS"));
+  checkTrue("section tier: an entry title below the section tier is not a boundary", !tierTexts.includes("Senior Widget Wrangler"));
+  check("section tier: exactly the three section headings survive", tierTexts, ["Professional Summary", "Work History", "SELECTED PRESS"]);
+
+  // Above the tier is still a section - the rule is a floor, not a band.
+  const aboveTierBlocks: SemanticContentBlock[] = [
+    tierHeading(0, "Professional Summary", 14),
+    tierBody(1, 10), tierBody(2, 10), tierBody(3, 10),
+    tierHeading(4, "SELECTED PRESS", 18),
+    tierBody(5, 10), tierBody(6, 10), tierBody(7, 10),
+  ];
+  checkTrue("section tier: an unaliased heading above the section tier is kept", candidateTexts(aboveTierBlocks).includes("SELECTED PRESS"));
+
+  // The floor is the SMALLEST alias heading, so an alias can never be
+  // filtered by a floor derived from its own peers.
+  const mixedAliasBlocks: SemanticContentBlock[] = [
+    tierHeading(0, "Professional Summary", 14),
+    tierBody(1, 10), tierBody(2, 10), tierBody(3, 10),
+    tierHeading(4, "Education", 12),
+    tierBody(5, 10), tierBody(6, 10), tierBody(7, 10),
+    tierHeading(8, "SELECTED PRESS", 12),
+    tierBody(9, 10), tierBody(10, 10), tierBody(11, 10),
+  ];
+  const mixedTexts = candidateTexts(mixedAliasBlocks);
+  checkTrue("section tier: the smallest alias heading is never demoted by the floor it sets", mixedTexts.includes("Education"));
+  checkTrue("section tier: an unaliased heading matching that smaller floor is kept", mixedTexts.includes("SELECTED PRESS"));
+
+  // No alias matched anywhere - the document states no convention, so
+  // nothing may be filtered on typography it never declared.
+  const noAliasTierBlocks: SemanticContentBlock[] = [
+    tierHeading(0, "SELECTED PRESS", 14),
+    tierBody(1, 10), tierBody(2, 10), tierBody(3, 10),
+    tierHeading(4, "Senior Widget Wrangler", 11),
+    tierBody(5, 10), tierBody(6, 10), tierBody(7, 10),
+  ];
+  const noAliasTexts = candidateTexts(noAliasTierBlocks);
+  check("section tier: with no alias anywhere, no candidate is filtered", noAliasTexts, ["SELECTED PRESS", "Senior Widget Wrangler"]);
+
+
+  // The floor starts at the first alias heading. Everything above it is
+  // the document's header, where a line smaller than the section titles
+  // is ordinary rather than an entry inside a section - nothing is open
+  // yet for it to be inside of. The same size AFTER that point is an
+  // entry title and must not open a section of its own.
+  const preAliasBlocks: SemanticContentBlock[] = [
+    tierHeading(0, "AVERY LINDQVIST", 16),
+    tierHeading(1, "Principal Widget Steward", 12),
+    tierHeading(2, "Work History", 14),
+    tierBody(3, 10), tierBody(4, 10), tierBody(5, 10),
+    tierHeading(6, "Senior Widget Steward", 12),
+    tierBody(7, 10), tierBody(8, 10), tierBody(9, 10),
+    tierHeading(10, "SELECTED PRESS", 14),
+    tierBody(11, 10), tierBody(12, 10), tierBody(13, 10),
+  ];
+  const preAliasTexts = candidateTexts(preAliasBlocks);
+  checkTrue("first-alias floor: a leading line above the section tier is kept", preAliasTexts.includes("AVERY LINDQVIST"));
+  checkTrue("first-alias floor: a leading line BELOW the section tier is still kept", preAliasTexts.includes("Principal Widget Steward"));
+  checkTrue("first-alias floor: the alias heading that sets the floor is kept", preAliasTexts.includes("Work History"));
+  checkTrue("first-alias floor: the same size after that heading is an entry title, not a section", !preAliasTexts.includes("Senior Widget Steward"));
+  checkTrue("first-alias floor: a later heading at the section tier is still a section", preAliasTexts.includes("SELECTED PRESS"));
+  check("first-alias floor: the header survives whole and only the entry title is dropped", preAliasTexts, ["AVERY LINDQVIST", "Principal Widget Steward", "Work History", "SELECTED PRESS"]);
+
   // --- synthetic unit test: determinism ---
   const detOnce = detectSectionBoundaries(pdfBlocks);
   const detTwice = detectSectionBoundaries(pdfBlocks);

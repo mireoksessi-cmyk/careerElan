@@ -18,6 +18,11 @@ import { normalizeHeadingForMatching } from "./textNormalize";
 
 const MAX_HEADING_TEXT_LENGTH = 40;
 const HEADING_SCORE_THRESHOLD = 2;
+// Point sizes arrive as floats from the PDF/DOCX layer, so "the same size
+// as the section headings" is compared with a hair of slack rather than by
+// exact equality - a heading set in the very same size must not be demoted
+// by a rounding artefact. Not a size threshold: no point size is assumed.
+const FONT_SIZE_MATCH_TOLERANCE = 0.01;
 
 // Same conservative date-range signal blockAdapter.ts documents - a line
 // with a 4-digit year (or "present") is treated as very unlikely to be a
@@ -155,7 +160,63 @@ export function scoreHeadingCandidates(blocks: SemanticContentBlock[]): HeadingC
     }
   });
 
-  return candidates;
+  /*
+    "Larger than body text" is one signal covering two different things.
+    A resume sets its section titles at one size and the entry titles
+    inside them - the job title above a company and a date, the degree
+    above a school - at another, smaller one; both clear the body-text
+    comparison above, so both were being confirmed and every entry title
+    started a top-level section of its own, shattering the very section
+    it belonged to.
+
+    What separates them is not wording but typography, and the document
+    states its own convention: the headings a known alias already
+    confirmed ARE its section tier. So the smallest of those sets a
+    floor, and a candidate with no alias has to reach it to be read as a
+    section rather than as an entry inside one. Nothing is assumed about
+    what a resume looks like - no point size, no title vocabulary - and
+    the evidence is only the document's own.
+
+    Alias-confirmed candidates are never demoted; the floor is derived
+    from them, so it can never exclude them. A candidate that carries no
+    font size at all is left alone rather than judged on evidence it
+    doesn't have. And a document where no alias matched anything states
+    no convention to measure against, so nothing is filtered and the
+    behaviour above stands unchanged - which is what keeps heading-less
+    and wholly-custom resumes working exactly as before.
+
+    The floor only applies from the first alias heading onward. Above it
+    sits the header - the name, the line naming the person's profession,
+    the contact details - and there a line smaller than the section
+    titles is ordinary, not an entry inside anything: there is no
+    section open yet for it to be an entry of. Real resumes set that
+    professional-title line below their section titles routinely, and
+    measuring it against them deleted a leading block that
+    buildStructuredResume's identity window is already responsible for
+    reading. So before the first alias heading the scoring above stands
+    on its own, and identity keeps its own owner.
+
+    Deliberately no lookahead and no notion of which section is
+    currently open: an earlier attempt to read structure from vertical
+    spacing is described at the top of this file, and it fragmented real
+    sections. One document-local measurement and one position are
+    enough.
+  */
+  const aliasHeadings = candidates.filter((candidate) => candidate.reasonCodes.includes("known-heading-alias"));
+  const aliasHeadingFontSizes = aliasHeadings
+    .map((candidate) => blocks[candidate.blockIndex].style?.fontSize)
+    .filter((fontSize): fontSize is number => typeof fontSize === "number");
+  if (aliasHeadingFontSizes.length === 0) return candidates;
+  const aliasHeadingFontFloor = Math.min(...aliasHeadingFontSizes);
+  const firstAliasHeadingIndex = Math.min(...aliasHeadings.map((candidate) => candidate.blockIndex));
+
+  return candidates.filter((candidate) => {
+    if (candidate.reasonCodes.includes("known-heading-alias")) return true;
+    if (candidate.blockIndex < firstAliasHeadingIndex) return true;
+    const fontSize = blocks[candidate.blockIndex].style?.fontSize;
+    if (typeof fontSize !== "number") return true;
+    return fontSize >= aliasHeadingFontFloor - FONT_SIZE_MATCH_TOLERANCE;
+  });
 }
 
 export type SectionBoundary = {
