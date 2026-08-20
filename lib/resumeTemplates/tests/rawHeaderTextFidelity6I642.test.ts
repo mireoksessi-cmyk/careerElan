@@ -41,6 +41,7 @@ function educationEntry(overrides: Partial<NormalizedEducationEntry>): Normalize
     institution: "",
     credential: "",
     fieldOfStudy: "",
+    location: "",
     institutions: [],
     credentials: [],
     fieldsOfStudy: [],

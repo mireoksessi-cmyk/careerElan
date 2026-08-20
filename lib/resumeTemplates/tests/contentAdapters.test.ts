@@ -114,6 +114,38 @@ function main() {
   checkTrue("Jordan Ellis: mixed bullet/paragraph content present in exp-meridian-director", jordan.professionalExperience[1].items.some((i) => i.kind === "paragraph") && jordan.professionalExperience[1].items.some((i) => i.kind === "bullet"));
   checkTrue("Jordan Ellis: contains a long URL somewhere in the custom sections", jordan.customSections.some((s) => JSON.stringify(s.items).includes("https://")));
 
+  // --- Education.location parity ---
+  // The parser resolves an Education location just as it does for
+  // Experience, but this adapter used to drop it, so only Professional
+  // ATS (which reads the raw entry) could show it. These pin the value
+  // through the adapter, and pin that adding it changed nothing else.
+  const sv = (value: string) => ({ value, confidence: 1, extractionMethod: "explicit-label" as const, source: { sourceSectionId: "s", sourceBlockIds: [], sourceElementIds: [] } });
+  const located = normalizeResume({ ...fixture, education: [{ ...fixture.education[0], location: sv("Toronto, ON") }] });
+  check("education location: the source value survives normalization", located.education[0].location, "Toronto, ON");
+  check("education location: an absent location normalizes to empty string, never undefined", normalized.education[0].location, "");
+  check("education location: adding it leaves every other education field untouched", { ...located.education[0], location: undefined }, { ...normalized.education[0], location: undefined });
+
+  // An entry whose ONLY structured field is a location (no rawHeaderText
+  // to fall back on) must still count as real content - otherwise the
+  // meaningfulness filter drops a fact the resume actually stated.
+  const locationOnly = normalizeResume({
+    ...fixture,
+    education: [{ ...fixture.education[0], institution: undefined, credential: undefined, fieldOfStudy: undefined, institutions: [], credentials: [], fieldsOfStudy: [], dateRangeText: undefined, gpa: undefined, honors: [], details: [], rawHeaderText: "", location: sv("Toronto, ON") }],
+  });
+  check("education location: a location-only entry is kept, not filtered away", locationOnly.education.length, 1);
+  check("education location: and that entry still carries its location", locationOnly.education[0]?.location, "Toronto, ON");
+
+  // Each entry must read its own location - no carryover between entries.
+  const twoEntries = normalizeResume({
+    ...fixture,
+    education: [
+      { ...fixture.education[0], id: "edu-a", location: sv("Toronto, ON") },
+      { ...fixture.education[0], id: "edu-b", location: sv("Ottawa, ON") },
+    ],
+  });
+  check("education location: each entry keeps its own location", twoEntries.education.map((e) => e.location), ["Toronto, ON", "Ottawa, ON"]);
+  check("education location: entry order is unchanged", twoEntries.education.map((e) => e.id), ["edu-a", "edu-b"]);
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

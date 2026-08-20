@@ -119,6 +119,7 @@ export type NormalizedEducationEntry = {
   institution: string;
   credential: string;
   fieldOfStudy: string;
+  location: string;
   institutions: string[];
   credentials: string[];
   fieldsOfStudy: string[];
@@ -224,6 +225,12 @@ function normalizeEducation(entry: EducationEntry): NormalizedEducationEntry {
     institution: textValue(entry.institution),
     credential: textValue(entry.credential),
     fieldOfStudy: textValue(entry.fieldOfStudy),
+    /* Education carries a location just as Experience and Credential do,
+       and the parser already resolves it - it was simply never copied
+       here, so the three templates reading this normalized shape could
+       not render it while Professional ATS (which reads the raw entry)
+       could. Same textValue() convention as every other field. */
+    location: textValue(entry.location),
     institutions: textValues(entry.institutions),
     credentials: textValues(entry.credentials),
     fieldsOfStudy: textValues(entry.fieldsOfStudy),
@@ -331,6 +338,7 @@ function hasStructuredEducationFields(e: NormalizedEducationEntry): boolean {
     nonBlank(e.institution) ||
     nonBlank(e.credential) ||
     nonBlank(e.fieldOfStudy) ||
+    nonBlank(e.location) ||
     e.institutions.length > 0 ||
     e.credentials.length > 0 ||
     e.fieldsOfStudy.length > 0 ||

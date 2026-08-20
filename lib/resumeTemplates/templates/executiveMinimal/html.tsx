@@ -212,6 +212,7 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
             </div>
             <div style={{ color: colors.text }}>{edu.credentials.join(", ") || edu.credential}</div>
             {edu.fieldsOfStudy.length > 0 && <div style={{ color: colors.muted, fontSize: "0.9em" }}>{edu.fieldsOfStudy.join(" & ")}</div>}
+            {edu.location && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.location}</div>}
             {edu.gpa && <div style={{ color: colors.muted, fontSize: "0.85em" }}>GPA: {edu.gpa}</div>}
             {edu.honors.length > 0 && <div style={{ color: colors.muted, fontSize: "0.85em" }}>{edu.honors.join(", ")}</div>}
             {edu.details.map((d, di) => <div key={di} style={{ color: colors.muted, fontSize: "0.85em" }}>{d}</div>)}
