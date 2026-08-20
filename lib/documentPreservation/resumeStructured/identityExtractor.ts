@@ -40,7 +40,7 @@ const GENERIC_URL_RE = /https?:\/\/\S+/i;
 // segment so it can't accidentally swallow a whole sentence.
 const BARE_DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i;
 const LOCATION_RE = /^[A-Za-z][A-Za-z\s.'-]*,\s*[A-Za-z]{2,}$/;
-const DELIMITER_RE = /[|·]/;
+const DELIMITER_RE = /[|·•]/;
 
 export function hasIdentitySignal(blocks: SemanticContentBlock[]): boolean {
   const combined = blocks.map((b) => b.rawText).join(" ");
