@@ -242,6 +242,86 @@ async function main() {
     check("identity provenance: and the model with a gap in the window still validates", model.validation.passed, true);
   }
 
+
+  /* ============================================================
+     Resumes with no canonical section at all. The leading run has
+     nothing to stop it in that case, so it used to take the whole
+     document and read a real section as more contact details. Where no
+     canonical boundary exists the run now stops as soon as identity is
+     established - and where one DOES exist nothing changes, which the
+     last case here is what pins.
+     ============================================================ */
+
+  // Header carries its own contact line, so the run ends at the header
+  // and the section after it stays a section.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN", "Vancouver, BC | 604-555-0134 | alex.chen@mail.test"]),
+      identitySection(1, "custom", null, ["TRAINING", "Advanced widget certification", "Riverton Guild"]),
+    ]));
+    check("all-custom: identity is still recovered", model.identity?.fullName?.value, "ALEX CHEN");
+    check("all-custom: from the header's own contact line", model.identity?.email?.value, "alex.chen@mail.test");
+    check("all-custom: identity claims only the header section", identityTracedSectionIds(model.identity), ["idsec-0"]);
+    check("all-custom: the section after it survives as a section", model.customSections.length, 1);
+    check("all-custom: and it is the one identity did not take", model.customSections[0]?.source.sourceSectionId, "idsec-1");
+    check("all-custom: its content never becomes contact lines", (model.identity?.otherContactLines ?? []).some((v) => v.value.includes("Advanced widget certification")), false);
+    check("all-custom: nothing is left unrepresented", model.validation.missingSectionIds, []);
+    checkTrue("all-custom: the model still validates", model.validation.passed);
+  }
+
+  // Name and contact split across two sections - the run must reach the
+  // second, because that is where identity first becomes establishable,
+  // and must still stop before the third.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN"]),
+      identitySection(1, "custom", null, ["Vancouver, BC | 604-555-0134 | alex.chen@mail.test"]),
+      identitySection(2, "custom", null, ["TRAINING", "Advanced widget certification"]),
+    ]));
+    check("all-custom split header: the name comes from the first section", model.identity?.fullName?.value, "ALEX CHEN");
+    check("all-custom split header: the contact from the second is reached", model.identity?.email?.value, "alex.chen@mail.test");
+    check("all-custom split header: both header sections are claimed", identityTracedSectionIds(model.identity), ["idsec-0", "idsec-1"]);
+    check("all-custom split header: the run stops before the third", model.customSections.length, 1);
+    check("all-custom split header: which survives as a section", model.customSections[0]?.source.sourceSectionId, "idsec-2");
+    checkTrue("all-custom split header: the model still validates", model.validation.passed);
+  }
+
+  // No contact anywhere - identity must not be manufactured, and every
+  // section must survive exactly as before.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN"]),
+      identitySection(1, "custom", null, ["TRAINING", "Advanced widget certification"]),
+    ]));
+    check("all-custom with no contact: no identity is invented", model.identity, undefined);
+    check("all-custom with no contact: both sections are preserved", model.customSections.length, 2);
+  }
+
+  /* Load-bearing counterpart: the SAME early signal, but the document
+     does have a canonical section. The run must NOT stop early here, or
+     the ordinary header that puts a professional title after the
+     contact line would lose it. */
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "custom", null, ["ALEX CHEN", "Vancouver, BC | 604-555-0134 | alex.chen@mail.test"]),
+      identitySection(1, "custom", null, ["SENIOR PRODUCT MANAGER"]),
+      identitySection(2, "summary", "SUMMARY", ["SUMMARY", "Product leader with a decade of experience."]),
+    ]));
+    check("canonical present: the run does not stop at the first section", identityTracedSectionIds(model.identity), ["idsec-0", "idsec-1"]);
+    /* The title sits AFTER the contact line, and only the second block is
+       ever a headline candidate, so it is preserved as a contact line
+       rather than as the headline - what matters here is that the section
+       was reached at all and that its text kept its own provenance. */
+    check("canonical present: the later leading section still contributes its text", (model.identity?.otherContactLines ?? []).map((v) => v.value), ["SENIOR PRODUCT MANAGER"]);
+    check("canonical present: and that text is traced to the section it came from", (model.identity?.otherContactLines ?? []).map((v) => v.source.sourceSectionId), ["idsec-1"]);
+    check("canonical present: no leading section is emitted as custom content", model.customSections.length, 0);
+    check("canonical present: the canonical section is untouched", model.professionalSummary !== undefined, true);
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

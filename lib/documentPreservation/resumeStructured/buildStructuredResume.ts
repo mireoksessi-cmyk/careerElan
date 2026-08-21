@@ -221,10 +221,39 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
       actually took something from is skipped below, or its text would
       render twice - once as identity, once as its own custom section.
     */
+    /*
+      The run ends at the first section carrying a real canonical type -
+      which is fine as long as the document HAS one. A resume whose
+      headings none of the aliases recognise has no such section
+      anywhere, and then the run has nothing to stop it: it swallows the
+      whole document, and a genuine section - someone's education, their
+      work - is read as more of their contact details. Real evidence: a
+      resume written in another language, where no heading matched an
+      alias, put twenty-two blocks of degrees and schools inside
+      identity and lost the section they belonged to. Nothing was
+      dropped, but nothing was right either.
+
+      So when the document offers no canonical boundary to stop at, the
+      run stops as soon as it has what it came for - the same
+      hasIdentitySignal the gate below already requires, asked after
+      each section instead of once at the end. A header that carries its
+      own contact line ends the run immediately; a header that spreads
+      name and contact over two sections still gets both, because the
+      signal is not satisfied until the second. What it never does is
+      keep going past the point where identity is already established.
+
+      When a canonical section IS present that check is skipped
+      entirely and the run behaves exactly as before, which is what the
+      ordinary case needs: a name, a professional title and a contact
+      block in three separate leading sections, none of which carries
+      the signal until the last.
+    */
+    const hasCanonicalSection = document.sections.some((section) => section.normalizedType !== "custom");
     const leadingUnnamedSections = [];
     for (const section of document.sections) {
       if (section.normalizedType !== "custom") break;
       leadingUnnamedSections.push(section);
+      if (!hasCanonicalSection && hasIdentitySignal(leadingUnnamedSections.flatMap((collected) => collected.blocks))) break;
     }
     const identityCandidateBlocks = leadingUnnamedSections.flatMap((section) => section.blocks);
     if (leadingUnnamedSections.length > 0 && hasIdentitySignal(identityCandidateBlocks)) {
