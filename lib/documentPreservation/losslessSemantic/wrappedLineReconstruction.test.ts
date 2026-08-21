@@ -52,6 +52,7 @@ type BlockSpec = {
   blockType?: SemanticBlockType;
   fontSize?: number;
   order?: number;
+  page?: number;
 };
 
 function block(spec: BlockSpec, index: number): SemanticContentBlock {
@@ -62,7 +63,7 @@ function block(spec: BlockSpec, index: number): SemanticContentBlock {
     sourceElementIds: [`e${index}`],
     text: spec.text,
     rawText: spec.text,
-    pageIndex: 0,
+    pageIndex: spec.page ?? 0,
     sourceOrder: spec.order ?? index,
     bbox: { x, y, width: spec.width, height: LINE_HEIGHT },
     style: { fontSize: spec.fontSize ?? 10 },
@@ -283,6 +284,76 @@ function fullWidth(x: number): number {
     { text: "Advisor, battery materials", line: 0, y: 100 + LINE_ADVANCE * 3, width: 200 },
   ]);
   check("12. a paragraph-sized vertical gap blocks the merge", out.length, 2);
+}
+
+// =====================================================================
+// STREAM ADJACENCY - sourceOrder is not what "adjacent" means here.
+//
+// sourceOrder is the page-local, row-major position from BEFORE the page
+// was re-read column-major, and it is never rewritten afterwards. On a
+// two-column page the other column keeps counting up through it, so the
+// two halves of one wrapped line arrive two or three apart. What makes
+// them neighbours is that they are consecutive in the run being walked.
+// =====================================================================
+
+// 13. A wrapped line whose halves are numbered two apart, because a line
+//     from the opposite column was extracted between them.
+{
+  const out = run([
+    { text: "Delivered the automated factory", line: 0, width: fullWidth(LEFT), order: 14 },
+    { text: "solutions for battery plants", line: 1, width: 190, order: 16 },
+  ]);
+  check("13. a wrapped line still merges when sourceOrder skips", out.length, 1);
+  check("13. its text is rejoined in order", texts(out), [
+    "Delivered the automated factory solutions for battery plants",
+  ]);
+  check("13. both fragments stay traceable", out[0].sourceElementIds, ["e0", "e1"]);
+}
+
+// 14. Control: the identical pair numbered consecutively. Removing the
+//     old test must not have changed what it used to allow.
+{
+  const out = run([
+    { text: "Delivered the automated factory", line: 0, width: fullWidth(LEFT), order: 14 },
+    { text: "solutions for battery plants", line: 1, width: 190, order: 15 },
+  ]);
+  check("14. consecutive sourceOrder merges exactly as before", out.length, 1);
+  check("14. with the same text", texts(out), [
+    "Delivered the automated factory solutions for battery plants",
+  ]);
+}
+
+// 15. A sourceOrder gap licenses nothing on its own: every boundary that
+//     used to hold still holds when the numbering skips.
+{
+  const bullets = run([
+    { text: "\u2022 Owned the full P&L for the components division", line: 0, width: fullWidth(LEFT), blockType: "bullet", order: 14 },
+    { text: "\u2022 Grew revenue 40% year over year", line: 1, width: 220, blockType: "bullet", order: 16 },
+  ]);
+  check("15. a following bullet is still not a continuation", bullets.length, 2);
+
+  const heading = run([
+    { text: "PROFESSIONAL EXPERIENCE", line: 0, width: fullWidth(LEFT), blockType: "heading", order: 14 },
+    { text: "Fifteen years across automotive and energy storage", line: 1, width: 300, order: 16 },
+  ]);
+  check("15. a heading still never continues into the line below", heading.length, 2);
+
+  const newUnit = run([
+    { text: "Delivered the automated factory", line: 0, width: fullWidth(LEFT), order: 14 },
+    { text: "CERTIFICATIONS", line: 1, width: 180, order: 16 },
+  ]);
+  check("15. an all-caps new unit is still refused", newUnit.length, 2);
+}
+
+// 16. Page boundary. The guard above it is what separates pages, and it
+//     stands on its own now that numbering no longer does - which matters
+//     because sourceOrder restarts on every page.
+{
+  const out = run([
+    { text: "Delivered the automated factory", line: 0, width: fullWidth(LEFT), order: 14, page: 0 },
+    { text: "solutions for battery plants", line: 1, width: 190, order: 15, page: 1 },
+  ]);
+  check("16. a continuation never crosses a page boundary", out.length, 2);
 }
 
 console.log(`\n--- ${pass} passed, ${fail} failed ---`);

@@ -206,7 +206,21 @@ function isContinuationOf(
   const nextBox = next.bbox;
   if (!tailBox || !nextBox) return false;
   if (tail.pageIndex !== next.pageIndex) return false;
-  if (next.sourceOrder !== tail.sourceOrder + 1) return false;
+  /*
+    Adjacency is the caller's, not sourceOrder's. reconstructBlockRun walks one
+    section's blocks in order and re-points `tail` at every step, so these two
+    are already neighbours in that array - and that array is a contiguous slice
+    of the stream preSectionRegionOrdering produced, so nothing from another
+    section, column or region can sit between them.
+
+    sourceOrder answers a different question: it is the pre-ordering, page-local
+    row-major position, and it is deliberately never rewritten when a page is
+    re-read column-major. On a two-column page the opposite column still counts
+    up through it, so the two halves of one wrapped line land two or three apart
+    and a "+1" test rejects them - not because anything separates them, but
+    because a line from the other column happens to number in between. That test
+    is asking about the layout the reader never sees.
+  */
   if (next.rawText.length === 0 || tail.rawText.length === 0) return false;
 
   // --- vetoes on the previous line ---------------------------------
