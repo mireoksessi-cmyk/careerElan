@@ -1368,6 +1368,111 @@ async function main() {
     checkTrue("C3D ordinary detail: its date is still structured", (entries[0].dateRangeText?.value ?? "").includes("1986"));
   }
 
+
+  /* ============================================================
+     School after the date. The shared header window closes a
+     date-last header at the date, so in the credential / date /
+     school order the school lands in the body and the entry ends up
+     with no institution at all. It may be taken back as header
+     material only when everything that early exit protects has been
+     ruled out first - which is what the negatives below pin.
+     ============================================================ */
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-trail", [
+      block("Bachelor of Widget Design (Honours)"),
+      block("01/2014"),
+      block("Thornbury Ridge - Riverton, ON"),
+      block("Capstone project recognized for excellence", "bullet"),
+    ]);
+    check("trailing institution: still exactly one entry", entries.length, 1);
+    check("trailing institution: the credential is unchanged", entries[0].credential?.value, "Bachelor of Widget Design (Honours)");
+    check("trailing institution: the date is unchanged", entries[0].dateRangeText?.value, "01/2014");
+    check("trailing institution: the school after the date is bound", entries[0].institution?.value, "Thornbury Ridge");
+    check("trailing institution: its city comes with it", entries[0].location?.value, "Riverton, ON");
+    check("trailing institution: it traces the block it came from", entries[0].institution?.source.sourceBlockIds, ["block-p0-b2"]);
+    check("trailing institution: it is no longer also a detail", detailValues(entries[0]).some((v) => v.includes("Thornbury Ridge")), false);
+    check("trailing institution: the genuine detail survives", detailValues(entries[0]), ["Capstone project recognized for excellence"]);
+    check("trailing institution: rawHeaderText keeps source order", entries[0].rawHeaderText, "Bachelor of Widget Design (Honours)\n01/2014\nThornbury Ridge - Riverton, ON");
+    checkTrue("trailing institution: the entry is no longer uncertain", !entries[0].isUncertain);
+  }
+
+  // A date after the date is the NEXT entry's own header, never this
+  // entry's school.
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-nextdate", [
+      block("Bachelor of Widget Design"),
+      block("01/2014"),
+      block("2009 - 2013"),
+    ]);
+    check("trailing institution negative: a date line is never adopted as a school", entries[0].institution, undefined);
+    check("trailing institution negative: and no location is invented from it", entries[0].location, undefined);
+  }
+
+  // A degree line after the date belongs to the next entry.
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-nextcred", [
+      block("Riverton Polytechnic Institute"),
+      block("01/2014"),
+      block("Bachelor of Arts (Honours)"),
+    ]);
+    check("trailing institution negative: a degree line is never adopted as a school", entries[0].institution?.value, "Riverton Polytechnic Institute");
+    check("trailing institution negative: the degree line does not become a location", entries[0].location, undefined);
+  }
+
+  // Program labels are details, not schools.
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-label", [
+      block("Bachelor of Widget Design"),
+      block("01/2014"),
+      block("Double Major:"),
+    ]);
+    check("trailing institution negative: a program label is never adopted as a school", entries[0].institution, undefined);
+  }
+
+  // GPA and honours lines are details too.
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-honours", [
+      block("Bachelor of Widget Design"),
+      block("01/2014"),
+      block("Dean's List, Riverton, ON"),
+    ]);
+    check("trailing institution negative: an honours line is never adopted as a school", entries[0].institution, undefined);
+  }
+
+  /* Load-bearing: ordinary prose with commas. The Education splitter
+     is conservative enough to refuse this one, and the sentence-ending
+     test refuses it regardless - neither may be relied on alone, so
+     both are pinned here. */
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-prose", [
+      block("Bachelor of Widget Design"),
+      block("01/2014"),
+      block("Coursework in finite element analysis, heat transfer, and manufacturing processes."),
+    ]);
+    check("trailing institution negative: sentence prose is never adopted as a school", entries[0].institution, undefined);
+    check("trailing institution negative: no location is invented out of its commas", entries[0].location, undefined);
+    check("trailing institution negative: it stays an ordinary detail", detailValues(entries[0]), ["Coursework in finite element analysis, heat transfer, and manufacturing processes."]);
+  }
+
+  // An entry that already found its school never reinterprets a later line.
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-bound", [
+      block("Bachelor of Widget Design"),
+      block("Cobalt University - Riverton, ON"),
+      block("01/2014"),
+      block("Thornbury Institute - Denton, TX"),
+    ]);
+    check("trailing institution negative: an already-bound school is never overwritten", entries[0].institution?.value, "Cobalt University");
+    check("trailing institution negative: and its own location is kept", entries[0].location?.value, "Riverton, ON");
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

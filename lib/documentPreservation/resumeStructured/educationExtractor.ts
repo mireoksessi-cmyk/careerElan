@@ -385,6 +385,56 @@ function extractGpa(sectionId: string, blocks: SemanticContentBlock[]): Structur
   return undefined;
 }
 
+const SENTENCE_TERMINAL_RE = /[.!?]$/;
+
+/*
+  An institution line that sits AFTER its entry's date.
+
+  The shared header window deliberately closes a date-last header at the
+  date - a line following it is far more often the next entry's own
+  header, a GPA or honours line, a program label, or plain description
+  prose than it is more header material, and that early exit is what
+  keeps all four out. It is also shared with the credential, award and
+  publication extractors, so it is not the place to make an Education-
+  shaped exception.
+
+  But one real Education order puts the school last - credential, then
+  the date, then the school and its city - and there the institution
+  falls outside the window and lands in details[], leaving the entry
+  with no institution at all. This reads only the block immediately
+  after the header, only when the entry ended up with no institution,
+  and only when every one of the shapes that early exit protects has
+  been ruled out first: a date of its own, a degree word, a program
+  label, GPA or honours, or a line that closes like a sentence. Even
+  then it must show positive evidence - the Education splitter finding
+  a trailing place name, or a recognised institution word - because
+  that splitter alone can read comma-heavy prose as an organization
+  and a location, so it is never sufficient by itself.
+
+  Adjacency is doing real work here: only the first body block is ever
+  considered, never a search through the details for something that
+  looks like a school.
+*/
+function adoptTrailingInstitutionLine(
+  block: SemanticContentBlock | undefined
+): { block: SemanticContentBlock; institution: string; location?: string; detail?: string } | undefined {
+  if (block === undefined || block.blockType === "bullet") return undefined;
+  const text = block.text.trim();
+  if (text.length === 0) return undefined;
+  if (!looksLikeHeaderLine(block)) return undefined;
+  if (hasDateEvidence(text)) return undefined;
+  if (DEGREE_KEYWORD_RE.test(text)) return undefined;
+  if (detectProgramLabel(text)) return undefined;
+  if (GPA_RE.test(text) || HONORS_RE.test(text)) return undefined;
+  if (SENTENCE_TERMINAL_RE.test(text)) return undefined;
+
+  const split = splitInstitutionLocationComposite(block.rawText);
+  const hasLocationEvidence = split.location !== undefined && split.location.length > 0;
+  if (!hasLocationEvidence && !INSTITUTION_KEYWORD_RE.test(text)) return undefined;
+  if (split.institution.length === 0) return undefined;
+  return { block, institution: split.institution, location: split.location, detail: split.detail };
+}
+
 export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticContentBlock[]): EducationEntry[] {
   /*
     Phase 2B-final - a marker-only block carries zero semantic content,
@@ -1070,10 +1120,32 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       }
     }
 
-    const gpa = extractGpa(sectionId, [...headerBlocks, ...bodyRunBlocks]);
+    /* Only when the header itself yielded no institution - an entry that
+       already found one is never reinterpreted. */
+    const adoptedInstitutionLine = institutionsAcc.length === 0 ? adoptTrailingInstitutionLine(bodyRunBlocks[0]) : undefined;
+    if (adoptedInstitutionLine !== undefined) {
+      institutionsAcc.push(makeValue(adoptedInstitutionLine.institution, sectionId, adoptedInstitutionLine.block, 0.7));
+      if (location === undefined && adoptedInstitutionLine.location !== undefined) {
+        location = makeValue(adoptedInstitutionLine.location, sectionId, adoptedInstitutionLine.block, 0.65);
+      }
+      /* A middle campus segment has no field of its own - same details
+         channel the composite splitter's other callers already use. */
+      if (adoptedInstitutionLine.detail !== undefined && adoptedInstitutionLine.detail.length > 0) {
+        extraDetails.push(makeValue(adoptedInstitutionLine.detail, sectionId, adoptedInstitutionLine.block, 0.6));
+      }
+      reasonCodes.push("trailing-institution-line-adopted-into-header");
+    }
+    /* The adopted block is header material now, so it is handed to the
+       header side BEFORE details are built rather than being removed
+       from them afterwards. Both lists together still cover exactly the
+       same blocks as before. */
+    const headerOwnedBlocks = adoptedInstitutionLine !== undefined ? [...headerBlocks, adoptedInstitutionLine.block] : headerBlocks;
+    const detailOwnedBlocks = adoptedInstitutionLine !== undefined ? bodyRunBlocks.slice(1) : bodyRunBlocks;
+
+    const gpa = extractGpa(sectionId, [...headerOwnedBlocks, ...detailOwnedBlocks]);
     const honors: StructuredTextValue[] = [];
     const details: StructuredTextValue[] = [...extraDetails];
-    for (const block of bodyRunBlocks) {
+    for (const block of detailOwnedBlocks) {
       if (block.rawText.length === 0) continue;
       /* Phase 2B Bug A - the emptiness guard above tests rawText, which
          still carries the marker, so a marker-only block passes it and
@@ -1087,7 +1159,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       }
     }
 
-    const allBlocks = [...headerBlocks, ...bodyRunBlocks];
+    const allBlocks = [...headerOwnedBlocks, ...detailOwnedBlocks];
     const institution = institutionsAcc[0];
     const credential = credentialsAcc[0];
     const fieldOfStudy = fieldsOfStudyAcc[0];
@@ -1112,7 +1184,7 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
       gpa,
       honors,
       details,
-      rawHeaderText: headerBlocks.map((b) => b.rawText).join("\n"),
+      rawHeaderText: headerOwnedBlocks.map((b) => b.rawText).join("\n"),
       source: mergeTraces(traceFromBlocks(sectionId, allBlocks)),
       isUncertain,
       reasonCodes,
