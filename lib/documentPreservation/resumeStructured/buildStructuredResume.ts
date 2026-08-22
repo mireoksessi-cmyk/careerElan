@@ -27,6 +27,7 @@ import { extractCredentialEntries } from "./credentialExtractor";
 import { extractProjectEntries } from "./projectExtractor";
 import { extractAwardEntries } from "./awardExtractor";
 import { extractPublicationEntries } from "./publicationExtractor";
+import { extractLanguageEntries } from "./languageExtractor";
 import { adaptCustomSection } from "./customSectionAdapter";
 import { normalizeBulletPresentation } from "./bulletPresentation";
 import { splitEmbeddedCanonicalSubsections } from "./embeddedSubsectionSplitter";
@@ -460,6 +461,20 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
         if (isEmpty(entries)) { model.customSections.push(adaptCustomSection(section)); break; }
         mergeSectionHeadingIntoFirst(section, entries);
         model.publications.push(...entries);
+        break;
+      }
+      case "languages": {
+        /*
+          Additive, unlike every typed case above: the section still
+          becomes a custom section exactly as it did before, and the
+          typed entries are extra semantic data alongside it. That is
+          what keeps the custom section the owner of block coverage and
+          of everything downstream that already renders this section, so
+          neither the validator nor any consumer has to change. An
+          empty extraction is simply the previous behavior.
+        */
+        model.languages.push(...extractLanguageEntries(section.id, body));
+        model.customSections.push(adaptCustomSection(section));
         break;
       }
       default:

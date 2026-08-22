@@ -322,6 +322,95 @@ async function main() {
     check("canonical present: the canonical section is untouched", model.professionalSummary !== undefined, true);
   }
 
+
+  /* ============================================================
+     L2 - additive inline Languages extraction. The typed entries are
+     EXTRA data: every assertion below pairs a typed expectation with
+     the matching proof that the original custom section is still
+     there, unchanged, because that section remains what the validator
+     and every downstream consumer actually reads.
+     ============================================================ */
+
+  // Inline pairs: typed entries appear AND the section is still custom.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "languages", "Languages", ["Alpha (one), Beta (two)"]),
+    ]));
+    check("L2 inline: typed languages are populated", model.languages.map((l) => [l.name, l.proficiency]), [["Alpha", "one"], ["Beta", "two"]]);
+    check("L2 inline: the same section is STILL a custom section", model.customSections.map((c) => c.originalHeading), ["Languages"]);
+    check("L2 inline: the custom section still carries the original text", model.customSections[0]?.content.map((c) => c.text), ["Alpha (one), Beta (two)"]);
+    check("L2 inline: the custom section still traces the source section", model.customSections[0]?.source.sourceSectionId, "idsec-0");
+    check("L2 inline: typed entries trace back to the same section", model.languages.map((l) => l.source.sourceSectionId), ["idsec-0", "idsec-0"]);
+    check("L2 inline: two entries from one block share that block", model.languages.map((l) => l.source.sourceBlockIds), [["idb-0"], ["idb-0"]]);
+    check("L2 inline: nothing is left unrepresented", model.validation.missingBlockIds, []);
+    check("L2 inline: the custom section remains the sole coverage owner, so no duplicates", model.validation.duplicateBlockIds, []);
+    checkTrue("L2 inline: the model still validates", model.validation.passed);
+  }
+
+  // Plain list across blocks - proficiency omitted, peers present.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "languages", "Languages", ["Alpha", "Beta", "Gamma", "Delta"]),
+    ]));
+    check("L2 plain list: one typed entry per block, in block order", model.languages.map((l) => l.name), ["Alpha", "Beta", "Gamma", "Delta"]);
+    checkTrue("L2 plain list: no proficiency is invented", model.languages.every((l) => !("proficiency" in l)));
+    check("L2 plain list: the custom section survives intact", model.customSections[0]?.content.map((c) => c.text), ["Alpha", "Beta", "Gamma", "Delta"]);
+    checkTrue("L2 plain list: the model still validates", model.validation.passed);
+  }
+
+  // A section the grammar refuses: typed stays empty, custom unchanged.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "languages", "Languages", ["Alpha (one, Beta (two)"]),
+    ]));
+    check("L2 declined: no typed entries are produced", model.languages, []);
+    check("L2 declined: the custom section is exactly what it always was", model.customSections.map((c) => c.originalHeading), ["Languages"]);
+    check("L2 declined: with its text untouched", model.customSections[0]?.content.map((c) => c.text), ["Alpha (one, Beta (two)"]);
+    checkTrue("L2 declined: the model still validates", model.validation.passed);
+  }
+
+  // A lone bare item has no peer evidence - declined, section preserved.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "languages", "Languages", ["Alpha beta gamma delta"]),
+    ]));
+    check("L2 lone bare: declined for want of peers", model.languages, []);
+    check("L2 lone bare: the text still survives as custom content", model.customSections[0]?.content.map((c) => c.text), ["Alpha beta gamma delta"]);
+  }
+
+  // Section gating: the SAME text under a different classification is
+  // never handed to the language grammar.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "skills", "SKILLS", ["Alpha (one), Beta (two)"]),
+      identitySection(1, "custom", "OTHER", ["Gamma (three), Delta (four)"]),
+    ]));
+    check("L2 gating: a skills section produces no typed languages", model.languages, []);
+    check("L2 gating: an unclassified section produces no typed languages either", model.languages.length, 0);
+    checkTrue("L2 gating: skills still extracts as skills", model.skillGroups.length > 0);
+    checkTrue("L2 gating: the model still validates", model.validation.passed);
+  }
+
+  // Neighbouring typed sections are untouched by the new branch.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "summary", "SUMMARY", ["A short professional summary."]),
+      identitySection(1, "languages", "Languages", ["Alpha (one), Beta (two)"]),
+      identitySection(2, "education", "EDUCATION", ["Bachelor of Science, Example University, 2015 - 2019"]),
+    ]));
+    check("L2 neighbours: languages are typed", model.languages.map((l) => l.name), ["Alpha", "Beta"]);
+    checkTrue("L2 neighbours: the summary is still extracted", model.professionalSummary !== undefined);
+    checkTrue("L2 neighbours: education is still extracted", model.education.length > 0);
+    check("L2 neighbours: only the Languages section became custom", model.customSections.map((c) => c.originalHeading), ["Languages"]);
+    checkTrue("L2 neighbours: the model still validates", model.validation.passed);
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }
