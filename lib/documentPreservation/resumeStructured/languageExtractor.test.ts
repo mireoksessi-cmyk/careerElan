@@ -170,6 +170,163 @@ function main() {
     check("a section of nothing but a heading yields no entries", extractLanguageEntries(SECTION_ID, headingOnly), []);
   }
 
+
+  /* ============================================================
+     L3.0 - a Languages section laid out as a grid: one column per
+     language, the lower row repeating a single shared value. Every
+     case below is geometry plus abstract tokens; nothing here knows
+     what a language or a proficiency is, and the same code path serves
+     two columns and ten.
+     ============================================================ */
+
+  /* Regular layout: disjoint columns, vertically separated rows. The
+     numbers are the test's own, not measured from any document. */
+  const gridBlocks = (rows: string[][]): SemanticContentBlock[] => {
+    const out: SemanticContentBlock[] = [];
+    let n = 0;
+    rows.forEach((row, r) =>
+      row.forEach((text, c) => {
+        const i = n++;
+        out.push({
+          id: `grid-b${i}`,
+          sourceElementIds: [`grid-e${i}`],
+          text,
+          rawText: text,
+          pageIndex: 1,
+          sourceOrder: i,
+          blockType: "paragraph",
+          bbox: { x: 50 + c * 100, y: 100 + r * 20, width: 60, height: 10 },
+        });
+      })
+    );
+    return out;
+  };
+
+  /* Explicit geometry, for the cases whose whole point is an irregular
+     shape. */
+  const cellBlocks = (specs: { text: string; x: number; y: number; w: number; h: number; page?: number }[]): SemanticContentBlock[] =>
+    specs.map((spec, i) => ({
+      id: `cell-b${i}`,
+      sourceElementIds: [`cell-e${i}`],
+      text: spec.text,
+      rawText: spec.text,
+      pageIndex: spec.page ?? 1,
+      sourceOrder: i,
+      blockType: "paragraph",
+      bbox: { x: spec.x, y: spec.y, width: spec.w, height: spec.h },
+    }));
+
+  const gridShape = (rows: string[][]) => extractLanguageEntries(SECTION_ID, gridBlocks(rows)).map((e) => [e.name, e.proficiency]);
+
+  // --- the same algorithm across lane counts ---
+  check("L3 N=2: two columns pair with the shared lower value", gridShape([["Alpha", "Beta"], ["Xi", "Xi"]]), [
+    ["Alpha", "Xi"],
+    ["Beta", "Xi"],
+  ]);
+  check("L3 N=3: three columns, identical code path", gridShape([["Alpha", "Beta", "Gamma"], ["Xi", "Xi", "Xi"]]), [
+    ["Alpha", "Xi"],
+    ["Beta", "Xi"],
+    ["Gamma", "Xi"],
+  ]);
+  check("L3 N=4: four columns, identical code path", gridShape([["Alpha", "Beta", "Gamma", "Delta"], ["Xi", "Xi", "Xi", "Xi"]]), [
+    ["Alpha", "Xi"],
+    ["Beta", "Xi"],
+    ["Gamma", "Xi"],
+    ["Delta", "Xi"],
+  ]);
+  check("L3 N=6: nothing is capped", gridShape([["A1", "A2", "A3", "A4", "A5", "A6"], ["Xi", "Xi", "Xi", "Xi", "Xi", "Xi"]]).length, 6);
+
+  // --- ordering and provenance ---
+  check("L3 order: entries follow columns left to right", gridShape([["Delta", "Charlie", "Bravo"], ["Xi", "Xi", "Xi"]]).map((e) => e[0]), ["Delta", "Charlie", "Bravo"]);
+  {
+    const entries = extractLanguageEntries(SECTION_ID, gridBlocks([["Alpha", "Beta"], ["Xi", "Xi"]]));
+    check("L3 trace: each entry cites its own two cells", entries.map((e) => e.source.sourceBlockIds), [["grid-b0", "grid-b2"], ["grid-b1", "grid-b3"]]);
+    check("L3 trace: element ids come from both cells too", entries.map((e) => e.source.sourceElementIds), [["grid-e0", "grid-e2"], ["grid-e1", "grid-e3"]]);
+    check("L3 trace: the section id is carried", entries.map((e) => e.source.sourceSectionId), [SECTION_ID, SECTION_ID]);
+  }
+
+  // --- the lower row must be one repeated value ---
+  check("L3 reject: lower values all differ", gridShape([["Alpha", "Beta", "Gamma"], ["Xi", "Psi", "Chi"]]), []);
+  check("L3 reject: lower row repeats only partly", gridShape([["Alpha", "Beta", "Gamma"], ["Xi", "Xi", "Psi"]]), []);
+
+  // --- degenerate content shapes ---
+  check("L3 reject: upper row repeats a value", gridShape([["Alpha", "Alpha", "Beta"], ["Xi", "Xi", "Xi"]]), []);
+  check("L3 reject: the repeated lower value also appears above", gridShape([["Alpha", "Beta", "Xi"], ["Xi", "Xi", "Xi"]]), []);
+  check("L3 reject: an empty cell", gridShape([["Alpha", "  "], ["Xi", "Xi"]]), []);
+
+  // --- a two-column grid of independent items is refused, not guessed ---
+  check("L3 reject: 2x2 with four distinct values", gridShape([["Alpha", "Beta"], ["Gamma", "Delta"]]), []);
+
+  // --- shape gates ---
+  check("L3 reject: three rows", gridShape([["Alpha", "Beta"], ["Xi", "Xi"], ["Psi", "Psi"]]), []);
+  check(
+    "L3 reject: rows of unequal width",
+    extractLanguageEntries(SECTION_ID, cellBlocks([
+      { text: "Alpha", x: 50, y: 100, w: 60, h: 10 },
+      { text: "Beta", x: 150, y: 100, w: 60, h: 10 },
+      { text: "Gamma", x: 250, y: 100, w: 60, h: 10 },
+      { text: "Xi", x: 50, y: 120, w: 60, h: 10 },
+      { text: "Xi", x: 150, y: 120, w: 60, h: 10 },
+    ])),
+    []
+  );
+  check(
+    "L3 reject: one upper cell straddles two lower cells",
+    extractLanguageEntries(SECTION_ID, cellBlocks([
+      { text: "Alpha", x: 50, y: 100, w: 200, h: 10 },
+      { text: "Beta", x: 300, y: 100, w: 60, h: 10 },
+      { text: "Xi", x: 50, y: 120, w: 60, h: 10 },
+      { text: "Xi", x: 200, y: 120, w: 60, h: 10 },
+    ])),
+    []
+  );
+  check(
+    "L3 passthrough: cells spread across pages are not a grid, so the list grammar keeps them",
+    extractLanguageEntries(SECTION_ID, cellBlocks([
+      { text: "Alpha", x: 50, y: 100, w: 60, h: 10 },
+      { text: "Beta", x: 150, y: 100, w: 60, h: 10 },
+      { text: "Xi", x: 50, y: 120, w: 60, h: 10, page: 2 },
+      { text: "Xi", x: 150, y: 120, w: 60, h: 10, page: 2 },
+    ])).length,
+    4
+  );
+
+  // --- equality is trim-only ---
+  check("L3 equality: surrounding whitespace does not stop the match", gridShape([["Alpha", "Beta"], ["Xi ", " Xi"]]), [
+    ["Alpha", "Xi"],
+    ["Beta", "Xi"],
+  ]);
+  check("L3 equality: case is not folded away", gridShape([["Alpha", "Beta"], ["Xi", "xi"]]), []);
+
+  // --- a grid never falls through to the list grammar ---
+  checkTrue(
+    "L3 fail-closed: a refused grid yields nothing rather than four bare names",
+    extractLanguageEntries(SECTION_ID, gridBlocks([["Alpha", "Beta"], ["Gamma", "Delta"]])).length === 0
+  );
+
+  // --- non-grid input still belongs to the list grammar ---
+  check(
+    "L3 passthrough: a single column of peers is still a plain list",
+    extractLanguageEntries(SECTION_ID, cellBlocks([
+      { text: "Alpha", x: 50, y: 100, w: 60, h: 10 },
+      { text: "Beta", x: 50, y: 120, w: 60, h: 10 },
+      { text: "Gamma", x: 50, y: 140, w: 60, h: 10 },
+      { text: "Delta", x: 50, y: 160, w: 60, h: 10 },
+    ])).map((e) => [e.name, e.proficiency]),
+    [["Alpha", undefined], ["Beta", undefined], ["Gamma", undefined], ["Delta", undefined]]
+  );
+  check(
+    "L3 passthrough: an inline pair line is still parsed as text",
+    extractLanguageEntries(SECTION_ID, cellBlocks([{ text: "Alpha (one), Beta (two)", x: 50, y: 100, w: 200, h: 10 }])).map((e) => [e.name, e.proficiency]),
+    [["Alpha", "one"], ["Beta", "two"]]
+  );
+  check("L3 passthrough: grid-shaped text without geometry stays with the list grammar", shape(["Alpha", "Beta", "Xi", "Xi"]), [
+    ["Alpha", undefined],
+    ["Beta", undefined],
+    ["Xi", undefined],
+    ["Xi", undefined],
+  ]);
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }
