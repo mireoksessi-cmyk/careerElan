@@ -411,6 +411,70 @@ async function main() {
     checkTrue("L2 neighbours: the model still validates", model.validation.passed);
   }
 
+
+  /* ============================================================
+     A Skills section the extractor cannot turn into skills. It still
+     hands back a group - one carrying the blocks' trace but no skill -
+     and that used to count as a successful extraction, so the section
+     was owned by a slot that renders nothing and its text reached no
+     output at all. These cases pin the fallback, not a new reading of
+     the text: the extractor's own verdict is unchanged throughout.
+     ============================================================ */
+
+  // Nothing usable came out, so the section goes where every other
+  // failed typed extraction goes - and its text survives there.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "skills", "SKILLS", ["Alpha, Beta, Gamma, Delta, Epsilon."]),
+    ]));
+    check("skills with no usable items: no typed skill groups are kept", model.skillGroups, []);
+    check("skills with no usable items: the section survives as custom", model.customSections.map((c) => c.originalHeading), ["SKILLS"]);
+    check("skills with no usable items: its text survives verbatim", model.customSections[0]?.content.map((c) => c.text), ["Alpha, Beta, Gamma, Delta, Epsilon."]);
+    check("skills with no usable items: traced to the section it came from", model.customSections[0]?.source.sourceSectionId, "idsec-0");
+    check("skills with no usable items: nothing is left unrepresented", model.validation.missingBlockIds, []);
+    check("skills with no usable items: the section is claimed exactly once", model.validation.duplicateBlockIds, []);
+    check("skills with no usable items: no skill is invented", model.validation.inventedFactValues, []);
+    checkTrue("skills with no usable items: the model still validates", model.validation.passed);
+  }
+
+  // The same shape a Skills section normally has still types as before.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "skills", "SKILLS", ["Alpha, Beta, Gamma"]),
+    ]));
+    check("ordinary skills list: still typed", model.skillGroups.flatMap((g) => g.skills), ["Alpha", "Beta", "Gamma"]);
+    check("ordinary skills list: does not also become a custom section", model.customSections.length, 0);
+    checkTrue("ordinary skills list: the model still validates", model.validation.passed);
+  }
+
+  // One unusable block alongside a real group must NOT send the whole
+  // section to the fallback - the section did produce skills.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "skills", "SKILLS", ["Tooling: Alpha, Beta", "A trailing line the extractor reads as prose."]),
+    ]));
+    checkTrue("mixed skills section: real skills are still typed", model.skillGroups.some((g) => g.skills.length > 0));
+    check("mixed skills section: the labelled group survives", model.skillGroups.find((g) => g.label === "Tooling")?.skills, ["Alpha", "Beta"]);
+    check("mixed skills section: it does not fall back to custom", model.customSections.length, 0);
+    checkTrue("mixed skills section: the model still validates", model.validation.passed);
+  }
+
+  // A section with a heading and no body at all keeps its previous
+  // behaviour - the fallback already covered this and still does.
+  identityBlockCounter = 0;
+  {
+    const model = buildStructuredResume(identityDocument([
+      identitySection(0, "skills", "SKILLS", []),
+      identitySection(1, "summary", "SUMMARY", ["A short professional summary."]),
+    ]));
+    check("empty skills section: still falls back to custom", model.customSections.map((c) => c.originalHeading), ["SKILLS"]);
+    check("empty skills section: no typed groups", model.skillGroups, []);
+    checkTrue("empty skills section: the model still validates", model.validation.passed);
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

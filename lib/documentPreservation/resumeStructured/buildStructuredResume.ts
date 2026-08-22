@@ -343,7 +343,21 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
         break;
       case "skills": {
         const groups = extractSkillGroups(section.id, body);
-        if (isEmpty(groups)) { model.customSections.push(adaptCustomSection(section)); break; }
+        /*
+          A section can come back with groups that hold no skill at all -
+          the extractor still emits one, carrying the blocks' trace, when
+          it reads the body as prose rather than a list. Those groups
+          satisfy block coverage but render nothing, so treating them as
+          a successful extraction used to leave the section owned by a
+          slot that shows it nowhere. Judging success by whether any
+          skill actually came out, rather than by whether a group object
+          exists, hands those sections to the same custom fallback every
+          other typed case already uses, and the groups are dropped with
+          them so no block is claimed twice. An empty `groups` satisfies
+          this too, so the previous condition is subsumed rather than
+          replaced.
+        */
+        if (groups.every((group) => group.skills.length === 0)) { model.customSections.push(adaptCustomSection(section)); break; }
         mergeSectionHeadingIntoFirst(section, groups);
         model.skillGroups.push(...groups);
         break;
