@@ -356,5 +356,137 @@ function fullWidth(x: number): number {
   check("16. a continuation never crosses a page boundary", out.length, 2);
 }
 
+
+// =====================================================================
+// NARROW RUNS - a sidebar, a rail, the narrow half of a two-column page.
+// Too narrow to carry the right-edge argument, so refused by default.
+// One thing overrides that: the line above visibly did not finish. Both
+// forms of that evidence are orthographic, so neither asks what language
+// the document is in.
+// =====================================================================
+
+const NARROW_LEFT = 380;
+
+// 17. An open date range: a year, a joiner, then the line stops, and the
+//     line below is nothing but the closing year. The joiner is never
+//     read, so a word joins as well as a dash - shown here in two
+//     languages, neither of which the layer knows.
+{
+  const dashJoined = run([
+    { text: "Thornbury Group \u2014 2015 -", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "2019", x: NARROW_LEFT, line: 1, width: 24 },
+  ]);
+  check("17. an open date range closes across the wrap", dashJoined.length, 1);
+  check("17. and keeps both halves in order", texts(dashJoined), ["Thornbury Group \u2014 2015 - 2019"]);
+
+  const wordJoined = run([
+    { text: "Thornbury Group \u2014 2015 au", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "2019", x: NARROW_LEFT, line: 1, width: 24 },
+  ]);
+  check("17. a word joiner reads exactly the same as a dash", wordJoined.length, 1);
+  check("17. with both halves preserved", texts(wordJoined), ["Thornbury Group \u2014 2015 au 2019"]);
+  check("17. both fragments stay traceable", wordJoined[0].sourceElementIds, ["e0", "e1"]);
+}
+
+// 18. Load-bearing negative, and the pair this rule exists to tell apart:
+//     a finished line followed by one that merely CONTAINS an open date.
+//     The evidence is about the tail, never the line below it.
+{
+  const out = run([
+    { text: "Bachelor of Widget Design, Finance", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "Thornbury Group \u2014 2015 au", x: NARROW_LEFT, line: 1, width: fullWidth(NARROW_LEFT) },
+  ]);
+  check("18. a finished line never absorbs the entry below it", out.length, 2);
+  check("18. neither line is altered", texts(out), [
+    "Bachelor of Widget Design, Finance",
+    "Thornbury Group \u2014 2015 au",
+  ]);
+}
+
+// 19. A bare year below a finished line is not evidence of anything. The
+//     tail has to be the thing that is open.
+{
+  const out = run([
+    { text: "Top Widget Award | Regional Division", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "2022", x: NARROW_LEFT, line: 1, width: 24 },
+  ]);
+  check("19. a bare year alone does not join a finished line", out.length, 2);
+}
+
+// 20. The width floor still does the work it always did: a narrow pair
+//     with nothing open about it is refused exactly as before.
+{
+  const out = run([
+    { text: "Widget design systems", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "User research", x: NARROW_LEFT, line: 1, width: 90 },
+  ]);
+  check("20. a narrow pair without open evidence is still refused", out.length, 2);
+  check("20. and both lines survive untouched", texts(out), ["Widget design systems", "User research"]);
+}
+
+// =====================================================================
+// ALL-CAPS NEXT LINE - the heading test cannot tell a section heading
+// from an acronym, so it is allowed to be overruled by the same evidence,
+// and by nothing else.
+// =====================================================================
+
+// 21. A credential broken across the wrap, its issuing body carrying onto
+//     the second line. The tail ends on a dangling dash, so the all-caps
+//     reading is already excluded.
+{
+  const out = run([
+    { text: "Chartered Widget Practitioner -", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "CWP, 2011", x: NARROW_LEFT, line: 1, width: 45 },
+  ]);
+  check("21. an unfinished tail admits an acronym continuation", out.length, 1);
+  check("21. joined with a single space", texts(out), ["Chartered Widget Practitioner - CWP, 2011"]);
+}
+
+// 22. The same all-caps shapes below a FINISHED line stay separate. These
+//     are wide runs, so the width floor is not what refuses them - the
+//     all-caps test is, and it still holds.
+{
+  const registry = run([
+    { text: "College of Widgets Registry", line: 0, width: fullWidth(LEFT) },
+    { text: "WD-884213", line: 1, width: 120 },
+  ]);
+  check("22. a licence code below a finished line stays separate", registry.length, 2);
+
+  const located = run([
+    { text: "Brookfield, SK", line: 0, width: fullWidth(LEFT) },
+    { text: "PARA-55231", line: 1, width: 120 },
+  ]);
+  check("22. and so does one below a location line", located.length, 2);
+
+  const heading = run([
+    { text: "Delivered the automated factory", line: 0, width: fullWidth(LEFT) },
+    { text: "CERTIFICATIONS", line: 1, width: 180 },
+  ]);
+  check("22. a real section heading is still never absorbed", heading.length, 2);
+}
+
+// 23. The absolute new-unit tests are not overridable: an unfinished tail
+//     buys an acronym the benefit of the doubt, never a bullet, a
+//     numbered heading or a complete date range.
+{
+  const bullet = run([
+    { text: "Chartered Widget Practitioner -", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "\u2022 Renewed annually", x: NARROW_LEFT, line: 1, width: 90, blockType: "bullet" },
+  ]);
+  check("23. an unfinished tail never absorbs a bullet", bullet.length, 2);
+
+  const numbered = run([
+    { text: "Chartered Widget Practitioner -", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "2) Renewed annually", x: NARROW_LEFT, line: 1, width: 90 },
+  ]);
+  check("23. nor a numbered heading", numbered.length, 2);
+
+  const dated = run([
+    { text: "Chartered Widget Practitioner -", x: NARROW_LEFT, line: 0, width: fullWidth(NARROW_LEFT) },
+    { text: "2019 - 2021", x: NARROW_LEFT, line: 1, width: 60 },
+  ]);
+  check("23. nor a complete date range", dated.length, 2);
+}
+
 console.log(`\n--- ${pass} passed, ${fail} failed ---`);
 if (fail > 0) process.exit(1);

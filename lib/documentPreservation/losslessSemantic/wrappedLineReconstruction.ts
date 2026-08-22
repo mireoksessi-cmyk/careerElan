@@ -139,7 +139,39 @@ const SENTENCE_END_RE = /[.!?][)"'”’]?$/;
 */
 const SOFT_WRAP_HYPHEN_RE = /[A-Za-z0-9]-$/;
 
-function looksLikeNewUnit(text: string): boolean {
+/*
+  A line can also end visibly mid-thought without ending mid-word: on a
+  dangling connector, an opening bracket, a separator that has nothing
+  after it yet.
+*/
+const TRAILING_CONNECTOR_RE = /(?:\s[-–—]|[,:;/(&])$/;
+
+/*
+  A date range that has opened and not closed: a year, then a short run of
+  whatever this document uses to join the two halves - a dash, a slash, a
+  word - and then the line stops. The span is bounded to a handful of
+  characters so that a year sitting anywhere earlier in a finished line
+  cannot qualify, and it is deliberately blind to WHICH joiner is used - a
+  dash and a word read alike to it, in any language. Pairing it with a
+  next line that is nothing but a date fragment is what makes it
+  evidence: a closing year on its own is not a line anyone writes.
+*/
+const OPEN_DATE_TAIL_RE = /\b(19|20)\d{2}\b\s*[^\d]{0,6}$/;
+const DATE_FRAGMENT_RE = /^\(?(?:(19|20)\d{2}|\d{1,2}[/.-]\d{2,4})\)?$/;
+
+/*
+  Does the previous line visibly not finish what it started? This is the
+  only evidence that may relax a conservative veto below, and it is
+  deliberately narrow: both families are orthographic, so neither asks
+  what language the resume is written in.
+*/
+function tailIsUnfinished(tailText: string, nextText: string): boolean {
+  if (SOFT_WRAP_HYPHEN_RE.test(tailText)) return true;
+  if (TRAILING_CONNECTOR_RE.test(tailText)) return true;
+  return OPEN_DATE_TAIL_RE.test(tailText) && DATE_FRAGMENT_RE.test(nextText.trim());
+}
+
+function looksLikeNewUnit(text: string, tailUnfinished: boolean): boolean {
   if (BULLET_LIKE_RE.test(text)) return true;
   if (NUMBERED_HEADING_RE.test(text)) return true;
   if (DATE_RANGE_RE.test(text)) return true;
@@ -147,8 +179,16 @@ function looksLikeNewUnit(text: string): boolean {
     An ALL-CAPS run is a heading only when it also carries letters -
     "2019 - 2021" matches the character class but is handled by the date
     rule above, and a bare "(A)" is too short to be meaningful.
+
+    This test cannot tell a section heading from an acronym, so a
+    certification's issuing body reads exactly like a new section to it.
+    Where the line ABOVE visibly did not finish, that reading is already
+    excluded - nothing was open for a heading to interrupt - so the
+    all-caps evidence is not what decides the pair. The three checks
+    above stay absolute either way: a bullet, a numbered heading or a
+    complete date range starts something new no matter what preceded it.
   */
-  if (ALL_CAPS_HEADING_RE.test(text) && /[A-Z]{2}/.test(text)) return true;
+  if (!tailUnfinished && ALL_CAPS_HEADING_RE.test(text) && /[A-Z]{2}/.test(text)) return true;
   return false;
 }
 
@@ -235,7 +275,19 @@ function isContinuationOf(
   ) {
     return false;
   }
-  if (looksLikeNewUnit(next.text)) return false;
+  const tailUnfinished = tailIsUnfinished(tail.text, next.text);
+  if (looksLikeNewUnit(next.text, tailUnfinished)) return false;
+
+  /*
+    A run too narrow to BE a text column carries no wrap evidence, so it
+    is refused - see MIN_TRUSTED_COLUMN_WIDTH. That is a statement about
+    the RUN, and it was applied to the whole run at once, which also
+    refused the sidebars and rails where lines wrap hardest. An unfinished
+    tail is evidence about THIS pair, and it is the one thing a narrow run
+    can offer that its width cannot argue with, so the refusal is now
+    asked per pair and only that evidence lifts it.
+  */
+  if (runWidth < MIN_TRUSTED_COLUMN_WIDTH && !tailUnfinished) return false;
 
   // --- the load-bearing gate: did the previous line run out of room?
   const tailRight = tailBox.x + tailBox.width;
@@ -307,7 +359,6 @@ export function reconstructBlockRun(blocks: SemanticContentBlock[]): SemanticCon
   const rightEdge = effectiveRightEdge(blocks);
   const runWidth = contentWidth(blocks);
   if (rightEdge === null || runWidth === null) return blocks;
-  if (runWidth < MIN_TRUSTED_COLUMN_WIDTH) return blocks;
 
   const output: SemanticContentBlock[] = [];
   let accumulated: SemanticContentBlock | null = null;
