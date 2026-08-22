@@ -47,6 +47,7 @@ export async function GET(req: Request) {
   try {
     const { analyzeDocument } = await import("@/lib/documentPreservation/layoutAnalysis");
     const { buildLosslessResumeDocument } = await import("@/lib/documentPreservation/losslessSemantic/buildLosslessDocument");
+    const { reconstructWrappedLines } = await import("@/lib/documentPreservation/losslessSemantic/wrappedLineReconstruction");
     const { buildStructuredResume } = await import("@/lib/documentPreservation/resumeStructured/buildStructuredResume");
     const { buildProfessionalAtsAssembly } = await import("@/lib/documentPreservation/professionalAtsAssembly/buildProfessionalAtsAssembly");
     const { buildProfessionalAtsHtmlPreview } = await import("@/lib/documentPreservation/professionalAtsHtml/buildProfessionalAtsHtmlPreview");
@@ -54,7 +55,12 @@ export async function GET(req: Request) {
     const buffer = fs.readFileSync(requestedPath);
     const layoutResult = await analyzeDocument("resume", sourceFormat, buffer);
     const document = buildLosslessResumeDocument(layoutResult, { fileName: fixture, fileType: sourceFormat });
-    const model = buildStructuredResume(document);
+    /*
+      Rejoin wrapped physical lines before structured extraction, exactly
+      where the canonical import does it - this preview is only useful if
+      the model it renders is the one production would have built.
+    */
+    const model = buildStructuredResume(reconstructWrappedLines(document));
     const assembly = buildProfessionalAtsAssembly(model);
     const preview = await buildProfessionalAtsHtmlPreview(assembly, paperSize);
 
