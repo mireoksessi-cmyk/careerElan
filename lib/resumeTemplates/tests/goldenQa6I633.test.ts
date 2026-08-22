@@ -337,6 +337,7 @@ async function main() {
     projects: [],
     awards: [],
     publications: [],
+    languages: [],
     customSections: [],
     metricGrids: [],
     slotAvailability: { identity: false, professional_summary: false, core_skills: false, professional_experience: false, volunteer_experience: false, education: false, certifications_licenses: false, projects: false, awards: false, publications: false, additional_information: false },

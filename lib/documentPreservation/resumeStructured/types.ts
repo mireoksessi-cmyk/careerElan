@@ -367,6 +367,31 @@ export type PublicationEntry = {
 };
 
 /*
+  One language and, where the source states one, how well it is spoken.
+
+  Shaped like SkillGroup rather than the entry types above: plain strings
+  and a single entry-level trace, because there is nothing here to carry a
+  per-field confidence for - a language line is a name and at most a
+  descriptor, not a header with a body under it.
+
+  `proficiency` is optional because resumes routinely list languages with
+  no descriptor at all, and free-form because the wording is the source's,
+  not ours: "fluent", "native", "conversational" and "Native or Bilingual"
+  are all things a resume says, and no closed set survives contact with a
+  second language of authorship.
+
+  `source` is required, as it is on every other extracted fact here. An
+  entry with no document behind it uses an explicit sentinel trace (see
+  manualResumeRuntimeMapper.ts's MANUAL_ENTRY_SOURCE_TRACE) rather than an
+  absent one, so "where did this come from" always has an answer.
+*/
+export type LanguageEntry = {
+  name: string;
+  proficiency?: string | null;
+  source: SourceTrace;
+};
+
+/*
   Phase 5D.2B - a single Value/Label pair recovered from a KPI grid,
   metric dashboard, stat-card row, or similar Number+Caption structure
   ("$212M+" paired with "CUMULATIVE CONTRACT VALUE"). Each side keeps its own
@@ -455,6 +480,7 @@ export type ResumeStructuredModel = {
   projects: ProjectEntry[];
   awards: AwardEntry[];
   publications: PublicationEntry[];
+  languages: LanguageEntry[];
 
   customSections: CustomResumeSection[];
   metricGrids: MetricGrid[];

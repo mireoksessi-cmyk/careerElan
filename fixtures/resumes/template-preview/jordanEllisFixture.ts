@@ -245,6 +245,7 @@ export function buildJordanEllisResume(): ResumeStructuredModel {
         reasonCodes: [],
       },
     ],
+    languages: [],
     customSections: [
       {
         id: "custom-languages",

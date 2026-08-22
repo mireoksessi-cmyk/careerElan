@@ -83,6 +83,7 @@ function makeModel(): ResumeStructuredModel {
     ],
     awards: [],
     publications: [],
+    languages: [],
     customSections: [],
     metricGrids: [],
     slotAvailability: {

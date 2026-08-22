@@ -161,6 +161,7 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
     projects: [],
     awards: [],
     publications: [],
+    languages: [],
     customSections: [],
     metricGrids: [],
     slotAvailability: {

@@ -43,6 +43,7 @@ function emptyModel(): ResumeStructuredModel {
     projects: [],
     awards: [],
     publications: [],
+    languages: [],
     customSections: [],
     metricGrids: [],
     slotAvailability: {

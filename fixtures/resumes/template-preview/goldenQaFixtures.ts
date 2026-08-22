@@ -217,6 +217,7 @@ function base(overrides: Partial<ResumeStructuredModel>): ResumeStructuredModel 
     projects: [],
     awards: [],
     publications: [],
+    languages: [],
     customSections: [],
     metricGrids: [],
     slotAvailability: {

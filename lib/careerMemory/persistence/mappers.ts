@@ -641,7 +641,17 @@ export function mapGeneratedDocumentToInsertInput(tailoredResumeId: string, doc:
 // `careerProfileToCanonicalRuntime` - kept exactly that name).
 // ============================================================
 export function careerProfileToCanonicalRuntime(bundle: CareerMemoryPersistenceBundle): CanonicalResumeRuntime {
-  const resume = toPlain(bundle.latestVersion.snapshot) as unknown as ResumeStructuredModel;
+  /*
+    Snapshots written before a collection existed simply have no key for
+    it, and this cast cannot know that - it would hand back a model whose
+    type promises an array where there is nothing at all. Defaulted here,
+    at the one place a stored snapshot becomes a runtime model, so every
+    reader downstream sees the shape the type describes.
+  */
+  const snapshotResume = toPlain(bundle.latestVersion.snapshot) as unknown as ResumeStructuredModel;
+  const resume: ResumeStructuredModel = Array.isArray(snapshotResume.languages)
+    ? snapshotResume
+    : { ...snapshotResume, languages: [] };
 
   const orderedDocs = sortByCreatedAtThenId(bundle.sourceDocuments);
   const sourceDocuments: RuntimeSourceDocument[] = orderedDocs.map(careerSourceDocumentRowToRuntimeSourceDocument);

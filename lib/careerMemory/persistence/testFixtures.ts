@@ -208,6 +208,7 @@ export function buildFixtureResume(): ResumeStructuredModel {
         reasonCodes: [],
       },
     ],
+    languages: [],
     customSections: [
       {
         id: "custom-langs",

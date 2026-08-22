@@ -60,6 +60,7 @@ import {
   type EducationEntry,
   type EntryContentBlock,
   type ExperienceEntry,
+  type LanguageEntry,
   type MetricGrid,
   type ProjectEntry,
   type PublicationEntry,
@@ -299,6 +300,7 @@ export function buildManualResumeStructuredModel(input: ManualCareerMemoryInput)
   const projects = projectEntries.map((e, i) => buildProjectEntry(`manual-project-${i}`, e));
   const awards: AwardEntry[] = [];
   const publications: PublicationEntry[] = [];
+  const languages: LanguageEntry[] = [];
   const customSections: CustomResumeSection[] = [];
   const metricGrids: MetricGrid[] = [];
 
@@ -329,6 +331,7 @@ export function buildManualResumeStructuredModel(input: ManualCareerMemoryInput)
     projects,
     awards,
     publications,
+    languages,
     customSections,
     metricGrids,
     slotAvailability,

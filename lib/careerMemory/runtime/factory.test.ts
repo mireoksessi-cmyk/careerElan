@@ -36,6 +36,7 @@ function makeMinimalModel(): ResumeStructuredModel {
     projects: [],
     awards: [],
     publications: [],
+    languages: [],
     customSections: [],
     metricGrids: [],
     slotAvailability: {
