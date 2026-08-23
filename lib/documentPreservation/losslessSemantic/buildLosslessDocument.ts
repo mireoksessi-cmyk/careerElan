@@ -50,6 +50,15 @@ export function buildLosslessResumeDocument(
     // the block object is the SAME reference held by the flat `blocks`
     // array, so this mutation is visible everywhere consistently.
     if (headingBlock) headingBlock.blockType = "heading";
+    // A heading that wrapped across the rail contributed several source
+    // blocks. Only the first is `headingBlock`; promoting the rest here
+    // is what keeps their continuation lines out of every consumer's
+    // body, since those all filter on blockType. The blocks themselves
+    // stay in this section, so no source text is dropped or moved.
+    for (const memberIndex of boundary.headingBlockIndices ?? []) {
+      const memberBlock = blocks[memberIndex];
+      if (memberBlock) memberBlock.blockType = "heading";
+    }
 
     const classification = classifySection(headingText, bodyBlocks, {
       isFirstSectionInDocument: index === 0,

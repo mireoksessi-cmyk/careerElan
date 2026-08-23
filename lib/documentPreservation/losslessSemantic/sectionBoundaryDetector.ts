@@ -221,6 +221,12 @@ export function scoreHeadingCandidates(blocks: SemanticContentBlock[]): HeadingC
 
 export type SectionBoundary = {
   headingBlockIndex: number | null;
+  /* Every block that contributed a line to this heading, in source order.
+     A heading that wrapped across the rail has more than one, and the
+     continuation lines are only identifiable structurally - the caller
+     cannot recover them from headingBlockIndex alone. Optional so a
+     boundary built without it keeps its previous single-block meaning. */
+  headingBlockIndices?: number[];
   headingText: string | null;
   startBlockIndex: number;
   endBlockIndex: number;
@@ -364,6 +370,7 @@ export function detectSectionBoundaries(blocks: SemanticContentBlock[]): Boundar
             .join(" ");
     return {
       headingBlockIndex: candidate.blockIndex,
+      headingBlockIndices: run.map((line) => line.blockIndex),
       headingText,
       startBlockIndex: candidate.blockIndex,
       endBlockIndex: nextCandidateIndex - 1,

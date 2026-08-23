@@ -312,6 +312,35 @@ async function main() {
   const detTwice = detectSectionBoundaries(pdfBlocks);
   check("repeat detectSectionBoundaries run on same blocks yields identical result", detOnce, detTwice);
 
+  // --- merged-heading member provenance + continuation-block role ---
+  const memberIndices = (bs: SemanticContentBlock[]) => detectSectionBoundaries(bs).sections.map((s) => s.headingBlockIndices);
+
+  // T1: a two-line rail heading records BOTH contributing blocks.
+  check("merged heading: two-line run records both member indices", memberIndices(p1), [[0, 3]]);
+
+  // T2 + T3: three lines, one offset 0.4pt, all three recorded.
+  check("merged heading: three-line run records all member indices", memberIndices(p2), [[0, 2, 4]]);
+
+  // T4: a single-line heading records just itself - previous meaning intact.
+  check("merged heading: single-line heading records only itself", memberIndices(n3), [[0], [1]]);
+
+  // L1/L2/L3: after buildLosslessResumeDocument every contributing block is
+  // typed heading, so the body filter every consumer applies excludes them,
+  // while the blocks themselves stay inside the section.
+  const promoted = (bs: SemanticContentBlock[]) => {
+    detectSectionBoundaries(bs).sections.forEach((s) => {
+      (s.headingBlockIndices ?? []).forEach((i) => { if (bs[i]) bs[i].blockType = "heading"; });
+    });
+    return bs.map((b) => `${b.rawText}:${b.blockType}`);
+  };
+  check("merged heading: both PROFESSIONAL/SUMMARY lines end up heading-typed", promoted(p1.map((b) => ({ ...b }))).filter((x) => /PROFESSIONAL|SUMMARY/.test(x)), ["PROFESSIONAL:heading", "SUMMARY:heading"]);
+  check("merged heading: all three EDUCATION lines end up heading-typed", promoted(p2.map((b) => ({ ...b }))).filter((x) => /EDUCATION|PROFESSIONAL|QUALIFICATIONS/.test(x)), ["EDUCATION &:heading", "PROFESSIONAL:heading", "QUALIFICATIONS:heading"]);
+  check("merged heading: ADDITIONAL/INFORMATION both end up heading-typed", promoted(p3.map((b) => ({ ...b }))).filter((x) => /ADDITIONAL|INFORMATION/.test(x)), ["ADDITIONAL:heading", "INFORMATION:heading"]);
+
+  // Genuine body must never be promoted, including interleaved body.
+  const p1Roles = promoted(p1.map((b) => ({ ...b })));
+  checkTrue("merged heading: interleaved body blocks are never promoted", p1Roles.filter((x) => /Dedicated|Proven|conditions/.test(x)).every((x) => x.endsWith(":paragraph")));
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }
