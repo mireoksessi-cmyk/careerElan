@@ -382,6 +382,84 @@ type ResumeScores = {
   aiPersonalization: number;
 };
 
+/*
+  Career Memory stores skills as an array; resumes.parsed_data always
+  emits them as a comma-joined string (normalizeSkills() in
+  resumeAnalysisCore.ts returns a string on every branch). Scoring must
+  not depend on that difference, so a string is widened to a list here.
+  An array is passed through untouched, so manual scoring is unaffected.
+*/
+function normalizeSkillList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((skill) => skill.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+/*
+  The scorer should see career facts, not where they came from. This
+  builds an ephemeral view of the selected source for scoring only -
+  nothing is written back, and the two persisted shapes stay different.
+
+  Resume-native facts (experience, education, skills, languages,
+  certifications, projects, summary, headline, identity) deliberately
+  keep coming from the selected source alone, so an uploaded resume is
+  never inflated by another profile's content. Only career direction -
+  which is user intent rather than resume content, and which
+  parsed_data never contains - falls back to Career Memory.
+*/
+function buildScoreInput(sourceData: unknown, careerMemory: unknown) {
+  const source = (sourceData || {}) as Record<string, unknown>;
+  const memory = (careerMemory || {}) as Record<string, unknown>;
+
+  return {
+    ...source,
+
+    skills: normalizeSkillList(
+      source.skills ||
+        source.technicalSkills ||
+        source.coreSkills ||
+        []
+    ),
+
+    target_roles:
+      source.target_roles ||
+      source.targetRoles ||
+      source.targetRole ||
+      memory.target_roles ||
+      memory.targetRoles ||
+      memory.targetRole ||
+      [],
+
+    target_industry:
+      source.target_industry ||
+      source.targetIndustry ||
+      memory.target_industry ||
+      memory.targetIndustry ||
+      "",
+
+    target_location:
+      source.target_location ||
+      source.targetLocation ||
+      memory.target_location ||
+      memory.targetLocation ||
+      "",
+
+    career_goal_summary:
+      source.career_goal_summary ||
+      source.careerGoalSummary ||
+      memory.career_goal_summary ||
+      memory.careerGoalSummary ||
+      "",
+  };
+}
+
 function calculateResumeScores(
   data: any,
   source:
@@ -2175,7 +2253,10 @@ useEffect(() => {
   ) {
     setSelectedResumeScores(
       calculateResumeScores(
-        careerMemory,
+        buildScoreInput(
+          careerMemory,
+          careerMemory
+        ),
         "career_memory"
       )
     );
@@ -2230,7 +2311,10 @@ useEffect(() => {
 
   setSelectedResumeScores(
     calculateResumeScores(
-      uploadedResumeData,
+      buildScoreInput(
+        uploadedResumeData,
+        careerMemory
+      ),
       "uploaded_resume"
     )
   );
