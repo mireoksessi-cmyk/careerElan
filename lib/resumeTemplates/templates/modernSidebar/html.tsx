@@ -225,7 +225,39 @@ function buildSidebarItems(normalized: ReturnType<typeof normalizeResume>, color
     });
   }
 
-  const languageSections = normalized.customSections.filter(isLanguageCustomSection);
+  /*
+    Structured languages arrive already paired (name + proficiency). The
+    same source section is ALSO preserved as a raw custom section whose
+    lines are unpaired, so rendering both would show Languages twice. The
+    raw one is skipped only when its sourceSectionId is one the structured
+    entries came from - never by heading text, so an unrelated section such
+    as "Programming Languages" is left alone. With no structured languages
+    the raw section still renders exactly as before.
+  */
+  const structuredLanguages = normalized.languages ?? [];
+  const representedSectionIds = new Set(structuredLanguages.map((l) => l.sourceSectionId));
+  const languageSections = normalized.customSections
+    .filter(isLanguageCustomSection)
+    .filter((section) => section.sourceSectionId === undefined || !representedSectionIds.has(section.sourceSectionId));
+
+  if (structuredLanguages.length > 0) {
+    headingsInOrder.push(MODERN_SIDEBAR_LABELS.languages);
+    items.push({
+      id: "languages",
+      sectionKey: "languages",
+      node: (
+        <div style={{ color: colors.sidebarText, fontSize: "0.85em" }}>
+          {sidebarHeading(MODERN_SIDEBAR_LABELS.languages)}
+          {structuredLanguages.map((language, i) => (
+            <div key={i} style={{ marginBottom: "2px" }}>
+              {language.proficiency ? `${language.name} — ${language.proficiency}` : language.name}
+            </div>
+          ))}
+        </div>
+      ),
+    });
+  }
+
   if (languageSections.length > 0) {
     languageSections.forEach((section) => {
       headingsInOrder.push(section.heading);

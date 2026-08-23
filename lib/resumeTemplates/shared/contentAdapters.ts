@@ -23,6 +23,7 @@ import type {
   EntryContentBlock,
   ExperienceEntry,
   HierarchicalContentNode,
+  LanguageEntry,
   MetricGrid,
   ProjectEntry,
   PublicationEntry,
@@ -183,6 +184,20 @@ export type NormalizedCustomSection = {
   heading: string;
   items: NormalizedContentItem[];
   sourceOrder: number;
+  /* The section this custom block came from. Carried so a template can
+     tell the section that already produced structured languages from an
+     unrelated one that merely mentions the word. */
+  sourceSectionId?: string;
+};
+
+/* Structured languages, kept as name/proficiency pairs rather than the
+   flat lines the source section holds. sourceSectionId is the section
+   that produced this entry, so a duplicate raw section can be matched by
+   provenance instead of by heading text. */
+export type NormalizedLanguage = {
+  name: string;
+  proficiency: string;
+  sourceSectionId: string;
 };
 
 export type NormalizedMetricEntry = { id: string; value: string; label: string };
@@ -202,6 +217,7 @@ export type NormalizedResume = {
   projects: NormalizedProjectEntry[];
   awards: NormalizedAwardEntry[];
   publications: NormalizedPublicationEntry[];
+  languages?: NormalizedLanguage[];
   customSections: NormalizedCustomSection[];
   metricGrids: NormalizedMetricGrid[];
 };
@@ -307,6 +323,15 @@ function normalizeCustomSection(section: CustomResumeSection): NormalizedCustomS
     heading: section.displayHeading ?? section.originalHeading ?? "Additional Information",
     items: normalizeContentItems(section.content, [], false),
     sourceOrder: section.sourceOrder,
+    sourceSectionId: section.source.sourceSectionId,
+  };
+}
+
+function normalizeLanguage(entry: LanguageEntry): NormalizedLanguage {
+  return {
+    name: entry.name,
+    proficiency: entry.proficiency ?? "",
+    sourceSectionId: entry.source.sourceSectionId,
   };
 }
 
@@ -438,6 +463,7 @@ export function normalizeResume(resume: ResumeStructuredModel): NormalizedResume
     projects: resume.projects.map(normalizeProject).filter(isMeaningfulProject),
     awards: resume.awards.map(normalizeAward).filter(isMeaningfulAward),
     publications: resume.publications.map(normalizePublication).filter(isMeaningfulPublication),
+    languages: resume.languages.map(normalizeLanguage),
     customSections: resume.customSections.map(normalizeCustomSection).filter(isMeaningfulCustomSection),
     metricGrids: resume.metricGrids.map(normalizeMetricGrid),
   };

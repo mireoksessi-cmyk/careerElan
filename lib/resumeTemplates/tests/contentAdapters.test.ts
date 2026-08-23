@@ -162,6 +162,30 @@ function main() {
   check("education qualifier: a qualifier-only entry is kept, not filtered away", qualifierOnly.education.length, 1);
   check("education qualifier: and that entry still carries its qualifier", qualifierOnly.education[0]?.dateQualifierText, "Expected in");
 
+  // --- Languages: structured entries reach the template-facing model ---
+  const trace = (sectionId: string) => ({ sourceSectionId: sectionId, sourceBlockIds: [], sourceElementIds: [] });
+  const langResume = buildFixtureResume();
+  langResume.languages = [
+    { name: "English", proficiency: "Native or Bilingual", source: trace("section-spoken") },
+    { name: "French", proficiency: "Native or Bilingual", source: trace("section-spoken") },
+    { name: "Spanish", source: trace("section-spoken") },
+  ];
+  langResume.customSections = [
+    ...langResume.customSections,
+    { id: "spoken-custom", originalHeading: "LANGUAGES", displayHeading: "LANGUAGES", paragraphs: [], bullets: [], content: [{ id: "sc1", kind: "paragraph", text: "English", indentLevel: 0, source: trace("section-spoken") }], sourceOrder: 90, source: trace("section-spoken") },
+    { id: "prog-custom", originalHeading: "Programming Languages", displayHeading: "Programming Languages", paragraphs: [], bullets: [], content: [{ id: "pc1", kind: "paragraph", text: "Python", indentLevel: 0, source: trace("section-programming") }], sourceOrder: 91, source: trace("section-programming") },
+  ] as typeof langResume.customSections;
+  const langNorm = normalizeResume(langResume);
+
+  check("languages: structured entries are carried into NormalizedResume", langNorm.languages?.length, 3);
+  check("languages: name and proficiency stay paired", langNorm.languages?.slice(0, 2).map((l) => `${l.name}|${l.proficiency}`), ["English|Native or Bilingual", "French|Native or Bilingual"]);
+  check("languages: a missing proficiency becomes an empty string", langNorm.languages?.[2], { name: "Spanish", proficiency: "", sourceSectionId: "section-spoken" });
+  check("languages: source order is preserved", langNorm.languages?.map((l) => l.name), ["English", "French", "Spanish"]);
+  check("languages: each entry carries its source section for duplicate matching", langNorm.languages?.[0]?.sourceSectionId, "section-spoken");
+  checkTrue("languages: custom sections expose sourceSectionId", langNorm.customSections.every((c) => typeof c.sourceSectionId === "string"));
+  checkTrue("languages: the adapter does NOT remove the raw LANGUAGES custom section", langNorm.customSections.some((c) => c.sourceSectionId === "section-spoken"));
+  checkTrue("languages: an unrelated Programming Languages section is untouched", langNorm.customSections.some((c) => c.heading === "Programming Languages" && c.sourceSectionId === "section-programming"));
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

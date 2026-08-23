@@ -133,7 +133,21 @@ export async function renderModernSidebarDocx(context: TemplateRenderContext): P
       sidebarParagraphs.push(new Paragraph({ children: [run(label, { bold: true, size: tokens.fontSizeHalfPoints - 2, colorHex: sidebarTextHex }), run(g.skills.join(", "), { size: tokens.fontSizeHalfPoints - 2, colorHex: sidebarTextHex })], spacing: { after: 40 } }));
     }
   }
-  const languageSections = normalized.customSections.filter(isLanguageCustomSection);
+  /* Mirrors html.tsx: structured pairs render first, and the raw section
+     is skipped only when its own sourceSectionId already produced them. */
+  const structuredLanguages = normalized.languages ?? [];
+  const representedSectionIds = new Set(structuredLanguages.map((l) => l.sourceSectionId));
+  if (structuredLanguages.length > 0) {
+    sidebarParagraphs.push(new Paragraph({ children: [run(MODERN_SIDEBAR_LABELS.languages.toUpperCase(), { bold: true, size: tokens.fontSizeHalfPoints - 1, colorHex: sidebarTextHex })], spacing: { before: 160, after: 60 } }));
+    for (const language of structuredLanguages) {
+      const text = language.proficiency ? `${language.name} — ${language.proficiency}` : language.name;
+      sidebarParagraphs.push(new Paragraph({ children: [run(text, { size: tokens.fontSizeHalfPoints - 2, colorHex: sidebarTextHex })], spacing: { after: 20 } }));
+    }
+  }
+
+  const languageSections = normalized.customSections
+    .filter(isLanguageCustomSection)
+    .filter((section) => section.sourceSectionId === undefined || !representedSectionIds.has(section.sourceSectionId));
   for (const section of languageSections) {
     sidebarParagraphs.push(new Paragraph({ children: [run(section.heading.toUpperCase(), { bold: true, size: tokens.fontSizeHalfPoints - 1, colorHex: sidebarTextHex })], spacing: { before: 160, after: 60 } }));
     sidebarParagraphs.push(...renderContentItemsToParagraphs(section.items, { ...contentOpts, sizeHalfPoints: tokens.fontSizeHalfPoints - 2 }));
