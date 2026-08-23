@@ -226,6 +226,87 @@ async function main() {
   checkTrue("first-alias floor: a later heading at the section tier is still a section", preAliasTexts.includes("SELECTED PRESS"));
   check("first-alias floor: the header survives whole and only the entry title is dropped", preAliasTexts, ["AVERY LINDQVIST", "Principal Widget Steward", "Work History", "SELECTED PRESS"]);
 
+  // --- synthetic unit tests: S3 rail heading grouping ---
+  // A heading set in a narrow left rail wraps across visual lines while
+  // the body column's text is interleaved between them in reading order.
+  const RAIL_X = 52;
+  const BODY_X = 200;
+  const RAIL_FONT = 9.4;
+  const railLine = (order: number, text: string, y: number, x = RAIL_X, fontSize = RAIL_FONT) =>
+    makeBlock({ sourceOrder: order, text, rawText: text, blockType: "heading", style: { fontSize, fontWeight: 700 }, bbox: { x, y, width: 80, height: fontSize } });
+  const railBody = (order: number, text: string, y: number) =>
+    makeBlock({ sourceOrder: order, text, rawText: text, style: { fontSize: 8.8 }, bbox: { x: BODY_X, y, width: 340, height: 8.8 } });
+  const headings = (bs: SemanticContentBlock[]) => detectSectionBoundaries(bs).sections.map((s) => s.headingText);
+
+  // P1 + P4: two-line rail heading with body interleaved between the lines.
+  const p1 = [
+    railLine(0, "PROFESSIONAL", 118),
+    railBody(1, "Dedicated nurse practitioner with eight years of experience.", 118),
+    railBody(2, "Proven expertise across a diverse range of medical", 128.4),
+    railLine(3, "SUMMARY", 129.5),
+    railBody(4, "conditions. Adept at collaborating with teams.", 138.8),
+  ];
+  check("rail heading: two lines with interleaved body join into one heading", headings(p1), ["PROFESSIONAL SUMMARY"]);
+  checkTrue("rail heading: the interleaved body stays inside the merged section", detectSectionBoundaries(p1).sections[0].endBlockIndex === 4);
+
+  // P2: three lines, one of them offset by 0.4pt - exact x equality must not be required.
+  const p2 = [
+    railLine(0, "EDUCATION &", 473.7),
+    railBody(1, "Master of Science - Nursing", 473.7),
+    railLine(2, "PROFESSIONAL", 485.2, RAIL_X + 0.4),
+    railBody(3, "New Brunswick, NJ | June 2019", 494),
+    railLine(4, "QUALIFICATIONS", 496.7),
+    railBody(5, "Bachelor of Science - Nursing", 503.7),
+  ];
+  check("rail heading: three lines with 0.4pt x variance join", headings(p2), ["EDUCATION & PROFESSIONAL QUALIFICATIONS"]);
+
+  // P3
+  const p3 = [railLine(0, "ADDITIONAL", 597.1), railLine(1, "INFORMATION", 608.6), railBody(2, "Canadian Permanent Resident", 620)];
+  check("rail heading: ADDITIONAL INFORMATION joins", headings(p3), ["ADDITIONAL INFORMATION"]);
+
+  // P5: the independent-document ratio of 0.321 must still join.
+  const p5 = [railLine(0, "CAREER", 138.7, 78, 12.5), railLine(1, "PROFILE", 155.2, 78, 12.5)];
+  check("rail heading: gap ratio 0.32 joins", headings(p5), ["CAREER PROFILE"]);
+
+  // N1: heading followed by a metric, ratio ~0.56 - must stay separate.
+  const n1 = [railLine(0, "PROGRAM IMPACT", 608.2, 78, 12.5), railLine(1, "27%", 627.7, 78, 12.5)];
+  check("rail heading: gap ratio 0.56 stays separate", headings(n1), ["PROGRAM IMPACT", "27%"]);
+
+  // N2: heading followed by a job title, ratio ~0.92 - must stay separate.
+  const n2 = [railLine(0, "EXPERIENCE", 536.2, 78, 12.5), railLine(1, "Senior Financial Analyst", 560.2, 78, 12.5)];
+  check("rail heading: gap ratio 0.92 stays separate", headings(n2), ["EXPERIENCE", "Senior Financial Analyst"]);
+
+  // N3: two genuinely separate sections in the same rail.
+  const n3 = [railLine(0, "SKILLS", 672.7, 78, 12.5), railLine(1, "LANGUAGES", 718.5, 78, 12.5)];
+  check("rail heading: separate sections stay separate", headings(n3), ["SKILLS", "LANGUAGES"]);
+
+  // N4: same x, different font size.
+  const n4 = [railLine(0, "Alex Morgan", 64.5, 78, 20), railLine(1, "Operations Strategy Manager", 88, 78, 11)];
+  check("rail heading: different font sizes stay separate", headings(n4), ["Alex Morgan", "Operations Strategy Manager"]);
+
+  // N5: geometrically identical continuation on the next page.
+  const n5 = [
+    railLine(0, "COMMUNITY", 700),
+    makeBlock({ sourceOrder: 1, text: "INVOLVEMENT", rawText: "INVOLVEMENT", pageIndex: 1, blockType: "heading", style: { fontSize: RAIL_FONT, fontWeight: 700 }, bbox: { x: RAIL_X, y: 711.5, width: 80, height: RAIL_FONT } }),
+  ];
+  check("rail heading: cross-page candidates stay separate", headings(n5), ["COMMUNITY", "INVOLVEMENT"]);
+
+  // N6: a wrapped job title may join on its own, but must never chain into
+  // the section heading above it.
+  const n6 = [
+    railLine(0, "EXPERIENCE", 536.2, 78, 12.5),
+    railLine(1, "Senior Financial", 560.2, 78, 12.5),
+    railLine(2, "Analyst", 574.5, 78, 12.5),
+  ];
+  check("rail heading: wrapped job title joins without chaining into EXPERIENCE", headings(n6), ["EXPERIENCE", "Senior Financial Analyst"]);
+
+  // Missing geometry must never merge.
+  const noGeom = [
+    makeBlock({ sourceOrder: 0, text: "PROFESSIONAL", rawText: "PROFESSIONAL", blockType: "heading", style: { fontWeight: 700 } }),
+    makeBlock({ sourceOrder: 1, text: "SUMMARY", rawText: "SUMMARY", blockType: "heading", style: { fontWeight: 700 } }),
+  ];
+  check("rail heading: candidates without geometry stay separate", headings(noGeom), ["PROFESSIONAL", "SUMMARY"]);
+
   // --- synthetic unit test: determinism ---
   const detOnce = detectSectionBoundaries(pdfBlocks);
   const detTwice = detectSectionBoundaries(pdfBlocks);

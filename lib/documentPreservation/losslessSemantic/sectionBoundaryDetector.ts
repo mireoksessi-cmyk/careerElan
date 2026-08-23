@@ -240,6 +240,86 @@ export type BoundaryDetectionResult = {
   "무제목 콘텐츠 보존" requirement - nothing gets silently dropped just
   because the document has no detectable section titles.
 */
+/*
+  A section heading set in a narrow left rail wraps across several visual
+  lines ("PROFESSIONAL" / "SUMMARY"), and every line scores as its own
+  heading candidate above, so each one would open its own section. The
+  body column's text is interleaved between those lines in reading order,
+  so block adjacency cannot decide continuity - what matters is whether
+  the next candidate continues the SAME rail directly beneath the previous
+  one.
+
+  Geometry only: no text, alias or dictionary evidence is consulted, so an
+  unknown or localized heading groups exactly like a known one. The
+  measured separation is wide - real wrapped lines sit at a gap of at most
+  0.321x their own font size, while the nearest genuine non-heading pair
+  (a heading followed by a metric) sits at 0.561x and a heading followed
+  by a job title at 0.921x. Anything unmeasurable, non-finite, negative or
+  outside these bounds is left separate.
+*/
+const RAIL_X_TOLERANCE = 0.5;
+const RAIL_GAP_TO_FONT_SIZE_RATIO = 0.4;
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function continuesRailHeading(
+  blocks: SemanticContentBlock[],
+  previousIndex: number,
+  nextIndex: number
+): boolean {
+  const previous = blocks[previousIndex];
+  const next = blocks[nextIndex];
+  if (!previous || !next) return false;
+  if (previous.pageIndex !== next.pageIndex) return false;
+
+  const previousBox = previous.bbox;
+  const nextBox = next.bbox;
+  if (!previousBox || !nextBox) return false;
+  if (!isFiniteNumber(previousBox.x) || !isFiniteNumber(previousBox.y) || !isFiniteNumber(previousBox.height)) return false;
+  if (!isFiniteNumber(nextBox.x) || !isFiniteNumber(nextBox.y)) return false;
+
+  const previousFontSize = previous.style?.fontSize;
+  const nextFontSize = next.style?.fontSize;
+  if (!isFiniteNumber(previousFontSize) || !isFiniteNumber(nextFontSize)) return false;
+  if (previousFontSize <= 0) return false;
+  if (previousFontSize !== nextFontSize) return false;
+
+  if (Math.abs(nextBox.x - previousBox.x) > RAIL_X_TOLERANCE) return false;
+
+  const gap = nextBox.y - (previousBox.y + previousBox.height);
+  if (!isFiniteNumber(gap) || gap < 0) return false;
+  return gap / previousFontSize <= RAIL_GAP_TO_FONT_SIZE_RATIO;
+}
+
+/*
+  Groups already-scored candidates into runs, where a run of more than one
+  entry is a single heading that wrapped. Never creates a candidate, never
+  drops one: every candidate belongs to exactly one run, in the same order.
+*/
+function groupRailHeadingRuns(
+  blocks: SemanticContentBlock[],
+  sortedCandidates: HeadingCandidate[]
+): HeadingCandidate[][] {
+  const runs: HeadingCandidate[][] = [];
+  let current: HeadingCandidate[] = [sortedCandidates[0]];
+
+  for (let i = 1; i < sortedCandidates.length; i++) {
+    const previous = current[current.length - 1];
+    const candidate = sortedCandidates[i];
+    if (continuesRailHeading(blocks, previous.blockIndex, candidate.blockIndex)) {
+      current.push(candidate);
+    } else {
+      runs.push(current);
+      current = [candidate];
+    }
+  }
+
+  runs.push(current);
+  return runs;
+}
+
 export function detectSectionBoundaries(blocks: SemanticContentBlock[]): BoundaryDetectionResult {
   if (blocks.length === 0) {
     return { identityBlockIndices: [], sections: [] };
@@ -263,18 +343,34 @@ export function detectSectionBoundaries(blocks: SemanticContentBlock[]): Boundar
   }
 
   const sortedCandidates = [...candidates].sort((a, b) => a.blockIndex - b.blockIndex);
+  const runs = groupRailHeadingRuns(blocks, sortedCandidates);
 
   const identityBlockIndices: number[] = [];
   for (let i = 0; i < sortedCandidates[0].blockIndex; i++) identityBlockIndices.push(i);
 
-  const sections: SectionBoundary[] = sortedCandidates.map((candidate, i) => {
-    const nextCandidateIndex = sortedCandidates[i + 1]?.blockIndex ?? blocks.length;
+  const sections: SectionBoundary[] = runs.map((run, i) => {
+    const candidate = run[0];
+    const nextCandidateIndex = runs[i + 1]?.[0].blockIndex ?? blocks.length;
+    // A run of one keeps the exact previous text; a wrapped run joins its
+    // lines with single spaces and nothing else. The continuation lines
+    // stay inside this section's own block range, so no source block is
+    // dropped and none changes owner.
+    const headingText =
+      run.length === 1
+        ? blocks[candidate.blockIndex].rawText
+        : run
+            .map((line) => blocks[line.blockIndex].rawText.trim())
+            .filter((text) => text.length > 0)
+            .join(" ");
     return {
       headingBlockIndex: candidate.blockIndex,
-      headingText: blocks[candidate.blockIndex].rawText,
+      headingText,
       startBlockIndex: candidate.blockIndex,
       endBlockIndex: nextCandidateIndex - 1,
-      reasonCodes: candidate.reasonCodes,
+      reasonCodes:
+        run.length === 1
+          ? candidate.reasonCodes
+          : [...candidate.reasonCodes, `rail-heading-run-${run.length}-lines`],
     };
   });
 
