@@ -1032,7 +1032,63 @@ export function extractEducationEntries(sectionId: string, bodyBlocks: SemanticC
         }
       } else if (remaining.length === 1) {
         const only = remaining[0];
-        if (only.line.hasDegreeKeyword && !only.line.hasInstitutionKeyword) {
+        /*
+          One header line can carry BOTH a degree and an institution
+          ("Master of Science - Nursing | Rutgers, The State University
+          of New Jersey"). The credential test below is
+          degree-AND-NOT-institution, so a line carrying both fails it
+          and the whole string - degree included - was assigned as the
+          institution. The sibling two-remainder branch already resolves
+          the same competing-signal conflict the other way (it asks
+          `aHasDegree && !bHasDegree` first, so degree evidence wins
+          there); this only brings the one-remainder case into line with
+          it, and only when the line can be separated on evidence the
+          repository already trusts.
+
+          No new delimiter vocabulary: splitMultiValueSegment's own
+          strong delimiters do the split, with comma excluded for the
+          reason that option already documents - "Master of Engineering,
+          Mechanical Engineering" and "Rutgers, The State University of
+          New Jersey" both carry a semantic comma INSIDE one value. A
+          hyphen is not a strong delimiter at all, so "Master of Science
+          - Nursing" is never cut. Weak "and"/"&" splitting is refused
+          outright (hasReinforcingLabel: false) - this recovery is
+          strong-delimiter only.
+
+          Then both halves must earn their roles independently: exactly
+          two segments, one that looks like a degree and NOT like an
+          institution, one that looks like an institution and NOT like a
+          degree. "Bachelor of Arts / Bachelor of Science" (two degrees)
+          and "University of Alpha / Beta College" (two institutions)
+          therefore both fall through to the existing branches
+          unchanged, because neither yields one of each. Both values are
+          resolved through the SAME resolvers the branches below use,
+          from the SAME source block, so provenance is unchanged - one
+          block legitimately backing two fields is already how the
+          single-line comma path works.
+        */
+        const inlineSplit =
+          only.line.hasDegreeKeyword && only.line.hasInstitutionKeyword
+            ? splitMultiValueSegment(only.text, {
+                segmentShapeTest: (segment) => segmentLooksLikeDegree(segment) || segmentLooksLikeInstitution(segment),
+                hasReinforcingLabel: false,
+                excludeCommaDelimiter: true,
+              }).values
+            : [];
+        const inlineDegree =
+          inlineSplit.length === 2 ? inlineSplit.find((s) => segmentLooksLikeDegree(s) && !segmentLooksLikeInstitution(s)) : undefined;
+        const inlineInstitution =
+          inlineSplit.length === 2 ? inlineSplit.find((s) => segmentLooksLikeInstitution(s) && !segmentLooksLikeDegree(s)) : undefined;
+        if (inlineDegree !== undefined && inlineInstitution !== undefined) {
+          reasonCodes.push("multi-line-header-single-remainder-inline-degree-institution");
+          const credR = resolveCredentialsFromText(inlineDegree, sectionId, only.line.block, windowHasProgramLabel, 0.7);
+          credentialsAcc.push(...credR.credentials);
+          fieldsOfStudyAcc.push(...credR.fieldsOfStudy);
+          const instR = resolveInstitutionsFromText(inlineInstitution, sectionId, only.line.block, windowHasProgramLabel, 0.7);
+          institutionsAcc.push(...instR.institutions);
+          if (instR.location && !location) location = instR.location;
+          if (instR.detail) extraDetails.push(instR.detail);
+        } else if (only.line.hasDegreeKeyword && !only.line.hasInstitutionKeyword) {
           reasonCodes.push("multi-line-header-single-remainder-as-credential");
           const r = resolveCredentialsFromText(only.text, sectionId, only.line.block, windowHasProgramLabel, 0.7);
           credentialsAcc.push(...r.credentials);
