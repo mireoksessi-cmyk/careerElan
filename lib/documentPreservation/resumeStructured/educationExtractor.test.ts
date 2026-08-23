@@ -1473,6 +1473,83 @@ async function main() {
     check("trailing institution negative: and its own location is kept", entries[0].location?.value, "Riverton, ON");
   }
 
+  /*
+    A bare two-sided date range following an entry that already owns its
+    own date is the NEXT record's Date-first header, not metadata
+    continuing the one above. The f13 fixture's own b10-b14 run is the
+    source shape: before this was recognised, "2013 - 2017" was absorbed
+    into Ravenswood's details, segmentation then resumed one line late at
+    Thornfield, and Thornfield's window swallowed Elmsworth - costing
+    Elmsworth its entry, its date and its location.
+  */
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-datefirst", [
+      block("Ravenswood College - 2017"),
+      block("2013 - 2017"),
+      block("Thornfield University, Springvale, ON"),
+      block("Elmsworth College, Bakersview, AB"),
+      block("2012 - 2016"),
+    ]);
+    check("date-first range: the run segments into three entries, not two", entries.length, 3);
+    check("date-first range: the dated single-line record keeps its own date", entries[0].dateRangeText?.value, "2017");
+    check("date-first range: and does not absorb the next record's range as a detail", detailValues(entries[0]), []);
+    check("date-first range: the second record owns the range that preceded it", entries[1].dateRangeText?.value, "2013 - 2017");
+    check("date-first range: the second record keeps its own institution", entries[1].institution?.value, "Thornfield University");
+    check("date-first range: the second record keeps its own location", entries[1].location?.value, "Springvale, ON");
+    check("date-first range: the third record is no longer swallowed by the second", entries[2].institution?.value, "Elmsworth College");
+    check("date-first range: the third record owns its own location", entries[2].location?.value, "Bakersview, AB");
+    check("date-first range: the third record owns its own date", entries[2].dateRangeText?.value, "2012 - 2016");
+    /* Provenance: every source block is claimed exactly once. */
+    const claimed = entries.flatMap((e) => e.source.sourceBlockIds);
+    check("date-first range: every source block is claimed", claimed.length, 5);
+    check("date-first range: no source block is claimed twice", new Set(claimed).size, 5);
+  }
+
+  /* The two shapes this predicate already existed for stay untouched: a
+     bare SINGLE date is a genuine Issue/Expiry-style continuation, and a
+     date line carrying its own text is the location/date continuation
+     the rule was written for. */
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-point", [block("Alpha University - 2019"), block("2015")]);
+    check("date-first range negative: a bare single date still continues the entry above", entries.length, 1);
+    check("date-first range negative: and is still preserved as that entry's detail", detailValues(entries[0]), ["2015"]);
+  }
+  counter = 0;
+  {
+    const entries = extractEducationEntries("s-edu-loc", [block("Alpha University"), block("Toronto, ON - 04/2027")]);
+    check("date-first range negative: a date line with its own text still continues the entry above", entries.length, 1);
+    check("date-first range negative: and still yields that entry's location", entries[0].location?.value, "Toronto, ON");
+  }
+
+  /* Two institution lines genuinely belonging to ONE record must not be
+     split. Segmentation is unchanged here - it never counts institutions
+     - so these stay single entries exactly as before. */
+  counter = 0;
+  {
+    const partner = extractEducationEntries("s-edu-partner", [
+      block("University of Alpha"),
+      block("Partner institution: Beta College"),
+      block("2019"),
+    ]);
+    check("multi-institution negative: a partner institution stays in one entry", partner.length, 1);
+    counter = 0;
+    const exchange = extractEducationEntries("s-edu-exchange", [
+      block("University of Alpha"),
+      block("Exchange at Beta College"),
+      block("2019"),
+    ]);
+    check("multi-institution negative: an exchange institution stays in one entry", exchange.length, 1);
+    counter = 0;
+    const subUnit = extractEducationEntries("s-edu-subunit", [
+      block("University of Alpha"),
+      block("College of Engineering"),
+      block("2019"),
+    ]);
+    check("multi-institution negative: a college within a university stays in one entry", subUnit.length, 1);
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

@@ -170,7 +170,39 @@ export type EducationEntryRange = { headerBlockIndices: number[]; bodyBlockIndic
 function isContinuationMetadataLine(block: SemanticContentBlock): boolean {
   if (block.blockType === "bullet") return false;
   if (DEGREE_KEYWORD_RE.test(block.text) || INSTITUTION_KEYWORD_RE.test(block.text)) return false;
-  return hasDateEvidence(block.text);
+  if (!hasDateEvidence(block.text)) return false;
+  /*
+    A line that is NOTHING but a two-sided date range has no metadata of
+    its own to continue an entry WITH - no location, no qualifier word,
+    no text at all on either side of the date.
+
+    collectHeaderWindow already refuses exactly this shape for exactly
+    this reason (see its own comment: a bare RANGE "2013 - 2017"
+    immediately following another entry's own date "is almost certainly
+    that NEXT entry's own Date-first header, not a continuation of this
+    one"), and that is what closes the window above. So a bare range can
+    only ever reach this scan once the preceding entry's window has
+    already closed - which, for a date-last header, means that entry
+    already owns its own date. Reading it as continuation metadata here
+    contradicts the window collector about the same block, and costs the
+    following record its entry: its date-first header line is swallowed
+    backwards, and the two institution lines after it then collapse into
+    one window.
+
+    Deliberately narrow. A bare SINGLE date is untouched - an Issue/
+    Expiry-style point date is a genuine continuation shape, and this
+    predicate's own reason for existing ("Toronto, ON - 04/2027") is a
+    date line that DOES carry its own text, so both keep the behaviour
+    they had. No institution counting, no lookahead, no neighbouring
+    block is read.
+  */
+  const anchor = stripDateAnchor(block.text);
+  const isBareTwoSidedRange =
+    anchor.startDateText !== undefined &&
+    anchor.endDateText !== undefined &&
+    anchor.beforeText.length === 0 &&
+    anchor.afterText.length === 0;
+  return !isBareTwoSidedRange;
 }
 
 function isNewEntryStart(blocks: SemanticContentBlock[], index: number): boolean {
