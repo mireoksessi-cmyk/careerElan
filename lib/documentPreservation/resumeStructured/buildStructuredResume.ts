@@ -22,7 +22,9 @@ import { extractIdentity, hasIdentitySignal } from "./identityExtractor";
 import { extractSummary } from "./summaryExtractor";
 import { extractSkillGroups } from "./skillsExtractor";
 import { extractExperienceEntries } from "./experienceExtractor";
-import { extractEducationEntries } from "./educationExtractor";
+import { extractEducationEntries, segmentEducationRanges } from "./educationExtractor";
+import { segmentLooksLikeCredential, segmentLooksLikeDegree, segmentLooksLikeInstitution } from "./multiAcademicValueParser";
+import { matchAlias } from "../losslessSemantic/aliasDictionary";
 import { extractCredentialEntries } from "./credentialExtractor";
 import { extractProjectEntries } from "./projectExtractor";
 import { extractAwardEntries } from "./awardExtractor";
@@ -37,6 +39,106 @@ import { RESUME_STRUCTURED_SCHEMA_VERSION, type CustomResumeSection, type Resume
 
 function bodyBlocksOf(section: LosslessResumeSection): SemanticContentBlock[] {
   return section.blocks.filter((b) => b.blockType !== "heading");
+}
+
+/*
+  A composite academic section names two families at once ("Education &
+  Certifications", "Academic Background & Credentials", "Education,
+  Licenses & Certifications"). Phase 1 has exactly one normalizedType per
+  section and so classifies these "custom" - correctly, since no single
+  singular type describes them. That classification is left alone; the
+  composite reading lives only here, where routing happens.
+
+  Recognition reuses Phase 1's OWN alias vocabulary rather than a new
+  dictionary: the heading is split on its existing conjunction forms and
+  each part is offered to matchAlias. One part must independently resolve
+  to education, and another must resolve to a credential-family type. The
+  single gap in that vocabulary is a trailing "qualifications" part, which
+  no alias covers; it is accepted only as the CREDENTIAL half, never as
+  the academic one, so a heading whose only signal is "qualifications"
+  ("Summary of Qualifications", "Core Qualifications", "Skills &
+  Qualifications") can never reach composite routing - it has no academic
+  part to pair with. Requiring two parts also leaves every plain
+  "Education" / "Certifications" / "Licenses" section on its existing
+  singular path, untouched.
+*/
+const QUALIFICATION_FAMILY_TOKEN = "qualifications";
+
+function isAcademicCompositeHeading(heading: string | null): boolean {
+  if (heading === null) return false;
+  const parts = heading
+    .toLowerCase()
+    .replace(/[^a-z0-9&,\s]/g, " ")
+    .split(/\s*(?:&|,|\band\b)\s*/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter((part) => part.length > 0);
+  if (parts.length < 2) return false;
+  const families = parts.map((part) => matchAlias(part));
+  if (!families.includes("education")) return false;
+  return parts.some(
+    (part, i) =>
+      families[i] === "certifications" ||
+      families[i] === "licenses" ||
+      part.split(" ").pop() === QUALIFICATION_FAMILY_TOKEN
+  );
+}
+
+/*
+  Splits a composite body into disjoint logical subsets BEFORE any
+  extraction, because handing the same mixed body to two extractors makes
+  both claim it.
+
+  A credential run needs a positive anchor - a block that looks like a
+  credential and looks like neither a degree nor an institution - so an
+  ordinary academic detail line can never open one. It then extends over
+  following blocks that are likewise neither degree- nor institution-
+  shaped: a real licence/certification run routinely lists items whose own
+  wording carries no credential keyword ("Nurse Practitioner (NP)"), and
+  those belong with their anchor rather than with the entry above.
+
+  The same test terminates the run, which is what protects a genuine
+  academic entry that happens to follow licence material - a degree- or
+  institution-shaped line ends the run instead of being swallowed by it.
+  Nothing here reads section text semantics, invents ids, reorders, or
+  touches the lossless section; the returned arrays are views over the
+  same block objects.
+*/
+function partitionCompositeBody(body: SemanticContentBlock[]): {
+  academicBlocks: SemanticContentBlock[];
+  credentialRuns: SemanticContentBlock[][];
+} {
+  const academicBlocks: SemanticContentBlock[] = [];
+  const credentialRuns: SemanticContentBlock[][] = [];
+  const restartsAcademic = (block: SemanticContentBlock): boolean =>
+    segmentLooksLikeDegree(block.text) || segmentLooksLikeInstitution(block.text);
+  let i = 0;
+  while (i < body.length) {
+    if (!segmentLooksLikeCredential(body[i].text) || restartsAcademic(body[i])) {
+      academicBlocks.push(body[i]);
+      i += 1;
+      continue;
+    }
+    const run: SemanticContentBlock[] = [body[i]];
+    let j = i + 1;
+    while (j < body.length && !restartsAcademic(body[j])) {
+      run.push(body[j]);
+      j += 1;
+    }
+    credentialRuns.push(run);
+    i = j;
+  }
+  return { academicBlocks, credentialRuns };
+}
+
+/*
+  An Education entry that names neither a credential nor an institution
+  asserts nothing academic - it is the shape a stray certification line
+  produces when the Education extractor is pointed at it. Reading the
+  extractor's own output this way is what separates a real academic award
+  from a professional certification without any new word list.
+*/
+function namesAcademicSubject(entry: { credential?: unknown; institution?: unknown; institutions: unknown[] }): boolean {
+  return entry.credential !== undefined || entry.institution !== undefined || entry.institutions.length > 0;
 }
 
 /*
@@ -491,12 +593,69 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
         model.customSections.push(adaptCustomSection(section));
         break;
       }
-      default:
+      default: {
+        /*
+          A composite academic section arrives here as "custom" (see
+          isAcademicCompositeHeading). Partition first, extract second:
+          each logical group is offered to the EXISTING Education
+          extractor, and only a group whose own result names an academic
+          subject is kept as Education. A group that does not - the shape
+          a certification line produces - falls to the credential path if
+          it carries positive credential evidence, and to residual custom
+          otherwise. Nothing is guessed: a professional name the credential
+          extractor cannot represent stays residual rather than being
+          forced into a field.
+
+          Every body block lands in exactly one of the three routes, so no
+          block is claimed twice and none is dropped. If the section yields
+          no entries at all, nothing above is committed and the ordinary
+          custom fallback below runs exactly as before.
+        */
+        const compositeBody = isAcademicCompositeHeading(section.originalHeading) ? bodyBlocksOf(section) : [];
+        if (compositeBody.length > 0) {
+          const { academicBlocks, credentialRuns } = partitionCompositeBody(compositeBody);
+          const educationEntries: ReturnType<typeof extractEducationEntries> = [];
+          const credentialEntries: ReturnType<typeof extractCredentialEntries> = [];
+          const residualGroups: SemanticContentBlock[][] = [];
+
+          const routeNonAcademic = (group: SemanticContentBlock[]): void => {
+            const credentials = group.some((b) => segmentLooksLikeCredential(b.text))
+              ? extractCredentialEntries(section.id, group)
+              : [];
+            if (credentials.length > 0) credentialEntries.push(...credentials);
+            else residualGroups.push(group);
+          };
+
+          for (const range of segmentEducationRanges(academicBlocks)) {
+            const group = [...range.headerBlockIndices, ...range.bodyBlockIndices]
+              .sort((a, b) => a - b)
+              .map((i) => academicBlocks[i]);
+            const entries = extractEducationEntries(section.id, group);
+            if (entries.length > 0 && entries.every(namesAcademicSubject)) educationEntries.push(...entries);
+            else routeNonAcademic(group);
+          }
+          for (const run of credentialRuns) routeNonAcademic(run);
+
+          const firstProduced: { source: SourceTrace }[] | null =
+            educationEntries.length > 0 ? educationEntries : credentialEntries.length > 0 ? credentialEntries : null;
+          if (firstProduced) {
+            model.education.push(...educationEntries);
+            model.credentials.push(...credentialEntries);
+            residualGroups.forEach((group, index) => {
+              model.customSections.push(
+                buildEmbeddedResidualSubsection(section.id, `${section.id}-composite-${index}`, section.sourceOrder, null, group)
+              );
+            });
+            mergeSectionHeadingIntoFirst(section, firstProduced);
+            break;
+          }
+        }
         // training, professional_development, affiliations, languages,
         // interests, references, custom - no dedicated Phase 2 slot
         // this round (spec section 16/17); preserved whole, never
         // dropped, never force-classified into a wrong known slot.
         model.customSections.push(adaptCustomSection(section));
+      }
     }
   }
 
