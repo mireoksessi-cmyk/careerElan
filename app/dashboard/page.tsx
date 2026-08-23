@@ -3552,14 +3552,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
   >
     <div className="flex items-start justify-between">
       <div className="text-3xl">💼</div>
-      <div className="text-right">
-        {job.match && (
-          <p className="text-2xl font-extrabold text-green-600">{job.match}</p>
-        )}
-        {job.match && (
-          <p className="text-xs font-bold text-slate-500">Match</p>
-        )}
-      </div>
+      <div className="text-right" />
     </div>
 
     <h3 className="mt-4 text-lg font-extrabold">{job.title}</h3>

@@ -738,16 +738,12 @@ setCategory(state.category || "All");
                 <h2 className="text-xl font-extrabold">
                   {externalMode
                    ? `${countryNameByCode[country]} Job Search Results`
-                    : hasCareerMemory
-                    ? "AI Matched Jobs"
-                    : "Recommended Jobs"}
+                    : "Job Listings"}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {externalMode
                     ? "Live job listings powered by JSearch. Select a job to generate your package."
-                    : hasCareerMemory
-                    ? "These jobs are ranked based on your Career Memory and profile."
-                    : "General recommendations. Upload your resume or complete Career Memory for AI matches."}
+                    : "Live job listings based on your search."}
                 </p>
               </div>
 
@@ -792,22 +788,9 @@ setCategory(state.category || "All");
                       )}
                     </div>
 
-                    {job.match ? (
-                      <div className="text-right">
-                        {index === 0 && page === 1 && (
-                          <span className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-bold text-green-700">
-                            Best
-                          </span>
-                        )}
-                        <p className="mt-2 text-sm font-extrabold text-green-600">
-                          {job.match}% Match
-                        </p>
-                      </div>
-                    ) : (
-                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
-                        General
-                      </span>
-                    )}
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
+                      General
+                    </span>
                   </div>
 
                   <h3 className="mt-5 line-clamp-2 text-sm font-extrabold">
