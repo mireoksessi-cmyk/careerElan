@@ -106,8 +106,25 @@ export function buildPublicationEntryBlock(entry: PublicationEntry, priority: nu
   return block;
 }
 
-export function buildCustomSectionBlock(section: CustomResumeSection, priority: number): AssemblyBlock {
+/*
+  `languages` is passed ONLY for a Languages section whose structured
+  pairs provably cover every content line it holds (see
+  buildProfessionalAtsAssembly's own coverage proof). It never replaces
+  the payload: `section` stays the caller's exact object, so this block
+  still traces to a real Phase 2 object by identity. The policy input is
+  deliberately unchanged too - paragraphCount/bulletCount still describe
+  the SOURCE section, so breakPolicy resolves the same "custom-section"
+  policy either way and no new block kind is introduced. Only the size
+  estimate follows what will actually be drawn, since two paired lines
+  measure differently from four unpaired ones.
+*/
+export function buildCustomSectionBlock(section: CustomResumeSection, priority: number, languages?: NonNullable<AssemblyBlock["languageEntries"]>): AssemblyBlock {
   const block = buildBlock("custom-section", `assembly-custom-section-${section.id}`, section.id, section.source.sourceSectionId, section.source.sourceBlockIds, priority, false, section, { paragraphCount: section.paragraphs.length, bulletCount: section.bullets.length });
+  if (languages && languages.length > 0) {
+    block.languageEntries = languages;
+    block.estimatedContentUnits = HEADER_BASELINE_UNITS + sumTextUnits(languages.map((l) => (l.proficiency ? `${l.name} ${l.proficiency}` : l.name)));
+    return block;
+  }
   block.estimatedContentUnits = HEADER_BASELINE_UNITS + sumTextUnits(section.paragraphs.map((p) => p.value)) + sumTextUnits(section.bullets.map((b) => b.text));
   return block;
 }

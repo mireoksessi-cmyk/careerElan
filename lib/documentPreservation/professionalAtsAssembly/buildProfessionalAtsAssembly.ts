@@ -270,9 +270,63 @@ export function buildProfessionalAtsAssembly(model: ResumeStructuredModel): Prof
     if (!visible) {
       sections[key] = emptySection(key, order(key), model.customSections.length === 0 ? "empty" : "no-valid-entries");
     } else {
+      /*
+        A Languages section arrives here twice over: once as this raw
+        custom section, whose lines Phase 2 kept unpaired, and once as
+        model.languages, which languageExtractor already paired. Rendering
+        the raw one shows a reader four detached lines where two entries
+        belong. The pairs are therefore handed to the block that this
+        section already produces - the section itself stays the payload,
+        so nothing here is invented and the validator needs no exception.
+
+        Matching is on sourceSectionId, never on heading text, so a
+        section such as "Programming Languages" is untouched.
+
+        The paired form is used ONLY when it is a lossless REGROUPING of
+        what the section already holds: every sourceBlockId behind the
+        section's own content must be claimed by EXACTLY ONE matched
+        entry. That single test is pure provenance - no language
+        taxonomy, no name matching, no text heuristics - and it fails
+        closed in both directions that matter.
+
+        Claimed zero times means the section holds a line no entry
+        accounts for (a stray note, a partial extraction); pairing would
+        silently drop it, so the raw section is kept instead.
+
+        Claimed more than once means several entries came from the SAME
+        line - the source wrote its languages inline, e.g. one line
+        reading "English (fluent), Italian (native)". That line is
+        ALREADY correctly paired prose; re-emitting it as two synthesised
+        lines would discard the document's own punctuation and grouping
+        to no benefit. Only the shape this fix exists for - one value per
+        line, which reads as detached lines - produces a one-to-one
+        claim, and only that shape is regrouped.
+      */
+      const languagesBySection = new Map<string, typeof model.languages>();
+      for (const language of model.languages) {
+        const existing = languagesBySection.get(language.source.sourceSectionId);
+        if (existing) existing.push(language);
+        else languagesBySection.set(language.source.sourceSectionId, [language]);
+      }
+      const coveringLanguages = (section: (typeof model.customSections)[number]): typeof model.languages | undefined => {
+        const candidates = languagesBySection.get(section.source.sourceSectionId);
+        if (!candidates || candidates.length === 0) return undefined;
+        const claims = new Map<string, number>();
+        for (const language of candidates) {
+          for (const id of language.source.sourceBlockIds) claims.set(id, (claims.get(id) ?? 0) + 1);
+        }
+        const required = new Set([
+          ...section.paragraphs.flatMap((p) => p.source.sourceBlockIds),
+          ...section.bullets.flatMap((b) => b.source.sourceBlockIds),
+          ...section.content.flatMap((c) => c.source.sourceBlockIds),
+        ]);
+        if (required.size === 0) return undefined;
+        for (const id of required) if (claims.get(id) !== 1) return undefined;
+        return candidates;
+      };
       const validSections = model.customSections.filter((s) => hasCustomContent([s]));
       const ordered = orderCustomSectionsBySourceOrder(validSections);
-      const blocks = ordered.map((s, i) => buildCustomSectionBlock(s, i));
+      const blocks = ordered.map((s, i) => buildCustomSectionBlock(s, i, coveringLanguages(s)));
       sections[key] = {
         key, label: PROFESSIONAL_ATS_SECTION_LABELS[key], order: order(key), visible: true, visibilityReason: "has-content",
         blocks, keepHeadingWithFirstBlock: true, breakBefore: "allow", breakAfter: "allow", minBlocksToShow: 1,

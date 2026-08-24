@@ -562,12 +562,35 @@ function PublicationView({ block, subRange, isContinuation, spacing = DEFAULT_SP
   );
 }
 
+/*
+  block.languageEntries is present only for a Languages section whose
+  structured pairs provably cover every content line it holds (see
+  buildProfessionalAtsAssembly). One display item per language then
+  replaces the section's unpaired lines, so a reader sees "English
+  — Native or Bilingual" instead of "English" and "Native or
+  Bilingual" as two detached lines. The heading still comes from the
+  section itself, so the document's own wording survives. When a
+  language carries no proficiency only its name is drawn - never an
+  invented descriptor. Absent the field, this renders exactly as before.
+
+  The items go through the SAME renderOrderedContentBlocks the raw path
+  uses, so pagination, sub-range splitting and continuation behave
+  identically; only the text being laid out differs.
+*/
 function CustomSectionView({ block, subRange, isContinuation, spacing = DEFAULT_SPACING }: { block: AssemblyBlock; subRange?: SubRange; isContinuation: boolean; spacing?: DensitySpacingTokens }) {
   const section = block.payload as CustomResumeSection;
+  const content: EntryContentBlock[] = block.languageEntries
+    ? block.languageEntries.map((language, i) => ({
+        id: `${section.id}-language-${i}`,
+        kind: "paragraph" as const,
+        text: language.proficiency ? `${language.name} — ${language.proficiency}` : language.name,
+        source: language.source,
+      }))
+    : section.content;
   return (
     <div data-block-id={block.id} data-block-kind="custom-section" data-source-entry-id={block.sourceEntryId}>
       {!isContinuation && section.originalHeading && <h3 style={{ margin: 0 }}>{section.originalHeading}</h3>}
-      {renderOrderedContentBlocks(section.content, subRange, isContinuation, spacing)}
+      {renderOrderedContentBlocks(content, subRange, isContinuation, spacing)}
     </div>
   );
 }

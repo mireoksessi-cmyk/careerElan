@@ -427,16 +427,30 @@ function renderPublication(block: AssemblyBlock, ctx: BuildContext, blockGapTwip
   );
 }
 
+/*
+  DOCX counterpart of renderers.tsx's CustomSectionView - same rule, same
+  separator, same fallback, so the two formats never disagree about how
+  many language entries exist or which proficiency belongs to which
+  language. See that view's own comment for why the field exists.
+*/
 function renderCustomSection(block: AssemblyBlock, ctx: BuildContext, blockGapTwips: number) {
   const section = block.payload as CustomResumeSection;
+  const content: EntryContentBlock[] = block.languageEntries
+    ? block.languageEntries.map((language, i) => ({
+        id: `${section.id}-language-${i}`,
+        kind: "paragraph" as const,
+        text: language.proficiency ? `${language.name} — ${language.proficiency}` : language.name,
+        source: language.source,
+      }))
+    : section.content;
 
   if (section.originalHeading) {
     pushParagraph(ctx, block.id, block.sourceEntryId, [run(section.originalHeading, ctx, { bold: true })], {
       spacingBeforeTwips: blockGapTwips,
-      keepNext: section.content.length > 0,
+      keepNext: content.length > 0,
     });
   }
-  renderOrderedContentSubItems(block, ctx, section.content);
+  renderOrderedContentSubItems(block, ctx, content);
 }
 
 /*

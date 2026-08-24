@@ -17,6 +17,7 @@
   rewritten here - Phase 3 only decides visibility/order/grouping/break
   intent around content Phase 2 already produced.
 */
+import type { LanguageEntry } from "../resumeStructured/types";
 
 export type ProfessionalAtsSectionKey =
   | "identity"
@@ -97,6 +98,28 @@ export type AssemblyBlock = {
   isUncertain: boolean;
 
   payload: unknown;
+
+  /*
+    Languages only. A resume's Languages section reaches Phase 2 as a
+    CustomResumeSection whose lines are UNPAIRED ("English", "French",
+    "Native or Bilingual", "Native or Bilingual" as four separate
+    values), while languageExtractor has ALREADY paired the same lines
+    into model.languages. Rendering the raw section leaves a reader with
+    four detached lines instead of two entries.
+
+    These are the extractor's own LanguageEntry objects, carried BESIDE
+    the payload rather than folded into it: `payload` stays the exact
+    model.customSections[i] reference, so assemblyValidator's identity
+    provenance check (its check E) still traces this block to a real
+    Phase 2 object with no exception of any kind. Populated only when
+    buildProfessionalAtsAssembly has PROVEN, from sourceBlockIds alone,
+    that these entries cover every content line of that section;
+    otherwise it is absent and the raw section renders exactly as
+    before. Deliberately LanguageEntry-typed rather than a general
+    content-override channel - there is no string here for this layer to
+    author.
+  */
+  languageEntries?: LanguageEntry[];
 };
 
 export type ProfessionalAtsAssemblySection = {
