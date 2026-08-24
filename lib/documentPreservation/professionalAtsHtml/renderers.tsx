@@ -163,7 +163,7 @@ function renderOrderedContentBlocks(content: EntryContentBlock[], subRange: SubR
     const isFirstOverall = visibleSeen === 0;
     if (run.isBullet) {
       rendered.push(
-        <ul key={`ul-${visibleItems[0].index}`} style={{ margin: 0, marginTop: isFirstOverall && isContinuation ? 0 : spacing.bulletGapPx }}>
+        <ul key={`ul-${visibleItems[0].index}`} style={{ margin: 0, paddingLeft: HIERARCHY_INDENT_PX, marginTop: isFirstOverall && isContinuation ? 0 : spacing.bulletGapPx }}>
           {visibleItems.map(({ block, index }, localIdx) => (
             <li key={index} data-sub-index={index} style={{ marginTop: gapMarginTop(localIdx, spacing.bulletGapPx) }}>
               {block.text}
@@ -213,6 +213,26 @@ function buildContentIndexMap(content: EntryContentBlock[]): Map<string, number>
   return map;
 }
 
+/*
+  One step for the whole template, used for two things: how far a nested
+  hierarchy level advances, and how far a bullet list is inset from whatever
+  it sits under.
+
+  Every <ul> below states that inset explicitly. They previously set margin
+  alone, and no stylesheet here resets list padding, so each list silently
+  inherited the browser's own padding-inline-start (40px in Chromium) - a
+  value this template never chose and does not use anywhere else. Bullets
+  therefore stepped 40px while declared nesting stepped 16, and a nested list
+  landed on 16 + 40. Declaring the padding removes the UA default from the
+  geometry entirely, so first-level bullets share one edge and a nested list
+  advances by exactly one step.
+
+  The declaration is inline rather than a stylesheet rule because Professional
+  ATS HTML is wrapped by two independent documents that each carry their own
+  <style> - htmlDocument.ts for measurement and paginatedHtmlString.ts for the
+  paginated preview and the PDF. An inline style travels with the element into
+  all of them, so measured geometry and rendered geometry cannot drift apart.
+*/
 const HIERARCHY_INDENT_PX = 16;
 
 function renderHierarchicalNodes(
@@ -242,7 +262,7 @@ function renderHierarchicalNodes(
     if (run.isBullet) {
       const isFirstOverall = seenRef.count === 0;
       rendered.push(
-        <ul key={`ul-${run.items[0].index}`} style={{ margin: 0, marginLeft: indentPx, marginTop: isFirstOverall && isContinuation ? 0 : spacing.bulletGapPx }}>
+        <ul key={`ul-${run.items[0].index}`} style={{ margin: 0, marginLeft: indentPx, paddingLeft: HIERARCHY_INDENT_PX, marginTop: isFirstOverall && isContinuation ? 0 : spacing.bulletGapPx }}>
           {run.items.map(({ node, index }, localIdx) => (
             <li key={index} data-sub-index={index} style={{ marginTop: gapMarginTop(localIdx, spacing.bulletGapPx) }}>
               {node.text}
@@ -458,7 +478,7 @@ function EducationView({ block, subRange, isContinuation, spacing = DEFAULT_SPAC
         </div>
       )}
       {items.some((v) => v.trim().length > 0) && (
-        <ul style={{ margin: 0, marginTop: isContinuation ? 0 : spacing.bulletGapPx }}>
+        <ul style={{ margin: 0, paddingLeft: HIERARCHY_INDENT_PX, marginTop: isContinuation ? 0 : spacing.bulletGapPx }}>
           {items.map((text, i) => inRange(i, subRange) && text.trim().length > 0 && <li key={i} data-sub-index={i} style={{ marginTop: gapMarginTop(i, spacing.bulletGapPx) }}>{text}</li>)}
         </ul>
       )}
