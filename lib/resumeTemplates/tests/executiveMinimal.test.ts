@@ -29,6 +29,47 @@ function checkTrue(label: string, actual: boolean) {
 
 const GENERATED_AT = "2026-01-01T00:00:00.000Z";
 
+/*
+  Structured-languages variant of the same fixture. The base fixture ships
+  languages: [] plus a raw "Language Proficiency" section, which is the
+  empty-languages fallback every assertion above already covers. A resume
+  that DOES yield structured languages carries BOTH - paired name/
+  proficiency entries and the same section still preserved raw, its lines
+  unpaired. This reproduces that exact shape (same section, same
+  provenance) and adds an unrelated "Programming Languages" section from a
+  DIFFERENT source section, which must survive untouched: the suppression
+  is keyed on provenance, never on the word "language" in a heading.
+*/
+const UNPAIRED_LANGUAGE_LINES = ["English", "Native", "Français", "Courant"];
+const PROGRAMMING_LANGUAGES_TEXT = "TypeScript, Python, SQL";
+
+function buildStructuredLanguagesResume() {
+  const resume = buildJordanEllisResume();
+  const raw = resume.customSections.find((s) => s.id === "custom-languages")!;
+  const progTrace = { ...raw.source, sourceSectionId: "sec-custom-prog-lang" };
+  raw.paragraphs = UNPAIRED_LANGUAGE_LINES.map((text) => ({ value: text, confidence: 0.7, extractionMethod: "explicit-label" as const, source: raw.source }));
+  raw.content = UNPAIRED_LANGUAGE_LINES.map((text, i) => ({ id: `custom-lang-c${i + 1}`, kind: "paragraph" as const, text, source: raw.source }));
+  resume.languages = [
+    { name: "English", proficiency: "Native", source: raw.source },
+    { name: "Français", proficiency: "Courant", source: raw.source },
+  ];
+  resume.customSections.push({
+    id: "custom-programming-languages",
+    originalHeading: "Programming Languages",
+    displayHeading: "Programming Languages",
+    paragraphs: [],
+    bullets: [],
+    content: [{ id: "custom-prog-c1", kind: "paragraph" as const, text: PROGRAMMING_LANGUAGES_TEXT, source: progTrace }],
+    sourceOrder: 99,
+    source: progTrace,
+  });
+  return resume;
+}
+
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 async function main() {
   ensureTemplatesRegistered();
   const resume = buildJordanEllisResume();
@@ -88,6 +129,38 @@ async function main() {
   checkTrue("docx: document.xml is NOT an image-only wrapper (contains real <w:t> text runs)", documentXml.includes("<w:t"));
   checkTrue("docx: document.xml does not embed a full-page raster image as its only content (no w:drawing wrapping the entire body would be unusual, spot-check for excessive base64 blob markers absent)", !documentXml.includes("data:image"));
 
+
+  /*
+    Structured-languages regression (see buildStructuredLanguagesResume
+    above). Before this fix the raw section rendered its four unpaired
+    lines while the structured pairs were dropped on the floor, so a reader
+    saw four detached lines instead of two entries.
+  */
+  const langResume = buildStructuredLanguagesResume();
+  const langRuntime = createCanonicalRuntime({
+    resume: langResume,
+    version: createRuntimeVersion({ id: "exec-min-test-lang-v1", reason: "initial", createdAt: GENERATED_AT }),
+    metadata: createRuntimeMetadata({ schemaVersion: langResume.schemaVersion }),
+    overlayState: createRuntimeOverlayState(),
+  });
+  const langHtml = await renderTemplateFromRuntime(langRuntime, { templateId: "executive-minimal", generatedAt: GENERATED_AT }, "html");
+  const langDocx = await renderTemplateFromRuntime(langRuntime, { templateId: "executive-minimal", generatedAt: GENERATED_AT }, "docx");
+  const langDocumentXml = await (await JSZip.loadAsync(langDocx.bytes)).file("word/document.xml")!.async("string");
+
+  checkTrue("languages/html: renders the paired English entry", langHtml.html.includes("English — Native"));
+  checkTrue("languages/html: renders the paired Français entry", langHtml.html.includes("Français — Courant"));
+  check("languages/html: the source section's own heading appears exactly once (the paired block replaces the raw one, never doubles it)", occurrences(langHtml.html, "Language Proficiency"), 1);
+  checkTrue("languages/html: the unrelated Programming Languages section survives (suppression is by provenance, not by heading text)", langHtml.html.includes(PROGRAMMING_LANGUAGES_TEXT));
+  checkTrue("languages/html: validation.passed is true", langHtml.validation.passed);
+  check("languages/html: validation.missingTextCount is 0", langHtml.validation.missingTextCount, 0);
+  check("languages/html: validation.inventedTextCount is 0", langHtml.validation.inventedTextCount, 0);
+
+  checkTrue("languages/docx: renders the paired English entry", langDocumentXml.includes("English — Native"));
+  checkTrue("languages/docx: renders the paired Français entry", langDocumentXml.includes("Français — Courant"));
+  check("languages/docx: the source section's own heading appears exactly once", occurrences(langDocumentXml, "LANGUAGE PROFICIENCY"), 1);
+  checkTrue("languages/docx: the unrelated Programming Languages section survives", langDocumentXml.includes(PROGRAMMING_LANGUAGES_TEXT));
+  checkTrue("languages/docx: validation.passed is true", langDocx.validation.passed);
+  check("languages/docx: validation.missingTextCount is 0", langDocx.validation.missingTextCount, 0);
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   await closeSharedBrowser();
   if (fail > 0) process.exit(1);

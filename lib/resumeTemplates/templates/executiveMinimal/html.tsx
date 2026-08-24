@@ -276,15 +276,56 @@ function buildFlowItems(normalized: ReturnType<typeof normalizeResume>, visible:
     }
 
     if (key === "custom") {
-      if (normalized.customSections.length === 0) continue;
-      normalized.customSections.forEach((section, i) => {
+      /*
+        Structured languages are already paired (name + proficiency); the
+        same source section is also kept as a raw custom section whose
+        lines are unpaired, so rendering both shows Languages twice - once
+        correctly and once as detached lines. The raw one is dropped only
+        when its sourceSectionId is one the pairs came from, never by
+        heading text, so an unrelated "Programming Languages" section
+        survives. The suppressed section's own heading is carried onto the
+        paired block, so the candidate's wording is never swapped for a
+        generic label. With no structured languages nothing is suppressed
+        and the raw fallback renders exactly as before.
+      */
+      const structuredLanguages = normalized.languages ?? [];
+      const representedSectionIds = new Set(structuredLanguages.map((l) => l.sourceSectionId));
+      const supersededSections = normalized.customSections.filter(
+        (section) => section.sourceSectionId !== undefined && representedSectionIds.has(section.sourceSectionId)
+      );
+      const languagesHeading = supersededSections[0]?.heading ?? "Languages";
+      const customSections = normalized.customSections.filter(
+        (section) => section.sourceSectionId === undefined || !representedSectionIds.has(section.sourceSectionId)
+      );
+      if (structuredLanguages.length === 0 && customSections.length === 0) continue;
+      if (structuredLanguages.length > 0) {
+        items.push({
+          id: "languages",
+          sectionKey: key,
+          node: (
+            <section>
+              {heading(key)}
+              <div style={{ marginBottom: tokens.entryGapPx }}>
+                <div style={{ fontWeight: 700, color: colors.heading }}>{languagesHeading}</div>
+                {structuredLanguages.map((language, i) => (
+                  <div key={i} style={{ color: colors.text }}>
+                    {language.proficiency ? `${language.name} — ${language.proficiency}` : language.name}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ),
+        });
+      }
+      customSections.forEach((section, i) => {
         const body = (
           <div style={{ marginBottom: tokens.entryGapPx }}>
             <div style={{ fontWeight: 700, color: colors.heading }}>{section.heading}</div>
             <ContentItemsView items={section.items} textColor={colors.text} />
           </div>
         );
-        items.push({ id: `custom-${section.id}`, sectionKey: key, node: i === 0 ? (<section>{heading(key)}{body}</section>) : body });
+        const isFirstInSection = i === 0 && structuredLanguages.length === 0;
+        items.push({ id: `custom-${section.id}`, sectionKey: key, node: isFirstInSection ? (<section>{heading(key)}{body}</section>) : body });
       });
       continue;
     }

@@ -152,7 +152,33 @@ export async function renderExecutiveMinimalDocx(context: TemplateRenderContext)
       continue;
     }
     if (key === "custom") {
+      /*
+        Structured languages are already paired (name + proficiency); the
+        same source section is also kept as a raw custom section whose
+        lines are unpaired, so rendering both shows Languages twice - once
+        correctly and once as detached lines. The raw one is dropped only
+        when its sourceSectionId is one the pairs came from, never by
+        heading text, so an unrelated "Programming Languages" section
+        survives. The suppressed section's own heading is carried onto the
+        paired block, so the candidate's wording is never swapped for a
+        generic label. With no structured languages nothing is suppressed
+        and the raw fallback renders exactly as before.
+      */
+      const structuredLanguages = normalized.languages ?? [];
+      const representedSectionIds = new Set(structuredLanguages.map((l) => l.sourceSectionId));
+      const supersededSections = normalized.customSections.filter(
+        (section) => section.sourceSectionId !== undefined && representedSectionIds.has(section.sourceSectionId)
+      );
+      const languagesHeading = supersededSections[0]?.heading ?? "Languages";
+      if (structuredLanguages.length > 0) {
+        heading(languagesHeading);
+        for (const language of structuredLanguages) {
+          const line = language.proficiency ? `${language.name} — ${language.proficiency}` : language.name;
+          paragraphs.push(new Paragraph({ children: [run(line)], spacing: { after: 40 } }));
+        }
+      }
       for (const section of normalized.customSections) {
+        if (section.sourceSectionId !== undefined && representedSectionIds.has(section.sourceSectionId)) continue;
         heading(section.heading);
         paragraphs.push(...renderContentItemsToParagraphs(section.items, contentItemOpts));
       }

@@ -233,7 +233,45 @@ function buildSidebarItems(normalized: ReturnType<typeof normalizeResume>, color
     });
   }
 
-  const languageSections = normalized.customSections.filter(isLanguageCustomSection);
+  /*
+    Structured languages are already paired (name + proficiency); the same
+    source section is also kept as a raw custom section whose lines are
+    unpaired, so rendering both shows Languages twice in this sidebar -
+    once correctly and once as detached lines. The raw one is dropped only
+    when its sourceSectionId is one the pairs came from, never by heading
+    text, so an unrelated "Programming Languages" section survives. With
+    the suppressed section's own heading is carried onto the paired block,
+    so the candidate's wording is never swapped for a generic label. With
+    no structured languages nothing is suppressed and the raw fallback
+    renders exactly as before.
+  */
+  const structuredLanguages = normalized.languages ?? [];
+  const representedSectionIds = new Set(structuredLanguages.map((l) => l.sourceSectionId));
+  const supersededSections = normalized.customSections.filter(
+    (section) => section.sourceSectionId !== undefined && representedSectionIds.has(section.sourceSectionId)
+  );
+  const languagesHeading = supersededSections[0]?.heading ?? CREATIVE_TIMELINE_LABELS.languages;
+  if (structuredLanguages.length > 0) {
+    headingsInOrder.push(languagesHeading);
+    items.push({
+      id: "languages",
+      sectionKey: "languages",
+      node: (
+        <div style={{ color: colors.sidebarText, fontSize: "0.85em" }}>
+          {sidebarHeading(languagesHeading)}
+          {structuredLanguages.map((language, i) => (
+            <div key={i} style={{ marginBottom: "2px" }}>
+              {language.proficiency ? `${language.name} — ${language.proficiency}` : language.name}
+            </div>
+          ))}
+        </div>
+      ),
+    });
+  }
+
+  const languageSections = normalized.customSections
+    .filter(isLanguageCustomSection)
+    .filter((section) => section.sourceSectionId === undefined || !representedSectionIds.has(section.sourceSectionId));
   if (languageSections.length > 0) {
     languageSections.forEach((section) => {
       headingsInOrder.push(section.heading);

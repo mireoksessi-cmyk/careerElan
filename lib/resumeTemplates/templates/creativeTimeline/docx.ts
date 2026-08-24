@@ -139,7 +139,34 @@ export async function renderCreativeTimelineDocx(context: TemplateRenderContext)
       sidebarParagraphs.push(new Paragraph({ children: [run(label, { bold: true, size: tokens.fontSizeHalfPoints - 2, colorHex: sidebarTextHex }), run(g.skills.join(", "), { size: tokens.fontSizeHalfPoints - 2, colorHex: sidebarTextHex })], spacing: { after: 40 } }));
     }
   }
-  const languageSections = normalized.customSections.filter(isLanguageCustomSection);
+  /*
+    Structured languages are already paired (name + proficiency); the same
+    source section is also kept as a raw custom section whose lines are
+    unpaired, so rendering both shows Languages twice in this sidebar -
+    once correctly and once as detached lines. The raw one is dropped only
+    when its sourceSectionId is one the pairs came from, never by heading
+    text, so an unrelated "Programming Languages" section survives. With
+    the suppressed section's own heading is carried onto the paired block,
+    so the candidate's wording is never swapped for a generic label. With
+    no structured languages nothing is suppressed and the raw fallback
+    renders exactly as before.
+  */
+  const structuredLanguages = normalized.languages ?? [];
+  const representedSectionIds = new Set(structuredLanguages.map((l) => l.sourceSectionId));
+  const supersededSections = normalized.customSections.filter(
+    (section) => section.sourceSectionId !== undefined && representedSectionIds.has(section.sourceSectionId)
+  );
+  const languagesHeading = supersededSections[0]?.heading ?? CREATIVE_TIMELINE_LABELS.languages;
+  if (structuredLanguages.length > 0) {
+    sidebarParagraphs.push(new Paragraph({ children: [run(languagesHeading.toUpperCase(), { bold: true, size: tokens.fontSizeHalfPoints - 1, colorHex: sidebarTextHex })], spacing: { before: 160, after: 60 } }));
+    for (const language of structuredLanguages) {
+      const line = language.proficiency ? `${language.name} — ${language.proficiency}` : language.name;
+      sidebarParagraphs.push(new Paragraph({ children: [run(line, { size: tokens.fontSizeHalfPoints - 2, colorHex: sidebarTextHex })], spacing: { after: 40 } }));
+    }
+  }
+  const languageSections = normalized.customSections
+    .filter(isLanguageCustomSection)
+    .filter((section) => section.sourceSectionId === undefined || !representedSectionIds.has(section.sourceSectionId));
   for (const section of languageSections) {
     sidebarParagraphs.push(new Paragraph({ children: [run(section.heading.toUpperCase(), { bold: true, size: tokens.fontSizeHalfPoints - 1, colorHex: sidebarTextHex })], spacing: { before: 160, after: 60 } }));
     sidebarParagraphs.push(...renderContentItemsToParagraphs(section.items, { ...contentOpts, sizeHalfPoints: tokens.fontSizeHalfPoints - 2 }));
