@@ -39,19 +39,19 @@ export const MIN_SAFE_LINE_HEIGHT = 1.15;
 
 export const DENSITY_SPACING: Record<AssemblyDensity, DensitySpacingTokens> = {
   comfortable: {
-    pagePaddingPx: 48, sectionGapPx: 20, headingMarginBottomPx: 10, entryGapPx: 14,
+    pagePaddingPx: 48, sectionGapPx: 23, headingMarginBottomPx: 10, entryGapPx: 14,
     bulletGapPx: 4, skillItemGapPx: 8, lineHeight: 1.4, fontSizePt: 11,
   },
   balanced: {
-    pagePaddingPx: 40, sectionGapPx: 16, headingMarginBottomPx: 8, entryGapPx: 11,
+    pagePaddingPx: 40, sectionGapPx: 18, headingMarginBottomPx: 8, entryGapPx: 11,
     bulletGapPx: 3, skillItemGapPx: 6, lineHeight: 1.3, fontSizePt: 10.5,
   },
   compact: {
-    pagePaddingPx: 32, sectionGapPx: 12, headingMarginBottomPx: 6, entryGapPx: 8,
+    pagePaddingPx: 32, sectionGapPx: 13, headingMarginBottomPx: 6, entryGapPx: 8,
     bulletGapPx: 2, skillItemGapPx: 5, lineHeight: 1.2, fontSizePt: 10.5,
   },
   "ultra-compact": {
-    pagePaddingPx: 24, sectionGapPx: 8, headingMarginBottomPx: 4, entryGapPx: 6,
+    pagePaddingPx: 24, sectionGapPx: 10, headingMarginBottomPx: 4, entryGapPx: 6,
     bulletGapPx: 2, skillItemGapPx: 4, lineHeight: 1.15, fontSizePt: 10,
   },
 };
