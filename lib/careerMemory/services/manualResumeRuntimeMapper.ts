@@ -27,13 +27,40 @@
   rows with no recoverable envelope) - this file follows that same
   precedent with a self-documenting, non-empty id instead of an empty one.
 
-  languages: ResumeStructuredModel has no `languages` field anywhere (see
-  mappers.ts's own header comment, "LANGUAGES: A DB-ONLY, RUNTIME-
-  UNSUPPORTED TABLE") - a pre-existing, disclosed schema gap this file
-  does not close (that would be a schema redesign, explicitly out of
-  scope this round). career_memory.languages is therefore not mapped here
-  and stays exactly what it always was: Career Memory data with no
-  canonical-resume-rendering counterpart.
+  languages: ResumeStructuredModel DOES carry `languages: LanguageEntry[]`
+  (types.ts), and the template layer consumes it - so the note that used
+  to sit here, claiming no such field existed anywhere, described a schema
+  that has since changed. career_memory.languages is therefore mapped, and
+  the mapping is a rename rather than a parse: the editor already stores
+  each entry as two separate typed fields ({language, level}), which is
+  the same name/proficiency pair LanguageEntry holds. Nothing is split out
+  of a free-text line here, so the extractor's "A (B)" reading rule has
+  nothing to act on and no second parser is introduced. A row whose
+  `language` is blank is dropped, matching every other isNonEmpty* rule in
+  this file; a blank `level` maps to an absent proficiency rather than an
+  empty string, so a template renders the bare language name instead of a
+  dangling separator.
+
+  Two of the four templates cannot reach model.languages on their own.
+  Professional ATS pairs languages into a custom section that shares their
+  provenance, and Executive Minimal renders them inside its `custom` slot,
+  whose visibility is `customSections.length > 0`. Neither finds anything
+  when the only languages a resume has were typed rather than extracted.
+  So the Languages field the user actually filled in is ALSO represented as
+  a custom section here, carrying the same MANUAL_ENTRY_SOURCE_TRACE as
+  every other manual field. That is a second view of one real answer the
+  user gave, not a fabricated section: nothing is asserted that was not
+  typed, and no uploaded sourceBlockId is invented to carry it.
+
+  model.languages is deliberately kept as well. The templates that read it
+  directly still see structured pairs, and the ones that do not get the
+  section - and the two views cannot double up, because
+  MANUAL_ENTRY_SOURCE_TRACE carries no sourceBlockIds: every template's
+  coverage rule requires each of a section's own blocks to be claimed
+  exactly once, an empty block list can never satisfy that, so the pairs
+  stand down and the section renders alone. That is the shipped safety
+  rule behaving as designed, and buildManualLanguageSection's own comment
+  restates it where the dependency lives.
 
   schemaVersion: reuses the real Phase 1/2 parser's own
   RESUME_STRUCTURED_SCHEMA_VERSION constant (types.ts) rather than
@@ -123,10 +150,16 @@ function manualDescriptionParagraphs(text: string | null | undefined): Structure
 // jsonb shapes app/career-memory/page.tsx's persistMemory() writes -
 // EducationItem/WorkItem/VolunteerItem/CertificationItem/ProjectItem).
 // ============================================================
-export type ManualWorkEntry = { company?: string; jobTitle?: string; location?: string; startDate?: string; endDate?: string; isCurrent?: boolean; description?: string };
+/* The editor writes two different shapes into this one type: WorkItem
+   names the party/title `company`/`jobTitle`, VolunteerItem names them
+   `organization`/`role` (app/career-memory/page.tsx). buildExperienceEntry
+   already reads whichever pair applies; the volunteer names are declared
+   here so the emptiness gate below can read them too. */
+export type ManualWorkEntry = { company?: string; jobTitle?: string; organization?: string; role?: string; location?: string; startDate?: string; endDate?: string; isCurrent?: boolean; description?: string };
 export type ManualEducationEntry = { school?: string; program?: string; startDate?: string; endDate?: string; gpa?: string; coursework?: string };
 export type ManualCertificationEntry = { name?: string; issuer?: string; date?: string; description?: string };
 export type ManualProjectEntry = { name?: string; role?: string; dates?: string; description?: string };
+export type ManualLanguageEntry = { language?: string; level?: string };
 
 export type ManualCareerMemoryInput = {
   firstName?: string | null;
@@ -143,10 +176,20 @@ export type ManualCareerMemoryInput = {
   education?: ManualEducationEntry[] | null;
   certifications?: ManualCertificationEntry[] | null;
   projects?: ManualProjectEntry[] | null;
+  languages?: ManualLanguageEntry[] | null;
 };
 
 function isNonEmptyWork(entry: ManualWorkEntry): boolean {
   return !!(entry.company?.trim() || entry.jobTitle?.trim() || entry.description?.trim());
+}
+/* Volunteer rows carry organization/role instead of company/jobTitle, so
+   isNonEmptyWork's field names miss them: a volunteer entry with a real
+   organization and role but no description read as blank and was dropped
+   before buildExperienceEntry - which does understand both namings - ever
+   saw it. Describing a volunteer post without writing a description is
+   ordinary, so that entry has to survive. */
+function isNonEmptyVolunteer(entry: ManualWorkEntry): boolean {
+  return isNonEmptyWork(entry) || !!(entry.organization?.trim() || entry.role?.trim());
 }
 function isNonEmptyEducation(entry: ManualEducationEntry): boolean {
   return !!(entry.school?.trim() || entry.program?.trim());
@@ -156,6 +199,48 @@ function isNonEmptyCertification(entry: ManualCertificationEntry): boolean {
 }
 function isNonEmptyProject(entry: ManualProjectEntry): boolean {
   return !!(entry.name?.trim() || entry.description?.trim());
+}
+/* A proficiency with no language names nothing, so the language itself is
+   what makes the row real - deliberately narrower than the predicates
+   above, which accept any one populated field. */
+function isNonEmptyLanguage(entry: ManualLanguageEntry): boolean {
+  return !!entry.language?.trim();
+}
+
+/*
+  The user's Career Memory Languages field, expressed as a custom section so
+  Professional ATS and Executive Minimal can render it through the rendering
+  they already have. Heading is the field's own name; one line per entry, in
+  the order entered, joined with the same em dash every template uses for a
+  name/proficiency pair. A language with no level contributes its bare name
+  rather than a dangling separator.
+
+  Depends on MANUAL_ENTRY_SOURCE_TRACE carrying no sourceBlockIds: that is
+  what makes every template's coverage rule decline to pair model.languages
+  against this section, leaving exactly one Languages representation instead
+  of two. Asserted in this mapper's own tests.
+*/
+function buildManualLanguageSection(languages: LanguageEntry[]): CustomResumeSection {
+  return {
+    id: "manual-languages",
+    originalHeading: "Languages",
+    displayHeading: "Languages",
+    paragraphs: languages.map((language) => ({
+      value: language.proficiency ? `${language.name} — ${language.proficiency}` : language.name,
+      confidence: 1,
+      extractionMethod: "explicit-label",
+      source: MANUAL_ENTRY_SOURCE_TRACE,
+    })),
+    bullets: [],
+    content: languages.map((language, i) => ({
+      id: `manual-languages-${i}`,
+      kind: "paragraph" as const,
+      text: language.proficiency ? `${language.name} — ${language.proficiency}` : language.name,
+      source: MANUAL_ENTRY_SOURCE_TRACE,
+    })),
+    sourceOrder: 900,
+    source: MANUAL_ENTRY_SOURCE_TRACE,
+  };
 }
 
 function buildExperienceEntry(id: string, entry: ManualWorkEntry, isVolunteer: boolean): ExperienceEntry {
@@ -288,10 +373,11 @@ export function buildManualResumeStructuredModel(input: ManualCareerMemoryInput)
   const skillGroups: SkillGroup[] = skillList.length > 0 ? [{ label: undefined, skills: skillList, source: MANUAL_ENTRY_SOURCE_TRACE }] : [];
 
   const workEntries = (input.experience ?? []).filter(isNonEmptyWork);
-  const volunteerEntries = (input.volunteerExperience ?? []).filter(isNonEmptyWork);
+  const volunteerEntries = (input.volunteerExperience ?? []).filter(isNonEmptyVolunteer);
   const educationEntries = (input.education ?? []).filter(isNonEmptyEducation);
   const certificationEntries = (input.certifications ?? []).filter(isNonEmptyCertification);
   const projectEntries = (input.projects ?? []).filter(isNonEmptyProject);
+  const languageEntries = (input.languages ?? []).filter(isNonEmptyLanguage);
 
   const professionalExperience = workEntries.map((e, i) => buildExperienceEntry(`manual-experience-${i}`, e, false));
   const volunteerExperience = volunteerEntries.map((e, i) => buildExperienceEntry(`manual-volunteer-${i}`, e, true));
@@ -300,8 +386,12 @@ export function buildManualResumeStructuredModel(input: ManualCareerMemoryInput)
   const projects = projectEntries.map((e, i) => buildProjectEntry(`manual-project-${i}`, e));
   const awards: AwardEntry[] = [];
   const publications: PublicationEntry[] = [];
-  const languages: LanguageEntry[] = [];
-  const customSections: CustomResumeSection[] = [];
+  const languages: LanguageEntry[] = languageEntries.map((entry) => ({
+    name: entry.language!.trim(),
+    proficiency: entry.level?.trim() ? entry.level.trim() : undefined,
+    source: MANUAL_ENTRY_SOURCE_TRACE,
+  }));
+  const customSections: CustomResumeSection[] = languages.length > 0 ? [buildManualLanguageSection(languages)] : [];
   const metricGrids: MetricGrid[] = [];
 
   const slotAvailability: Record<ResumeSlotKey, boolean> = {
@@ -315,7 +405,7 @@ export function buildManualResumeStructuredModel(input: ManualCareerMemoryInput)
     projects: projects.length > 0,
     awards: false,
     publications: false,
-    additional_information: false,
+    additional_information: customSections.length > 0,
   };
 
   return {

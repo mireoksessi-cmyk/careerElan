@@ -3009,7 +3009,21 @@ return;
       );
     }
 
-    const manualLargePreviewSrc = `/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html&allowPlaceholder=1${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`;
+    /*
+      No allowPlaceholder here. This preview is only reachable once
+      runManualCanonicalFlow() has succeeded, i.e. the resume being shown is
+      the user's own completed Career Memory - and previewOnlyCompletion's
+      placeholder pass fills every EMPTY section with a neutral stand-in
+      entry, so a user who entered no education/projects/certifications was
+      shown EDUCATION, PROJECTS and CERTIFICATIONS headings over content they
+      never wrote. For a resume that already has real content the honest
+      rendering is the real one: a section with no data stays absent.
+
+      The flag itself is untouched and still serves the surface it was built
+      for - the zero-data template browsing below uses genericSkeleton, and
+      the uploaded-resume previews never passed it in the first place.
+    */
+    const manualLargePreviewSrc = `/api/internal/canonical-career-memory/resume-preview?templateId=${manualSelectedTemplateId}&format=html${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`;
     const manualLargePreviewAsset = templatePreviewAsset(manualSelectedTemplateId);
 
     return (
@@ -3025,7 +3039,10 @@ return;
               selectedTemplateId={manualSelectedTemplateId as any}
               onSelect={(templateId) => selectManualTemplate(templateId)}
               disabled={manualTemplateStatus === "saving-template"}
-              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail&allowPlaceholder=1${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
+              /* Same rule as the large preview above: these cards show the
+                 user's own resume in each design, so they must not gain
+                 sections the user never entered. */
+              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
             />
           </div>
         </div>

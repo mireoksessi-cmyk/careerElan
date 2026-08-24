@@ -15,9 +15,6 @@ import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
 import CoverLetterPreviewRenderer from "@/components/coverLetter/CoverLetterPreviewRenderer";
-import CareerMemoryTemplatePreview, {
-  mapCareerMemoryRowToPreviewData,
-} from "@/components/resume/CareerMemoryTemplatePreview";
 import CareerFairCard from "@/components/careerFairs/CareerFairCard";
 import ProvinceSelect from "@/components/careerFairs/ProvinceSelect";
 import { useUserLocation } from "@/lib/careerFairs/useUserLocation";
@@ -66,7 +63,12 @@ type ResumeTemplateResolution =
 
 type PreviewAsset =
   | {
+      /* The directly-authored resume. templateId is the CURRENT canonical
+         selection (career_profiles.default_template_id) - never
+         career_memory.resume_template, whose Classic/Professional/Creative
+         vocabulary belongs to the pre-canonical preview. */
       type: "career-memory-resume";
+      templateId: string;
     }
   | {
       type: "uploaded-resume";
@@ -2642,10 +2644,40 @@ function renderPreviewContent() {
   if (!previewAsset) return null;
 
   if (previewAsset.type === "career-memory-resume") {
+    /*
+      Renders what the user actually selected, through the same four-template
+      engine every other preview uses. This used to draw
+      CareerMemoryTemplatePreview - a separate hand-written implementation
+      that knew only Classic/Professional/Creative/Modern, so choosing
+      Executive Minimal (or any current template id) matched no branch and
+      fell through to its basic layout.
+
+      The route is the direct-authored one: it builds the runtime from the
+      live career_memory row, so no canonical version has to exist for a
+      typed resume to be previewable. Same placeholder-then-fade treatment as
+      the uploaded-resume branch below, for the same cold-render reason.
+    */
+    const previewSrc = `/api/internal/canonical-career-memory/manual-preview?templateId=${previewAsset.templateId}`;
+    const previewStatus = largePreviewStatusBySrc[previewSrc];
+    const placeholderAsset = availableTemplates.find((template) => template.id === previewAsset.templateId)?.previewAsset;
     return (
-      <CareerMemoryTemplatePreview
-        data={mapCareerMemoryRowToPreviewData(careerMemory)}
-      />
+      <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+        {placeholderAsset && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
+        )}
+        <iframe
+          key={previewAsset.templateId}
+          src={previewSrc}
+          title="Resume preview"
+          onLoad={() => markLargePreview(previewSrc, "loaded")}
+          onError={() => markLargePreview(previewSrc, "failed")}
+          className={`relative h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+        />
+        {previewStatus === "failed" && (
+          <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
+        )}
+      </div>
     );
   }
 
@@ -3205,6 +3237,9 @@ Choose which resume and cover letter will be used when generating your applicati
             onClick={() =>
               setPreviewAsset({
                 type: "career-memory-resume",
+                /* Non-null here by construction: showCareerMemoryPreview
+                   already gates this button on careerMemoryTemplateId. */
+                templateId: careerMemoryTemplateId as string,
               })
             }
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
