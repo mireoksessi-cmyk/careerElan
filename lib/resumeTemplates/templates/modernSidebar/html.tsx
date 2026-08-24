@@ -183,7 +183,24 @@ function buildMainItems(normalized: ReturnType<typeof normalizeResume>, colors: 
     });
   }
 
-  const nonLanguageCustom = normalized.customSections.filter((s) => !isLanguageCustomSection(s));
+  /*
+    A raw Languages section reaches the main column through this partition,
+    which has only ever asked whether the HEADING says "language". That
+    misses a section titled in the document's own words ("Idiomas del
+    Candidato"): the sidebar correctly skips it, the main column keeps it,
+    and the reader sees the pairs once and the raw lines again. Provenance
+    decides it here instead - normalized.languages has already been
+    narrowed to the sections whose pairs are a lossless regrouping, so a
+    section listed there is genuinely represented and must not be drawn a
+    second time. The heading regex stays only for the sidebar/main
+    placement it has always governed; it is no longer what suppression
+    rests on. Unsafe, partial, inline and empty coverage all leave
+    normalized.languages without that section, so the raw copy stays.
+  */
+  const languageRepresentedSectionIds = new Set((normalized.languages ?? []).map((l) => l.sourceSectionId));
+  const isRepresentedByStructuredLanguages = (s: { sourceSectionId?: string }) =>
+    s.sourceSectionId !== undefined && languageRepresentedSectionIds.has(s.sourceSectionId);
+  const nonLanguageCustom = normalized.customSections.filter((s) => !isLanguageCustomSection(s) && !isRepresentedByStructuredLanguages(s));
   if (nonLanguageCustom.length > 0) {
     headingsInOrder.push(MODERN_SIDEBAR_LABELS.custom);
     nonLanguageCustom.forEach((section, i) => {
@@ -240,14 +257,28 @@ function buildSidebarItems(normalized: ReturnType<typeof normalizeResume>, color
     .filter(isLanguageCustomSection)
     .filter((section) => section.sourceSectionId === undefined || !representedSectionIds.has(section.sourceSectionId));
 
+  /*
+    The heading belongs to the document, not to this template: when a real
+    raw section produced these pairs, its own wording is what a reader
+    recognises ("Langues", "Language Proficiency"), and substituting the
+    fixed label silently rewrites it - and makes it missing text, since
+    parity expects every custom section's heading. The owning section is
+    found by provenance, never by heading text. The template label stays
+    as the fallback for pairs with no owning raw section.
+  */
+  const supersededSections = normalized.customSections.filter(
+    (section) => section.sourceSectionId !== undefined && representedSectionIds.has(section.sourceSectionId)
+  );
+  const languagesHeading = supersededSections[0]?.heading ?? MODERN_SIDEBAR_LABELS.languages;
+
   if (structuredLanguages.length > 0) {
-    headingsInOrder.push(MODERN_SIDEBAR_LABELS.languages);
+    headingsInOrder.push(languagesHeading);
     items.push({
       id: "languages",
       sectionKey: "languages",
       node: (
         <div style={{ color: colors.sidebarText, fontSize: "0.85em" }}>
-          {sidebarHeading(MODERN_SIDEBAR_LABELS.languages)}
+          {sidebarHeading(languagesHeading)}
           {structuredLanguages.map((language, i) => (
             <div key={i} style={{ marginBottom: "2px" }}>
               {language.proficiency ? `${language.name} — ${language.proficiency}` : language.name}
@@ -315,7 +346,54 @@ export async function renderModernSidebarHtml(context: TemplateRenderContext): P
      executiveMinimal/html.tsx's identical fix and the existing, unmodified
      professionalAtsHtml/paginatedHtmlString.ts convention this matches. */
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const normalized = normalizeResume(context.resume);
+  /*
+    Structured languages are a lossless REGROUPING of the raw section they
+    came from only when each of that section's own content blocks is
+    claimed by exactly one entry. NormalizedResume drops block-level
+    provenance, so the test runs here, against context.resume, and its
+    result is applied by withholding the unsafe entries from `normalized`
+    - every helper below then reaches the right conclusion through the
+    logic it already has.
+
+    Claimed zero times means the section holds a line no entry accounts
+    for (a stray note, a partial extraction). Claimed more than once means
+    several entries came from ONE line, i.e. the source wrote its
+    languages inline and that line is already correctly paired prose.
+    Either way the raw section is the faithful rendering, so the pairs
+    stand down and it renders untouched.
+
+    Only entries whose section would actually survive as a raw fallback
+    are withheld: a language with no owning raw section has nothing to
+    fall back to, so withholding it would lose content outright, and it
+    is kept. Matching is provenance-only - no heading text, no language
+    names, no reconstruction of leftover lines.
+  */
+  const unsafeLanguageSectionIds = ((model) => {
+    const bySection = new Map<string, typeof model.languages>();
+    for (const language of model.languages) {
+      const existing = bySection.get(language.source.sourceSectionId);
+      if (existing) existing.push(language);
+      else bySection.set(language.source.sourceSectionId, [language]);
+    }
+    const unsafe = new Set<string>();
+    for (const [sectionId, entries] of bySection) {
+      const section = model.customSections.find((s) => s.source.sourceSectionId === sectionId);
+      if (!section) continue;
+      const claims = new Map<string, number>();
+      for (const entry of entries) {
+        for (const id of entry.source.sourceBlockIds) claims.set(id, (claims.get(id) ?? 0) + 1);
+      }
+      const required = new Set([
+        ...section.paragraphs.flatMap((p) => p.source.sourceBlockIds),
+        ...section.bullets.flatMap((b) => b.source.sourceBlockIds),
+        ...section.content.flatMap((c) => c.source.sourceBlockIds),
+      ]);
+      if (required.size === 0 || ![...required].every((id) => claims.get(id) === 1)) unsafe.add(sectionId);
+    }
+    return unsafe;
+  })(context.resume);
+  const normalizedAll = normalizeResume(context.resume);
+  const normalized = { ...normalizedAll, languages: (normalizedAll.languages ?? []).filter((l) => !unsafeLanguageSectionIds.has(l.sourceSectionId)) };
   const colors = MODERN_SIDEBAR_COLORS;
   const dims = PAPER_DIMENSIONS[context.paperSize];
   const tokens = HTML_DENSITY_SPACING[context.density];

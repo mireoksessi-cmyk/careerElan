@@ -19,7 +19,54 @@ import { buildValidationReport } from "../../parity/validateOutput";
 import type { TemplateDocxResult, TemplateRenderContext } from "../../contracts/types";
 
 export async function renderExecutiveMinimalDocx(context: TemplateRenderContext): Promise<TemplateDocxResult> {
-  const normalized = normalizeResume(context.resume);
+  /*
+    Structured languages are a lossless REGROUPING of the raw section they
+    came from only when each of that section's own content blocks is
+    claimed by exactly one entry. NormalizedResume drops block-level
+    provenance, so the test runs here, against context.resume, and its
+    result is applied by withholding the unsafe entries from `normalized`
+    - every helper below then reaches the right conclusion through the
+    logic it already has.
+
+    Claimed zero times means the section holds a line no entry accounts
+    for (a stray note, a partial extraction). Claimed more than once means
+    several entries came from ONE line, i.e. the source wrote its
+    languages inline and that line is already correctly paired prose.
+    Either way the raw section is the faithful rendering, so the pairs
+    stand down and it renders untouched.
+
+    Only entries whose section would actually survive as a raw fallback
+    are withheld: a language with no owning raw section has nothing to
+    fall back to, so withholding it would lose content outright, and it
+    is kept. Matching is provenance-only - no heading text, no language
+    names, no reconstruction of leftover lines.
+  */
+  const unsafeLanguageSectionIds = ((model) => {
+    const bySection = new Map<string, typeof model.languages>();
+    for (const language of model.languages) {
+      const existing = bySection.get(language.source.sourceSectionId);
+      if (existing) existing.push(language);
+      else bySection.set(language.source.sourceSectionId, [language]);
+    }
+    const unsafe = new Set<string>();
+    for (const [sectionId, entries] of bySection) {
+      const section = model.customSections.find((s) => s.source.sourceSectionId === sectionId);
+      if (!section) continue;
+      const claims = new Map<string, number>();
+      for (const entry of entries) {
+        for (const id of entry.source.sourceBlockIds) claims.set(id, (claims.get(id) ?? 0) + 1);
+      }
+      const required = new Set([
+        ...section.paragraphs.flatMap((p) => p.source.sourceBlockIds),
+        ...section.bullets.flatMap((b) => b.source.sourceBlockIds),
+        ...section.content.flatMap((c) => c.source.sourceBlockIds),
+      ]);
+      if (required.size === 0 || ![...required].every((id) => claims.get(id) === 1)) unsafe.add(sectionId);
+    }
+    return unsafe;
+  })(context.resume);
+  const normalizedAll = normalizeResume(context.resume);
+  const normalized = { ...normalizedAll, languages: (normalizedAll.languages ?? []).filter((l) => !unsafeLanguageSectionIds.has(l.sourceSectionId)) };
   const fonts = EXECUTIVE_MINIMAL_FONTS;
   const tokens = DOCX_DENSITY_SPACING[context.density];
   const page = PAGE_SIZE_TWIPS[context.paperSize];

@@ -47,11 +47,21 @@ function buildStructuredLanguagesResume() {
   const resume = buildJordanEllisResume();
   const raw = resume.customSections.find((s) => s.id === "custom-languages")!;
   const progTrace = { ...raw.source, sourceSectionId: "sec-custom-prog-lang" };
-  raw.paragraphs = UNPAIRED_LANGUAGE_LINES.map((text) => ({ value: text, confidence: 0.7, extractionMethod: "explicit-label" as const, source: raw.source }));
-  raw.content = UNPAIRED_LANGUAGE_LINES.map((text, i) => ({ id: `custom-lang-c${i + 1}`, kind: "paragraph" as const, text, source: raw.source }));
+  /*
+    Each detached line gets its OWN sourceBlockId, and each language claims
+    the two blocks its name and proficiency came from. That is what the DPE
+    actually emits for a one-value-per-line Languages section, and it is
+    what makes the pairs a lossless regrouping of the source rather than a
+    rewrite: every block is claimed exactly once. Reusing one trace for all
+    four lines - as this builder first did - describes a single INLINE line
+    instead, which the templates deliberately leave unpaired.
+  */
+  const lineTrace = (blockId: string) => ({ ...raw.source, sourceBlockIds: [blockId] });
+  raw.paragraphs = UNPAIRED_LANGUAGE_LINES.map((text, i) => ({ value: text, confidence: 0.7, extractionMethod: "explicit-label" as const, source: lineTrace(`lang-b${i}`) }));
+  raw.content = UNPAIRED_LANGUAGE_LINES.map((text, i) => ({ id: `custom-lang-c${i + 1}`, kind: "paragraph" as const, text, source: lineTrace(`lang-b${i}`) }));
   resume.languages = [
-    { name: "English", proficiency: "Native", source: raw.source },
-    { name: "Français", proficiency: "Courant", source: raw.source },
+    { name: "English", proficiency: "Native", source: { ...raw.source, sourceBlockIds: ["lang-b0", "lang-b1"] } },
+    { name: "Français", proficiency: "Courant", source: { ...raw.source, sourceBlockIds: ["lang-b2", "lang-b3"] } },
   ];
   resume.customSections.push({
     id: "custom-programming-languages",
@@ -63,6 +73,43 @@ function buildStructuredLanguagesResume() {
     sourceOrder: 99,
     source: progTrace,
   });
+  return resume;
+}
+
+/*
+  Two fixtures the paired path must REFUSE, both keyed on provenance alone.
+
+  Partial: one raw line that no structured entry accounts for. Pairing would
+  have to drop it, so the section stays raw and the line survives.
+
+  Inline: both entries came from ONE source line, which already reads as
+  correctly paired prose - re-emitting it as two rows would discard the
+  document's own punctuation, so it is preserved verbatim.
+*/
+const UNACCOUNTED_NOTE = "Certified interpreter since 2019";
+const INLINE_LANGUAGE_LINE = "English (fluent), Italian (native)";
+
+function buildPartialCoverageResume() {
+  const resume = buildJordanEllisResume();
+  const raw = resume.customSections.find((s) => s.id === "custom-languages")!;
+  const lineTrace = (blockId: string) => ({ ...raw.source, sourceBlockIds: [blockId] });
+  const lines = ["English", "Native", UNACCOUNTED_NOTE];
+  raw.paragraphs = lines.map((text, i) => ({ value: text, confidence: 0.7, extractionMethod: "explicit-label" as const, source: lineTrace(`part-b${i}`) }));
+  raw.content = lines.map((text, i) => ({ id: `part-c${i}`, kind: "paragraph" as const, text, source: lineTrace(`part-b${i}`) }));
+  resume.languages = [{ name: "English", proficiency: "Native", source: { ...raw.source, sourceBlockIds: ["part-b0", "part-b1"] } }];
+  return resume;
+}
+
+function buildInlineCoverageResume() {
+  const resume = buildJordanEllisResume();
+  const raw = resume.customSections.find((s) => s.id === "custom-languages")!;
+  const oneBlock = { ...raw.source, sourceBlockIds: ["inline-b0"] };
+  raw.paragraphs = [{ value: INLINE_LANGUAGE_LINE, confidence: 0.7, extractionMethod: "explicit-label" as const, source: oneBlock }];
+  raw.content = [{ id: "inline-c0", kind: "paragraph" as const, text: INLINE_LANGUAGE_LINE, source: oneBlock }];
+  resume.languages = [
+    { name: "English", proficiency: "fluent", source: oneBlock },
+    { name: "Italian", proficiency: "native", source: oneBlock },
+  ];
   return resume;
 }
 
@@ -161,6 +208,42 @@ async function main() {
   checkTrue("languages/docx: the unrelated Programming Languages section survives", langDocumentXml.includes(PROGRAMMING_LANGUAGES_TEXT));
   checkTrue("languages/docx: validation.passed is true", langDocx.validation.passed);
   check("languages/docx: validation.missingTextCount is 0", langDocx.validation.missingTextCount, 0);
+
+  /* Coverage-safety regressions: the paired path must stand down and leave
+     the source untouched whenever pairing would not be a lossless
+     regrouping of it. */
+  const partialResume = buildPartialCoverageResume();
+  const partialRuntime = createCanonicalRuntime({
+    resume: partialResume,
+    version: createRuntimeVersion({ id: "exec-min-partial", reason: "initial", createdAt: GENERATED_AT }),
+    metadata: createRuntimeMetadata({ schemaVersion: partialResume.schemaVersion }),
+    overlayState: createRuntimeOverlayState(),
+  });
+  const partialHtml = await renderTemplateFromRuntime(partialRuntime, { templateId: "executive-minimal", generatedAt: GENERATED_AT }, "html");
+  const partialDocx = await renderTemplateFromRuntime(partialRuntime, { templateId: "executive-minimal", generatedAt: GENERATED_AT }, "docx");
+  const partialXml = await (await JSZip.loadAsync(partialDocx.bytes)).file("word/document.xml")!.async("string");
+
+  checkTrue("languages/partial: the line no structured entry accounts for is never dropped", partialHtml.html.includes(UNACCOUNTED_NOTE));
+  checkTrue("languages/partial: incomplete coverage declines pairing", !partialHtml.html.includes("English — Native"));
+  checkTrue("languages/partial: the raw unpaired lines still render", partialHtml.html.includes("English") && partialHtml.html.includes("Native"));
+  checkTrue("languages/partial: DOCX makes the same decision", partialXml.includes(UNACCOUNTED_NOTE) && !partialXml.includes("English — Native"));
+  check("languages/partial: validation stays clean under fallback", [partialHtml.validation.passed, partialHtml.validation.missingTextCount, partialHtml.validation.inventedTextCount, partialDocx.validation.passed], [true, 0, 0, true]);
+
+  const inlineResume = buildInlineCoverageResume();
+  const inlineRuntime = createCanonicalRuntime({
+    resume: inlineResume,
+    version: createRuntimeVersion({ id: "exec-min-inline", reason: "initial", createdAt: GENERATED_AT }),
+    metadata: createRuntimeMetadata({ schemaVersion: inlineResume.schemaVersion }),
+    overlayState: createRuntimeOverlayState(),
+  });
+  const inlineHtml = await renderTemplateFromRuntime(inlineRuntime, { templateId: "executive-minimal", generatedAt: GENERATED_AT }, "html");
+  const inlineDocx = await renderTemplateFromRuntime(inlineRuntime, { templateId: "executive-minimal", generatedAt: GENERATED_AT }, "docx");
+  const inlineXml = await (await JSZip.loadAsync(inlineDocx.bytes)).file("word/document.xml")!.async("string");
+
+  checkTrue("languages/inline: the original inline line is preserved verbatim", inlineHtml.html.includes(INLINE_LANGUAGE_LINE));
+  checkTrue("languages/inline: two entries sharing one source block decline pairing", !inlineHtml.html.includes("English — fluent"));
+  checkTrue("languages/inline: DOCX makes the same decision", inlineXml.includes(INLINE_LANGUAGE_LINE) && !inlineXml.includes("English — fluent"));
+  check("languages/inline: validation stays clean under fallback", [inlineHtml.validation.passed, inlineHtml.validation.missingTextCount, inlineHtml.validation.inventedTextCount, inlineDocx.validation.passed], [true, 0, 0, true]);
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   await closeSharedBrowser();
   if (fail > 0) process.exit(1);

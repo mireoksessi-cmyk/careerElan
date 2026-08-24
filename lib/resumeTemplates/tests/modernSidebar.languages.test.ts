@@ -24,10 +24,20 @@ function checkTrue(label: string, actual: boolean) {
   check(label, actual, true);
 }
 
-const trace = (sourceSectionId: string) => ({ sourceSectionId, sourceBlockIds: [], sourceElementIds: [] });
+/*
+  Every raw line carries its OWN source block, and a structured entry
+  carries the blocks its name and proficiency came from - which is what the
+  DPE emits for a one-value-per-line Languages section. The templates only
+  treat structured pairs as authoritative when they are a lossless
+  regrouping of that section, i.e. each of its blocks is claimed exactly
+  once, so a fixture that left the block list empty (as this one first did)
+  reads as "nothing to regroup" and correctly keeps the raw section.
+*/
+const trace = (sourceSectionId: string, sourceBlockIds: string[] = []) => ({ sourceSectionId, sourceBlockIds, sourceElementIds: [] });
+const blockOf = (sectionId: string, i: number) => `${sectionId}-b${i}`;
 
-function paragraph(id: string, text: string, sectionId: string) {
-  return { id, kind: "paragraph" as const, text, indentLevel: 0, source: trace(sectionId) };
+function paragraph(id: string, text: string, sectionId: string, blockId?: string) {
+  return { id, kind: "paragraph" as const, text, indentLevel: 0, source: trace(sectionId, blockId ? [blockId] : []) };
 }
 
 function customSection(id: string, heading: string, sectionId: string, texts: string[]) {
@@ -37,9 +47,9 @@ function customSection(id: string, heading: string, sectionId: string, texts: st
     displayHeading: heading,
     paragraphs: [],
     bullets: [],
-    content: texts.map((t, i) => paragraph(`${id}-c${i}`, t, sectionId)),
+    content: texts.map((t, i) => paragraph(`${id}-c${i}`, t, sectionId, blockOf(sectionId, i))),
     sourceOrder: 90,
-    source: trace(sectionId),
+    source: trace(sectionId, texts.map((_, i) => blockOf(sectionId, i))),
   };
 }
 
@@ -75,8 +85,8 @@ async function main() {
   // --- T1: same proficiency must stay paired, not collapse to four lines ---
   const sameProf = resumeWith({
     languages: [
-      { name: "English", proficiency: "Native or Bilingual", source: trace("section-spoken") },
-      { name: "French", proficiency: "Native or Bilingual", source: trace("section-spoken") },
+      { name: "English", proficiency: "Native or Bilingual", source: trace("section-spoken", [blockOf("section-spoken", 0), blockOf("section-spoken", 2)]) },
+      { name: "French", proficiency: "Native or Bilingual", source: trace("section-spoken", [blockOf("section-spoken", 1), blockOf("section-spoken", 3)]) },
     ],
     customSections: [customSection("spoken", "LANGUAGES", "section-spoken", ["English", "French", "Native or Bilingual", "Native or Bilingual"])] as ResumeStructuredModel["customSections"],
   });
@@ -141,6 +151,69 @@ async function main() {
   checkTrue("T11 DOCX renders both languages paired with their proficiency", docxText.includes("English — Native or Bilingual") && docxText.includes("French — Native or Bilingual"));
   check("T11 DOCX emits exactly one Languages heading", (docxText.match(/LANGUAGES/g) ?? []).length, 1);
 
+
+  /*
+    T12 - the source names its own section. The heading regex that decides
+    sidebar-vs-main placement does not match "Idiomas del Candidato", so
+    before provenance governed suppression the pairs rendered in the
+    sidebar AND the raw lines rendered again in the main column.
+  */
+  const OWN_HEADING = "Idiomas del Candidato";
+  const ownHeading = resumeWith({
+    languages: [
+      { name: "English", proficiency: "Native or Bilingual", source: trace("section-spoken", [blockOf("section-spoken", 0), blockOf("section-spoken", 2)]) },
+      { name: "French", proficiency: "Native or Bilingual", source: trace("section-spoken", [blockOf("section-spoken", 1), blockOf("section-spoken", 3)]) },
+    ],
+    customSections: [
+      customSection("spoken", OWN_HEADING, "section-spoken", ["English", "French", "Native or Bilingual", "Native or Bilingual"]),
+      customSection("affil", "Professional Affiliations", "section-affil", ["Member, Example Association"]),
+    ] as ResumeStructuredModel["customSections"],
+  });
+  const ownHeadingHtml = (await renderModernSidebarHtml(context(ownHeading))).html;
+  check("T12 a source-named Languages section still renders both pairs", languageLines(ownHeadingHtml), ["English — Native or Bilingual", "French — Native or Bilingual"]);
+  check("T12 the source heading is used, not the fixed template label", (ownHeadingHtml.match(new RegExp(OWN_HEADING, "g")) ?? []).length, 1);
+  checkTrue("T12 the raw copy is not repeated in the main column", !/>English<[\s\S]{0,200}>French</.test(ownHeadingHtml));
+  checkTrue("T12 an unrelated custom section is untouched", ownHeadingHtml.includes("Member, Example Association"));
+
+  /*
+    T13 - one raw line no structured entry accounts for. Pairing would have
+    to drop it, so the whole section stays raw.
+  */
+  const NOTE = "Certified interpreter since 2019";
+  const partial = resumeWith({
+    languages: [{ name: "English", proficiency: "Native or Bilingual", source: trace("section-spoken", [blockOf("section-spoken", 0), blockOf("section-spoken", 1)]) }],
+    customSections: [customSection("spoken", "LANGUAGES", "section-spoken", ["English", "Native or Bilingual", NOTE])] as ResumeStructuredModel["customSections"],
+  });
+  const partialHtml = (await renderModernSidebarHtml(context(partial))).html;
+  checkTrue("T13 the unaccounted line is never dropped", partialHtml.includes(NOTE));
+  check("T13 incomplete coverage declines pairing", languageLines(partialHtml), []);
+  checkTrue("T13 the raw lines still render", partialHtml.includes("English") && partialHtml.includes("Native or Bilingual"));
+
+  /*
+    T14 - both entries came from ONE inline line, which already reads as
+    correctly paired prose. Re-emitting it as two rows would discard the
+    document's own punctuation, so the raw line is preserved verbatim.
+  */
+  const INLINE = "English (fluent), Italian (native)";
+  const inline = resumeWith({
+    languages: [
+      { name: "English", proficiency: "fluent", source: trace("section-spoken", [blockOf("section-spoken", 0)]) },
+      { name: "Italian", proficiency: "native", source: trace("section-spoken", [blockOf("section-spoken", 0)]) },
+    ],
+    customSections: [customSection("spoken", "LANGUAGES", "section-spoken", [INLINE])] as ResumeStructuredModel["customSections"],
+  });
+  const inlineHtml = (await renderModernSidebarHtml(context(inline))).html;
+  checkTrue("T14 the original inline line is preserved verbatim", inlineHtml.includes(INLINE));
+  check("T14 one shared source block declines pairing", languageLines(inlineHtml), []);
+
+  /* T12-T14 make the same decision in DOCX. */
+  const ownHeadingDocxText = (await extractDocx((await renderModernSidebarDocx(context(ownHeading))).bytes)).text;
+  const partialDocxText = (await extractDocx((await renderModernSidebarDocx(context(partial))).bytes)).text;
+  const inlineDocxText = (await extractDocx((await renderModernSidebarDocx(context(inline))).bytes)).text;
+  checkTrue("T12 DOCX pairs the same two entries under the source heading", ownHeadingDocxText.includes("English — Native or Bilingual") && ownHeadingDocxText.includes("French — Native or Bilingual"));
+  check("T12 DOCX emits the source heading exactly once", (ownHeadingDocxText.match(new RegExp(OWN_HEADING, "gi")) ?? []).length, 1);
+  checkTrue("T13 DOCX keeps the unaccounted line", partialDocxText.includes(NOTE) && !partialDocxText.includes("English — Native or Bilingual"));
+  checkTrue("T14 DOCX keeps the inline line verbatim", inlineDocxText.includes(INLINE) && !inlineDocxText.includes("English — fluent"));
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }
