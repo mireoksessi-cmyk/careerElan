@@ -475,6 +475,106 @@ async function main() {
     checkTrue("empty skills section: the model still validates", model.validation.passed);
   }
 
+  /* ============================================================
+     Composite academic sections are routed group by group, which is
+     where entry identity and heading coverage can silently break.
+     Both cases below are built from generic structure - a composite
+     heading plus ordinary degree/institution/date lines - never from
+     any fixture's own wording or block ids.
+     ============================================================ */
+
+  // Two academic entry groups under one composite heading. Each group is
+  // extracted by its own call, so their ids collide unless the composite
+  // branch renumbers them by final position.
+  identityBlockCounter = 0;
+  {
+    const section = identitySection(0, "custom", "EDUCATION & CERTIFICATIONS", [
+      "EDUCATION & CERTIFICATIONS",
+      "Master of Science, Marine Biology",
+      "Northcliff University",
+      "Harbourton, NS",
+      "2021",
+      "Bachelor of Science, Marine Biology",
+      "Eastvale College",
+      "Harbourton, NS",
+      "2018",
+    ]);
+    section.blocks[0].blockType = "heading";
+    const model = buildStructuredResume(identityDocument([section]));
+
+    check("composite two groups: both entries are kept", model.education.length, 2);
+    const ids = model.education.map((e) => e.id);
+    check("composite two groups: entry ids are unique", new Set(ids).size, ids.length);
+    check("composite two groups: ids are numbered by final position", ids, [`${section.id}-education-0`, `${section.id}-education-1`]);
+    check("composite two groups: the entries stay semantically distinct", model.education.map((e) => e.credential?.value), [
+      "Master of Science",
+      "Bachelor of Science",
+    ]);
+    check("composite two groups: each entry keeps its own institution", model.education.map((e) => e.institution?.value), [
+      "Northcliff University",
+      "Eastvale College",
+    ]);
+    checkTrue("composite two groups: the model still validates", model.validation.passed);
+
+    // A rebuild from the same input must produce byte-identical ids.
+    identityBlockCounter = 0;
+    const repeatSection = identitySection(0, "custom", "EDUCATION & CERTIFICATIONS", [
+      "EDUCATION & CERTIFICATIONS",
+      "Master of Science, Marine Biology",
+      "Northcliff University",
+      "Harbourton, NS",
+      "2021",
+      "Bachelor of Science, Marine Biology",
+      "Eastvale College",
+      "Harbourton, NS",
+      "2018",
+    ]);
+    repeatSection.blocks[0].blockType = "heading";
+    check(
+      "composite two groups: ids are deterministic across rebuilds",
+      buildStructuredResume(identityDocument([repeatSection])).education.map((e) => e.id),
+      ids
+    );
+  }
+
+  // A composite heading that wrapped across several source blocks. Every
+  // physical heading member must stay covered once the section stops
+  // falling back to a whole-section custom trace.
+  identityBlockCounter = 0;
+  {
+    const section = identitySection(0, "custom", "ACADEMIC BACKGROUND & CREDENTIALS", [
+      "ACADEMIC",
+      "BACKGROUND &",
+      "CREDENTIALS",
+      "Master of Science, Marine Biology",
+      "Northcliff University",
+      "Harbourton, NS",
+      "2021",
+    ]);
+    section.blocks[0].blockType = "heading";
+    section.blocks[1].blockType = "heading";
+    section.blocks[2].blockType = "heading";
+    const headingIds = section.blocks.filter((b) => b.blockType === "heading").map((b) => b.id);
+    const model = buildStructuredResume(identityDocument([section]));
+
+    check("composite wrapped heading: the entry is produced", model.education.length, 1);
+    checkTrue("composite wrapped heading: the model validates", model.validation.passed);
+    check("composite wrapped heading: nothing is reported missing", model.validation.missingBlockIds, []);
+    const covered = model.education[0].source.sourceBlockIds;
+    check(
+      "composite wrapped heading: every heading member is covered",
+      headingIds.filter((id) => !covered.includes(id)),
+      []
+    );
+    // Coverage only - a continuation member must not become body content.
+    check("composite wrapped heading: no heading member became a credential", model.credentials.length, 0);
+    check(
+      "composite wrapped heading: the entry's own fields are untouched",
+      [model.education[0].credential?.value, model.education[0].institution?.value],
+      ["Master of Science", "Northcliff University"]
+    );
+  }
+
   console.log(`\n--- ${pass} passed, ${fail} failed ---`);
   if (fail > 0) process.exit(1);
 }

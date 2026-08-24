@@ -639,6 +639,18 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
           const firstProduced: { source: SourceTrace }[] | null =
             educationEntries.length > 0 ? educationEntries : credentialEntries.length > 0 ? credentialEntries : null;
           if (firstProduced) {
+            /*
+              Each group is extracted by its own call, and the extractor
+              numbers entries from 0 within a call - so every group's first
+              entry arrives carrying the same id. Renumber by final position
+              in this section, rewriting only the trailing index so the id
+              keeps exactly the shape the extractor produced. Identity only:
+              no field, trace, source id or reason code is touched, and an
+              ordinary single-call Education section never reaches here.
+            */
+            educationEntries.forEach((entry, index) => {
+              entry.id = entry.id.replace(/-\d+$/, `-${index}`);
+            });
             model.education.push(...educationEntries);
             model.credentials.push(...credentialEntries);
             residualGroups.forEach((group, index) => {
@@ -647,6 +659,19 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
               );
             });
             mergeSectionHeadingIntoFirst(section, firstProduced);
+            /*
+              That shared helper covers section.blocks[0] only. A heading that
+              wrapped across a rail contributed several source blocks, and the
+              rest would otherwise be represented by nothing at all once this
+              section stops falling back to adaptCustomSection. They stay
+              heading blocks and never join a body route - this extends which
+              block ids one existing trace already covers, exactly as the
+              helper itself does, and invents no value.
+            */
+            for (const headingBlock of section.blocks.slice(1)) {
+              if (headingBlock.blockType !== "heading") continue;
+              firstProduced[0].source = mergeTraces(firstProduced[0].source, traceFromBlock(section.id, headingBlock));
+            }
             break;
           }
         }
