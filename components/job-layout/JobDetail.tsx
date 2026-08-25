@@ -108,8 +108,43 @@ export default function JobDetail({
     per React's rule that hooks always run in the same order.
   */
   const toast = useToast();
-  const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"idle" | "loading" | "ready" | "not-applicable" | "error">("idle");
+  const [canonicalPreviewStatus, setCanonicalPreviewStatus] = useState<"idle" | "loading" | "ready" | "artifact" | "not-applicable" | "error">("idle");
   const [canonicalPreviewHtml, setCanonicalPreviewHtml] = useState<string | null>(null);
+  /*
+    A generated Package is an immutable historical snapshot: it was
+    produced from the canonical resume version recorded on its own
+    tailored-resume row, and it must keep showing THAT version no matter
+    how far the profile's canonical resume advances afterwards.
+
+    The live /canonical-generate-package/preview route cannot express
+    that. It reconstructs the profile's CURRENT latest version and 409s
+    when it no longer matches the package's pinned resume_version_id -
+    which, now that Career Memory's Edit Content writes a new version on
+    every save, is the normal state of every previously generated
+    package. The result was a package whose rows and stored artifacts
+    were both perfectly intact appearing broken.
+
+    The persisted PDF that Generate Package already wrote to Storage at
+    generation time IS the historical snapshot - the exact bytes the
+    user was shown when the package was created. Serving those is both
+    the most faithful answer and the only one that stays correct without
+    re-deriving anything from a moving profile.
+
+    Held in a ref as well as state because an object URL is a resource,
+    not a value: it must be revoked when it is replaced and when this
+    component unmounts, and the effect that does so cannot read it from
+    a stale state closure.
+  */
+  const [canonicalArtifactUrl, setCanonicalArtifactUrl] = useState<string | null>(null);
+  const canonicalArtifactUrlRef = useRef<string | null>(null);
+
+  const releaseCanonicalArtifactUrl = useCallback(() => {
+    if (canonicalArtifactUrlRef.current) {
+      URL.revokeObjectURL(canonicalArtifactUrlRef.current);
+      canonicalArtifactUrlRef.current = null;
+    }
+    setCanonicalArtifactUrl(null);
+  }, []);
   /*
     Phase 6I.9 - race guard: loadCanonicalPreview() is re-invoked every
     time selectedApplication changes (see the effect below). Without
@@ -144,12 +179,46 @@ export default function JobDetail({
       was selected a moment ago.
     */
     setCanonicalPreviewHtml(null);
+    releaseCanonicalArtifactUrl();
 
     if (!selectedApplication || selectedApplication.generation_engine !== "canonical") {
       setCanonicalPreviewStatus("not-applicable");
       return;
     }
     setCanonicalPreviewStatus("loading");
+
+    /*
+      Historical artifact first. The route resolves the document id and
+      Storage path entirely server-side from this application's own
+      generated_pdf_document_id, so nothing here can address an
+      arbitrary object; a 404 means simply "this package has no
+      persisted PDF" (an older canonical row generated before artifact
+      persistence existed) and falls through to the pre-existing live
+      path below, which is left exactly as it was.
+
+      No re-render happens on this branch: the bytes are read from
+      Storage, so no template engine and no headless browser is
+      involved, and the result cannot drift as the profile advances.
+    */
+    try {
+      const artifactRes = await fetch(
+        `/api/applications/${selectedApplication.id}/generated-resume-document?format=pdf`
+      );
+      if (isStale()) return;
+      if (artifactRes.ok) {
+        const artifactBlob = await artifactRes.blob();
+        if (isStale()) return;
+        const objectUrl = URL.createObjectURL(artifactBlob);
+        canonicalArtifactUrlRef.current = objectUrl;
+        setCanonicalArtifactUrl(objectUrl);
+        setCanonicalPreviewStatus("artifact");
+        return;
+      }
+    } catch {
+      /* Network/decode failure only - fall through to the live path
+         below rather than failing a preview that can still be produced. */
+    }
+
     try {
       /*
         Phase 6I.9 - reuse Generate Package's OWN reference preview
@@ -201,11 +270,22 @@ export default function JobDetail({
     } catch {
       if (!isStale()) setCanonicalPreviewStatus("error");
     }
-  }, [selectedApplication]);
+  }, [selectedApplication, releaseCanonicalArtifactUrl]);
 
   useEffect(() => {
     loadCanonicalPreview();
   }, [loadCanonicalPreview]);
+
+  /* Unmount only - revoking on every re-render would tear down the URL
+     the iframe is currently displaying. */
+  useEffect(() => {
+    return () => {
+      if (canonicalArtifactUrlRef.current) {
+        URL.revokeObjectURL(canonicalArtifactUrlRef.current);
+        canonicalArtifactUrlRef.current = null;
+      }
+    };
+  }, []);
 
   if (!selectedApplication) {
     return (
@@ -449,7 +529,23 @@ export default function JobDetail({
       <div className="mt-8">
         {selectedTab === "resume" && (
           <>
-            {canonicalPreviewStatus === "ready" ? (
+            {canonicalPreviewStatus === "artifact" ? (
+              /*
+                The package's own persisted PDF, shown in the browser's
+                native PDF viewer. No transform:scale() wrapper here -
+                unlike the fixed-816px-wide srcDoc page below, a PDF
+                viewer does its own fitting, so imposing an outer scale
+                would fight it.
+              */
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-2">
+                <iframe
+                  key={`${selectedApplication.id}-artifact`}
+                  src={canonicalArtifactUrl ?? ""}
+                  title="Generated resume package"
+                  style={{ width: "100%", height: 1100, border: 0 }}
+                />
+              </div>
+            ) : canonicalPreviewStatus === "ready" ? (
               <div ref={canonicalPreviewContainerRef} className="max-h-[1500px] overflow-auto rounded-2xl border border-slate-200 bg-white p-2">
                 <div style={{ height: canonicalPreviewScaledHeight ?? PAPER_DIMENSIONS.letter.heightPx * canonicalPreviewScale }}>
                   <iframe

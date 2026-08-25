@@ -441,6 +441,47 @@ async function downloadPackage(type: "docx" | "pdf") {
     */
     if (selectedApplication.generation_engine === "canonical") {
       /*
+        Historical artifact first, for both formats.
+
+        A generated Package is an immutable snapshot, so downloading one
+        must hand back the exact bytes that were produced and stored at
+        generation time - not a fresh render of whatever the profile's
+        canonical resume happens to say today. Re-rendering was both
+        wrong (the document silently changed after a Career Memory edit)
+        and fragile (it 409'd outright once the profile advanced, and a
+        PDF re-render additionally needs a headless browser).
+
+        Reading the persisted artifact removes all three problems at
+        once: the bytes are historical by construction, nothing resolves
+        the current canonical version, and no browser is launched. The
+        route resolves the document id and Storage path server-side from
+        this application's own generated_pdf_document_id /
+        generated_docx_document_id, so no path or id is supplied here.
+
+        A 404 means this package has no persisted artifact of that
+        format (an older canonical row predating artifact persistence);
+        it falls through to the pre-existing re-render path below,
+        unchanged.
+      */
+      try {
+        const artifactRes = await fetch(
+          `/api/applications/${selectedApplication.id}/generated-resume-document?format=${type}`
+        );
+        if (artifactRes.ok) {
+          const artifactBlob = await artifactRes.blob();
+          const artifactUrl = URL.createObjectURL(artifactBlob);
+          const artifactLink = document.createElement("a");
+          artifactLink.href = artifactUrl;
+          artifactLink.download = `${baseName}_Resume.${type}`;
+          artifactLink.click();
+          URL.revokeObjectURL(artifactUrl);
+          return;
+        }
+      } catch {
+        // Falls through to the existing path below on a network failure.
+      }
+
+      /*
         Phase 6I.9 - reuse Generate Package's OWN reference download
         mechanism exactly (CanonicalTemplateSelector.tsx's own
         handleDownload): call the SAME /canonical-generate-package
