@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 
 import { useEffect, useState } from "react";
@@ -249,7 +250,8 @@ export default function AnalyticsPage() {
         <div className="flex flex-1 flex-col md:flex-row">
           <Sidebar active="Analytics" />
 
-          <section className="min-w-0 flex-1 p-8">
+          <section className="min-w-0 flex-1">
+            <AppContent>
             <Header
               title="Analytics"
               subtitle="Track your job search performance."
@@ -309,6 +311,7 @@ export default function AnalyticsPage() {
                 }
               />
             </div>
+            </AppContent>
           </section>
         </div>
         <CareerElanFooter />

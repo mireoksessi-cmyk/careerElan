@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
@@ -2952,7 +2953,8 @@ if (!user) {
         </aside>
 
         <section className="min-w-0 flex-1">
-          <header className="flex flex-wrap items-center justify-between gap-4 px-8 py-6">
+          <AppContent>
+          <header className="flex flex-wrap items-center justify-between gap-4 pb-6">
             <div>
              <h1 className="text-2xl font-extrabold">
   Good morning, {displayName}! 👋
@@ -2987,7 +2989,7 @@ if (!user) {
             </div>
           </header>
 
-          <div className="grid grid-cols-12 gap-6 px-8 pb-8">
+          <div className="grid grid-cols-12 gap-6">
             <section className="col-span-12 space-y-6 xl:col-span-9">
               <div>
                 <h2 className="mb-4 text-lg font-bold">Overview</h2>
@@ -4163,6 +4165,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 </Card>
             </aside>
           </div>
+          </AppContent>
         </section>
       </div>
       <CareerElanFooter />

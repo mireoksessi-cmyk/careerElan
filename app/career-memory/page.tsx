@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 import Image from "next/image";
 import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
@@ -4106,7 +4107,8 @@ return;
     </nav>
   </aside>
 
-        <section className="min-w-0 flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1">
+          <AppContent>
           {mode === "start" ? (
             <StartScreen
   strength={profileStrength}
@@ -4647,6 +4649,7 @@ return;
 
             </>
           )}
+          </AppContent>
         </section>
       </div>
       <CareerElanFooter />

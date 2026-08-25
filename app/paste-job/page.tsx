@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 
 import Link from "next/link";
@@ -3581,7 +3582,8 @@ async function downloadDocx() {
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1">
+          <AppContent>
           <header className="mb-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="text-xs font-bold text-blue-600">
@@ -4893,6 +4895,7 @@ async function downloadDocx() {
               </section>
             
         </div>
+          </AppContent>
         </section>
       </div>
       <CareerElanFooter />
