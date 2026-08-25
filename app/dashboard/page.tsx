@@ -2865,9 +2865,9 @@ if (!user) {
       )}
 
       {showTour && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-labelledby="welcome-tour-title" className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
-            <div className="flex items-start justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-labelledby="welcome-tour-title" className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col rounded-3xl bg-white p-5 shadow-2xl sm:p-8">
+            <div className="flex shrink-0 items-start justify-between">
               <div>
                 <h2 id="welcome-tour-title" className="text-3xl font-extrabold">Welcome to Career Élan! 👋</h2>
                 <p className="mt-2 text-sm text-slate-500">Take a quick 3-step tour to get started.</p>
@@ -2875,7 +2875,8 @@ if (!user) {
               <button onClick={closeTour} aria-label="Close" className="text-2xl text-slate-400 hover:text-slate-700"><span aria-hidden="true">×</span></button>
             </div>
 
-            <div className="mt-8 grid gap-5 md:grid-cols-3">
+            <div className="mt-6 min-h-0 flex-1 overflow-y-auto sm:mt-8">
+            <div className="grid gap-5 md:grid-cols-3">
               <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5 text-center">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-4xl shadow-sm">🧠</div>
                 <span className="mt-5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">1</span>
@@ -2909,6 +2910,7 @@ if (!user) {
               <button onClick={closeTour} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600">
                 Skip for now
               </button>
+            </div>
             </div>
           </div>
         </div>
