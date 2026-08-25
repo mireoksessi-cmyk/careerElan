@@ -296,6 +296,40 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
     },
   };
 
+  /*
+    Phase 5D.2B - detected once, over EVERY section's blocks in their
+    original Phase 1 form (never re-sorted, sourceOrder untouched), so a
+    KPI/metric grid can be recovered even when Phase 1's own
+    section-boundary logic (unchanged, out of scope this round) split
+    the grid's value row and label row into two different sections - see
+    metricGridExtractor.ts's own header comment for the real-fixture
+    evidence this handles. Each consumed block is then filtered OUT of
+    its own section's `blocks` before that section reaches any other
+    extractor below, so nothing is ever represented twice (once as a
+    MetricEntry, again as ordinary custom-section text). A section left
+    with zero blocks after filtering still flows through its normal
+    switch branch below - typically `adaptCustomSection` on an
+    empty-blocks section - which is what keeps section-level coverage
+    (structuredValidator.ts checks A/F) satisfied without inventing or
+    duplicating anything.
+  */
+  const { grids: metricGrids, consumedBlockIds } = detectMetricGrids(document.sections);
+  model.metricGrids = metricGrids;
+  const sections = consumedBlockIds.size > 0 ? document.sections.map((s) => ({ ...s, blocks: s.blocks.filter((b) => !consumedBlockIds.has(b.id)) })) : document.sections;
+
+  /*
+    "before that section reaches any other extractor below" was true of
+    every extractor except the one above it. The identity fallback ran
+    first and read the sections unfiltered, so on a resume whose header
+    run contains a KPI band it took the grid's own cells as contact
+    lines - the same blocks the grid then claimed, which is a block
+    owned twice and an import refused for STRUCTURE_BLOCK_DUPLICATE.
+
+    Detection therefore happens here instead, once, on the same input as
+    before, so identity reads the same filtered view of the document
+    that everything downstream already reads. Nothing about which blocks
+    a grid consumes changes; only who gets to look at them first.
+  */
   const identitySourceSectionIds = new Set<string>();
   if (document.identityBlocks.length > 0) {
     model.identity = extractIdentity("identity", document.identityBlocks);
@@ -352,9 +386,9 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
       block in three separate leading sections, none of which carries
       the signal until the last.
     */
-    const hasCanonicalSection = document.sections.some((section) => section.normalizedType !== "custom");
+    const hasCanonicalSection = sections.some((section) => section.normalizedType !== "custom");
     const leadingUnnamedSections = [];
-    for (const section of document.sections) {
+    for (const section of sections) {
       if (section.normalizedType !== "custom") break;
       leadingUnnamedSections.push(section);
       if (!hasCanonicalSection && hasIdentitySignal(leadingUnnamedSections.flatMap((collected) => collected.blocks))) break;
@@ -407,27 +441,6 @@ export function buildStructuredResume(document: LosslessResumeDocument): ResumeS
   }
 
   let summaryConsumed = false;
-
-  /*
-    Phase 5D.2B - detected once, over EVERY section's blocks in their
-    original Phase 1 form (never re-sorted, sourceOrder untouched), so a
-    KPI/metric grid can be recovered even when Phase 1's own
-    section-boundary logic (unchanged, out of scope this round) split
-    the grid's value row and label row into two different sections - see
-    metricGridExtractor.ts's own header comment for the real-fixture
-    evidence this handles. Each consumed block is then filtered OUT of
-    its own section's `blocks` before that section reaches any other
-    extractor below, so nothing is ever represented twice (once as a
-    MetricEntry, again as ordinary custom-section text). A section left
-    with zero blocks after filtering still flows through its normal
-    switch branch below - typically `adaptCustomSection` on an
-    empty-blocks section - which is what keeps section-level coverage
-    (structuredValidator.ts checks A/F) satisfied without inventing or
-    duplicating anything.
-  */
-  const { grids: metricGrids, consumedBlockIds } = detectMetricGrids(document.sections);
-  model.metricGrids = metricGrids;
-  const sections = consumedBlockIds.size > 0 ? document.sections.map((s) => ({ ...s, blocks: s.blocks.filter((b) => !consumedBlockIds.has(b.id)) })) : document.sections;
 
   for (const section of sections) {
     if (identitySourceSectionIds.has(section.id)) continue;
