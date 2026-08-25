@@ -392,6 +392,188 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   */
   const [inlineTemplateExplicitlySelected, setInlineTemplateExplicitlySelected] = useState(false);
 
+  /*
+    Edit Content, for a resume that arrived by upload.
+
+    An imported resume was previously read-only: the parser's answer was
+    the only answer, and a wrong employer or a missed language could not
+    be corrected anywhere. This opens the SAME 1-8 sections the typed
+    flow uses - renderStepForm() below is reused verbatim, not copied -
+    over the current canonical version's own content.
+
+    The draft lives in memoryData while the workspace is open, which is
+    what makes reuse possible at all. uploadedEditRestore holds whatever
+    was in memoryData beforehand so Cancel can put it back exactly;
+    nothing is written until Save, and Save is one request.
+  */
+  const [uploadedEditOpen, setUploadedEditOpen] = useState(false);
+  const [uploadedEditStep, setUploadedEditStep] = useState(0);
+  const [uploadedEditStatus, setUploadedEditStatus] = useState<"idle" | "loading" | "ready" | "saving" | "error">("idle");
+  const [uploadedEditError, setUploadedEditError] = useState<string | null>(null);
+  const [uploadedEditRestore, setUploadedEditRestore] = useState<typeof memoryData | null>(null);
+  const [uploadedEditPreviewHtml, setUploadedEditPreviewHtml] = useState<string>("");
+
+  /*
+    The draft in the shape the canonical mapper speaks, built from the
+    same memoryData the forms bind to. Kept as a function rather than
+    derived state so it always reflects the latest keystroke without an
+    effect having to chase it.
+  */
+  function uploadedEditDraft() {
+    return {
+      firstName: memoryData.firstName,
+      lastName: memoryData.lastName,
+      email: memoryData.email,
+      phone: memoryData.phone,
+      location: memoryData.location,
+      linkedin: memoryData.linkedin,
+      headline: memoryData.headline,
+      summary: memoryData.summary,
+      skills: (memoryData.skills ?? "").split(",").map((skill: string) => skill.trim()).filter(Boolean),
+      experience: memoryData.workExperience ?? [],
+      volunteerExperience: memoryData.volunteerExperience ?? [],
+      education: memoryData.education ?? [],
+      certifications: memoryData.certifications ?? [],
+      projects: memoryData.projects ?? [],
+      languages: memoryData.languages ?? [],
+    };
+  }
+
+  async function openUploadedEdit() {
+    setUploadedEditOpen(true);
+    setUploadedEditStatus("loading");
+    setUploadedEditError(null);
+    setUploadedEditStep(0);
+    try {
+      const res = await fetch("/api/internal/canonical-career-memory/import-manual", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "prefill" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error?.message || "Could not load your resume for editing.");
+      const draft = data.draft ?? {};
+      setUploadedEditRestore(memoryData);
+      setMemoryData((current: typeof memoryData) => ({
+        ...current,
+        firstName: draft.firstName ?? "",
+        lastName: draft.lastName ?? "",
+        email: draft.email ?? "",
+        phone: draft.phone ?? "",
+        location: draft.location ?? "",
+        linkedin: draft.linkedin ?? "",
+        headline: draft.headline ?? "",
+        summary: draft.summary ?? "",
+        skills: Array.isArray(draft.skills) ? draft.skills.join(", ") : "",
+        workExperience: draft.experience ?? [],
+        volunteerExperience: draft.volunteerExperience ?? [],
+        education: draft.education ?? [],
+        certifications: draft.certifications ?? [],
+        projects: draft.projects ?? [],
+        languages: draft.languages ?? [],
+      }));
+      setUploadedEditStatus("ready");
+    } catch (error) {
+      setUploadedEditError(error instanceof Error ? error.message : "Could not load your resume for editing.");
+      setUploadedEditStatus("error");
+    }
+  }
+
+  /* Cancel restores the pre-edit values and writes nothing. */
+  function cancelUploadedEdit() {
+    if (uploadedEditRestore) setMemoryData(uploadedEditRestore);
+    setUploadedEditRestore(null);
+    setUploadedEditOpen(false);
+    setUploadedEditStatus("idle");
+    setUploadedEditError(null);
+    setUploadedEditPreviewHtml("");
+  }
+
+  async function saveUploadedEdit() {
+    setUploadedEditStatus("saving");
+    setUploadedEditError(null);
+    try {
+      const res = await fetch("/api/internal/canonical-career-memory/import-manual", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "user-confirmed",
+          draft: uploadedEditDraft(),
+          /* The user's own Career Goals, carried across so a content save
+             cannot silently clear a step the resume never spoke for. */
+          careerGoals: {
+            /* Stored as one comma-separated field in the editor, sent as
+               the array the career_memory column holds. */
+            targetRoles: (memoryData.targetRoles ?? "").split(",").map((role: string) => role.trim()).filter(Boolean),
+            targetIndustry: memoryData.targetIndustry ?? null,
+            targetLocation: memoryData.targetLocation ?? null,
+            salaryExpectation: memoryData.salaryExpectation ?? null,
+            careerGoalSummary: memoryData.careerGoalSummary ?? null,
+          },
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error?.message || "Could not save your changes.");
+      /*
+        Authority has moved, so the preview has to move with it. The
+        uploaded-success preview pins its request and its iframe key to
+        canonicalPreviewVersionId; leaving that pointing at the version the
+        edit came from meant both strings stayed identical, React never
+        remounted the frame, and the user was shown the document fetched
+        before they typed - their save was correct and invisible.
+
+        Adopting the id the save itself returned repoints it at the new
+        version, which changes the src and the key together and is what
+        makes the frame refetch. It is the version pointer alone: no field
+        is inspected, so this behaves the same whichever of the 1-8
+        sections was edited, and the selected template is untouched.
+      */
+      if (data?.versionId) setCanonicalPreviewVersionId(data.versionId);
+      /* The draft is now the saved state, so there is nothing to restore
+         back to. */
+      setUploadedEditRestore(null);
+      setUploadedEditOpen(false);
+      setUploadedEditStatus("idle");
+      setUploadedEditPreviewHtml("");
+      toast.success("Changes saved.");
+    } catch (error) {
+      /* The draft stays in memoryData and the workspace stays open, so a
+         failed save can be retried without retyping anything. */
+      setUploadedEditError(error instanceof Error ? error.message : "Could not save your changes.");
+      setUploadedEditStatus("ready");
+    }
+  }
+
+  /*
+    Preview of the UNSAVED draft. POSTs the draft and renders the returned
+    document through srcdoc - the saved-state GET would show the old
+    resume, which is precisely the wrong thing while someone is editing.
+    Debounced so typing does not launch a render per keystroke; still no
+    database write of any kind.
+  */
+  useEffect(() => {
+    if (!uploadedEditOpen || uploadedEditStatus !== "ready" || !inlineSelectedTemplateId) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/internal/canonical-career-memory/manual-preview?templateId=${inlineSelectedTemplateId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ draft: uploadedEditDraft() }),
+        });
+        const html = res.ok ? await res.text() : "";
+        if (!cancelled) setUploadedEditPreviewHtml(html);
+      } catch {
+        if (!cancelled) setUploadedEditPreviewHtml("");
+      }
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedEditOpen, uploadedEditStatus, inlineSelectedTemplateId, memoryData]);
+
   async function loadInlineTemplateList() {
     const templatesRes = await fetch("/api/internal/canonical-career-memory/templates");
     const templatesData = templatesRes.ok ? await templatesRes.json() : { templates: [] };
@@ -3115,13 +3297,91 @@ return;
     canonicalPreviewTemplateId - no new API, no AI, no quota, no new
     Resume Version (spec section 6/11).
   */
+  /*
+    The editing workspace. Deliberately replaces the whole uploaded-success
+    view rather than unfolding beneath it: eight sections of forms crammed
+    under a resume preview is not a place anyone can work.
+
+    renderStepForm() is the SAME function the typed flow renders, driven by
+    the same currentStep it already reads, so every field, validation and
+    add/remove control behaves identically in both modes. Nothing here is a
+    second copy of those forms.
+  */
+  function renderUploadedEditWorkspace() {
+    const contentSteps = steps.slice(0, 8);
+    return (
+      <div className="mt-8">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-black uppercase tracking-wide text-blue-600">Edit Content</p>
+            <h2 className="mt-1 text-2xl font-black text-slate-950">Correct anything the import got wrong</h2>
+            <p className="mt-2 text-sm text-slate-500">Your changes are not saved until you choose Save Changes.</p>
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={cancelUploadedEdit} disabled={uploadedEditStatus === "saving"} className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-600 disabled:opacity-60">Back</button>
+            <button type="button" onClick={saveUploadedEdit} disabled={uploadedEditStatus !== "ready"} className="rounded-xl bg-blue-600 px-6 py-3 font-black text-white disabled:opacity-60">
+              {uploadedEditStatus === "saving" ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+
+        {uploadedEditError && <p role="alert" className="mb-4 rounded-xl border border-red-300 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700">{uploadedEditError}</p>}
+        {uploadedEditStatus === "loading" && <p className="text-sm font-semibold text-slate-500">Loading your resume...</p>}
+
+        {(uploadedEditStatus === "ready" || uploadedEditStatus === "saving") && (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,520px)]">
+            <div className="min-w-0 rounded-3xl border border-blue-100 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap gap-2">
+                {contentSteps.map((step, index) => (
+                  <button
+                    key={step.title}
+                    type="button"
+                    onClick={() => { setUploadedEditStep(index); setCurrentStep(index); }}
+                    className={`rounded-xl px-4 py-2 text-sm font-bold ${uploadedEditStep === index ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50"}`}
+                  >
+                    {index + 1}. {step.title}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-6">
+                <h3 className="text-xl font-black text-slate-950">{contentSteps[uploadedEditStep]?.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">{contentSteps[uploadedEditStep]?.description}</p>
+                {renderStepForm()}
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-sm font-black uppercase tracking-wide text-blue-600">Live Preview</p>
+              <p className="mt-1 text-sm text-slate-500">Showing your unsaved changes.</p>
+              <div className="mt-3 max-h-[900px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                {uploadedEditPreviewHtml ? (
+                  <iframe srcDoc={uploadedEditPreviewHtml} title="Unsaved resume preview" className="h-[760px] w-full rounded-xl border border-slate-200 bg-white" />
+                ) : (
+                  <div className="flex h-[760px] items-center justify-center text-sm font-semibold text-slate-500">Building preview...</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function renderInlineWorkspace() {
+    if (uploadedEditOpen) return renderUploadedEditWorkspace();
     return (
       <>
         <div className="mt-8 flex flex-col gap-6">
           <div className="min-w-0">
-            <p className="text-sm font-black uppercase tracking-wide text-blue-600">Live Resume Preview</p>
-            <p className="mt-1 text-sm text-slate-500">{inlineSelectedTemplateId ? "Selected template applied immediately." : "Your original resume, until you choose a design."}</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black uppercase tracking-wide text-blue-600">Live Resume Preview</p>
+                <p className="mt-1 text-sm text-slate-500">{inlineSelectedTemplateId ? "Selected template applied immediately." : "Your original resume, until you choose a design."}</p>
+              </div>
+              {/* Optional. An upload that needs no correction never has to
+                  come through here. */}
+              <button type="button" onClick={openUploadedEdit} className="rounded-xl border border-blue-600 px-5 py-2.5 font-bold text-blue-600">Edit Content</button>
+            </div>
             <div className="mt-3">{renderLiveResumePreviewContent()}</div>
           </div>
 

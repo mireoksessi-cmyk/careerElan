@@ -131,3 +131,54 @@ export async function GET(request: Request) {
     return errorResponse(error);
   }
 }
+
+/*
+  The same preview, from a draft the user has not saved yet.
+
+  GET above renders whatever is in the database, which is exactly wrong
+  while someone is editing: they would type a correction and watch the
+  old resume look back at them. POST takes the in-progress editor state
+  instead and renders that.
+
+  It writes nothing. No row, no version, no source document - the draft
+  goes straight into the same buildManualCanonicalRuntime() and the same
+  renderTemplateFromRuntime() the saved path uses, so the preview and the
+  eventual save agree by construction rather than by a second code path
+  that has to be kept in step. Authority still changes only on Save.
+*/
+export async function POST(request: Request) {
+  const url = new URL(request.url);
+  try {
+    const body = await request.json().catch(() => null);
+    const draft = (body as { draft?: ManualCareerMemoryInput } | null)?.draft;
+    if (!draft || typeof draft !== "object") {
+      throw new ValidationError(["A resume draft is required to preview unsaved changes."]);
+    }
+
+    return await withCanonicalAuth(async (ctx) => {
+      const rawPaperSize = url.searchParams.get("paperSize") ?? "letter";
+      if (!isValidPaperSize(rawPaperSize)) throw new ValidationError([`Unsupported paperSize "${rawPaperSize}"`]);
+      const rawDensity = url.searchParams.get("density") ?? "comfortable";
+      if (!isValidDensity(rawDensity)) throw new ValidationError([`Unsupported density "${rawDensity}"`]);
+      const locale = url.searchParams.get("locale") ?? "en";
+
+      const profile = await ctx.repos.profiles.getByUserId(ctx.userId);
+      const selectedTemplateId = url.searchParams.get("templateId") ?? profile?.default_template_id ?? null;
+      if (!selectedTemplateId) throw new ValidationError(["No resume template has been selected for this profile yet."]);
+      const templateId = resolveCanonicalTemplateId(selectedTemplateId);
+
+      const runtime = buildManualCanonicalRuntime(draft);
+      const result = await renderTemplateFromRuntime(
+        runtime,
+        { templateId, useTailored: false as const, paperSize: rawPaperSize, density: rawDensity, locale, generatedAt: new Date(0).toISOString() },
+        "html"
+      );
+      return new NextResponse(result.html, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      });
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}

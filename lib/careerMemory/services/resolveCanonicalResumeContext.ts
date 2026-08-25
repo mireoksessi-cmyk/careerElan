@@ -188,6 +188,59 @@ async function downloadAndHash(storagePath: string): Promise<string> {
   return sha256Hex(buffer);
 }
 
+/*
+  Which version speaks for a selected uploaded resume.
+
+  Filtering on source_document_id alone used to be the whole answer,
+  because importing was the only way a version came into being. Once a
+  person can open an imported resume, correct it and save, that stops
+  being true: a user-confirmed version carries source_document_id = NULL
+  by design - it was not produced from a file - so the filter skipped
+  every edit and returned the original parse. The upload still identifies
+  where the lineage begins; authority is its newest descendant.
+
+  The walk stops at the next version carrying a source_document_id of its
+  own, and that boundary is what keeps two uploads apart. Versions form a
+  single chain per profile - every new version, import or edit, parents
+  whatever was current - so a later upload is literally a descendant of
+  an earlier one. Without the boundary, selecting an older resume would
+  walk through the next import and answer with a different document's
+  edits. Only NULL-source children belong to the upload being asked
+  about.
+
+  Deliberately kept as a pure function over rows the caller already
+  fetched: it is the same rule the service-role RPC implements in SQL,
+  and the only way to hold the two in step is to be able to test this one
+  directly.
+*/
+export function resolveSelectedUploadAuthority<T extends { id: string; parent_version_id: string | null; source_document_id: string | null; created_at: string }>(
+  versions: T[],
+  sourceDocumentId: string,
+): T | null {
+  /* The lineage root: the most recent import of this exact file. Same
+     selection as before, so a never-edited upload resolves unchanged. */
+  const imports = versions
+    .filter((version) => version.source_document_id === sourceDocumentId)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || (a.id < b.id ? 1 : -1));
+  if (imports.length === 0) return null;
+
+  let current = imports[0];
+  /* Bounded by the row count: a cycle is impossible under the writer's
+     advisory lock and expected-version check, and this makes that
+     assumption non-fatal if it ever stops holding. */
+  for (let step = 0; step < versions.length; step++) {
+    const children = versions
+      .filter((version) => version.parent_version_id === current.id && version.source_document_id === null)
+      /* Deterministic even though no fork exists today - concurrent saves
+         are serialized per profile - so a future fork degrades to a
+         stable answer rather than an arbitrary one. */
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || (a.id < b.id ? -1 : 1));
+    if (children.length === 0) break;
+    current = children[0];
+  }
+  return current;
+}
+
 async function resolveSessionMode(input: SessionModeInput): Promise<ResolveCanonicalResumeContextResult> {
   const { repos, client, userId } = input;
 
@@ -241,11 +294,11 @@ async function resolveSessionMode(input: SessionModeInput): Promise<ResolveCanon
       throw new SelectedResumeUnavailableError("not-yet-importable", "The selected resume has not been imported into Canonical Career Memory yet.");
     }
     const allVersions = await repos.resumeVersions.listByProfileId(profile.id);
-    const matching = allVersions.filter((v) => v.source_document_id === sourceDoc.id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    if (matching.length === 0) {
+    const authoritative = resolveSelectedUploadAuthority(allVersions, sourceDoc.id);
+    if (!authoritative) {
       throw new SelectedResumeUnavailableError("not-yet-importable", "The selected resume's source document has no canonical version yet.");
     }
-    return { status: "resolved", source: input.resumeId ? "explicit-resume" : "selected-resume", profileId: profile.id, versionId: matching[0].id, sourceDocumentId: sourceDoc.id };
+    return { status: "resolved", source: input.resumeId ? "explicit-resume" : "selected-resume", profileId: profile.id, versionId: authoritative.id, sourceDocumentId: sourceDoc.id };
   }
 
   // Branch D - no explicit override, no (or unset) selection: preserve existing behavior (profile's latest).
