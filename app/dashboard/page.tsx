@@ -2662,7 +2662,7 @@ function renderPreviewContent() {
     const previewStatus = largePreviewStatusBySrc[previewSrc];
     const placeholderAsset = availableTemplates.find((template) => template.id === previewAsset.templateId)?.previewAsset;
     return (
-      <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+      <div className="relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full overflow-hidden rounded-xl">
         {placeholderAsset && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
@@ -2673,7 +2673,7 @@ function renderPreviewContent() {
           title="Resume preview"
           onLoad={() => markLargePreview(previewSrc, "loaded")}
           onError={() => markLargePreview(previewSrc, "failed")}
-          className={`relative h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+          className={`relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
         />
         {previewStatus === "failed" && (
           <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
@@ -2711,7 +2711,7 @@ function renderPreviewContent() {
     const previewStatus = largePreviewStatusBySrc[previewSrc];
     const placeholderAsset = availableTemplates.find((template) => template.id === previewAsset.templateId)?.previewAsset;
     return (
-      <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+      <div className="relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full overflow-hidden rounded-xl">
         {placeholderAsset && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
@@ -2722,7 +2722,7 @@ function renderPreviewContent() {
           title="Resume preview"
           onLoad={() => markLargePreview(previewSrc, "loaded")}
           onError={() => markLargePreview(previewSrc, "failed")}
-          className={`relative h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+          className={`relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
         />
         {previewStatus === "failed" && (
           <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
@@ -3200,7 +3200,7 @@ Choose which resume and cover letter will be used when generating your applicati
           : "border-slate-200 bg-white"
       }`}
     >
-      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+      <label className="flex w-full min-w-0 cursor-pointer items-center gap-3 sm:w-auto sm:flex-1">
         <input
           type="radio"
           name="resume"
@@ -3228,7 +3228,7 @@ Choose which resume and cover letter will be used when generating your applicati
         </div>
       </label>
 
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
         {/*
           Visibility only - the button itself, its onClick, its preview
           asset type and the renderer behind it are untouched. Edit stays
@@ -3299,7 +3299,7 @@ Choose which resume and cover letter will be used when generating your applicati
               : "border-slate-200 bg-white"
           }`}
         >
-          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+          <label className="flex w-full min-w-0 cursor-pointer items-center gap-3 sm:w-auto sm:flex-1">
             <input
               type="radio"
               name="resume"
