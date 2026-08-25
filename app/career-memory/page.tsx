@@ -3039,7 +3039,22 @@ return;
                 document loads. src, key and request are unchanged.
               */}
               <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
-                {manualLargePreviewAsset && (
+                {/*
+                  Dropped once the live document has loaded, not merely covered
+                  by it. The two layers do not line up: the underlay is a
+                  fixed-ratio asset drawn with object-contain, so it is scaled
+                  and CENTRED in this box, while the live page is a fixed-width
+                  document sitting flush left. Their designs therefore land at
+                  different x positions - measured 308-498px for the underlay
+                  against 25-286px for the live render at this width - and any
+                  moment the iframe is not fully opaque shows both, which reads
+                  as a second detached accent rail beside the real one.
+
+                  Keying on the same loaded status the iframe already uses means
+                  a failed render still keeps its placeholder, which is the
+                  whole reason the underlay exists.
+                */}
+                {manualLargePreviewAsset && largePreviewStatusBySrc[manualLargePreviewSrc] !== "loaded" && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={manualLargePreviewAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
                 )}
