@@ -220,7 +220,7 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
                   onLoad={() => markPreview(previewSrc, "loaded")}
                   onError={() => markPreview(previewSrc, "failed")}
                   className={`pointer-events-none absolute left-0 top-0 origin-top-left border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
-                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(calc(var(--tpl-w) / ${PAGE_WIDTH_PX}))`, willChange: "transform" }}
+                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(calc(var(--tpl-w) / ${PAGE_WIDTH_PX}px))`, willChange: "transform" }}
                 />
               ) : null}
               {previewStatus === "failed" && (
