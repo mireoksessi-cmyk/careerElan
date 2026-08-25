@@ -3027,25 +3027,7 @@ return;
     const manualLargePreviewAsset = templatePreviewAsset(manualSelectedTemplateId);
 
     return (
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,65%)]">
-        <div className="min-w-0">
-          <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose a template</p>
-          <h3 className="mt-1 text-xl font-black text-slate-950">Pick the design for your resume</h3>
-          <p className="mt-2 text-sm text-slate-600">Required. Select one of the four resume designs below - this is the same template lineup used for uploaded resumes.</p>
-          {manualTemplateError && <p className="mt-3 text-sm font-semibold text-red-600">{manualTemplateError}</p>}
-          <div className="mt-4">
-            <CanonicalTemplatePicker
-              templates={manualTemplates as any}
-              selectedTemplateId={manualSelectedTemplateId as any}
-              onSelect={(templateId) => selectManualTemplate(templateId)}
-              disabled={manualTemplateStatus === "saving-template"}
-              /* Same rule as the large preview above: these cards show the
-                 user's own resume in each design, so they must not gain
-                 sections the user never entered. */
-              livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
-            />
-          </div>
-        </div>
+      <div className="mt-6 flex flex-col gap-6">
         <div className="min-w-0">
           {manualSelectedTemplateId ? (
             <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
@@ -3080,6 +3062,26 @@ return;
             </div>
           )}
         </div>
+        <div className="min-w-0">
+          <p className="text-sm font-black uppercase tracking-wide text-blue-600">Choose a template</p>
+          <h3 className="mt-1 text-xl font-black text-slate-950">Pick the design for your resume</h3>
+          <p className="mt-2 text-sm text-slate-600">Required. Select one of the four resume designs below - this is the same template lineup used for uploaded resumes.</p>
+          {manualTemplateError && <p className="mt-3 text-sm font-semibold text-red-600">{manualTemplateError}</p>}
+          <div className="mt-4">
+            <div className="mx-auto w-full max-w-[576px]">
+              <CanonicalTemplatePicker
+                templates={manualTemplates as any}
+                selectedTemplateId={manualSelectedTemplateId as any}
+                onSelect={(templateId) => selectManualTemplate(templateId)}
+                disabled={manualTemplateStatus === "saving-template"}
+                /* Same rule as the large preview above: these cards show the
+                   user's own resume in each design, so they must not gain
+                   sections the user never entered. */
+                livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail${manualCanonicalVersionId ? `&canonicalVersionId=${manualCanonicalVersionId}` : ""}`}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -3101,7 +3103,7 @@ return;
   function renderInlineWorkspace() {
     return (
       <>
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,65%)_minmax(0,1fr)]">
+        <div className="mt-8 flex flex-col gap-6">
           <div className="min-w-0">
             <p className="text-sm font-black uppercase tracking-wide text-blue-600">Live Resume Preview</p>
             <p className="mt-1 text-sm text-slate-500">{inlineSelectedTemplateId ? "Selected template applied immediately." : "Your original resume, until you choose a design."}</p>
@@ -3127,13 +3129,15 @@ return;
             {(inlineTemplateStatus === "selecting" || inlineTemplateStatus === "saving" || inlineTemplateStatus === "ready") && (
               <div className="mt-4">
                 {inlineTemplateError && <p className="mb-3 text-sm font-semibold text-red-600">{inlineTemplateError}</p>}
-                <CanonicalTemplatePicker
-                  templates={inlineTemplates as any}
-                  selectedTemplateId={inlineSelectedTemplateId as any}
-                  onSelect={(templateId) => selectInlineTemplate(templateId)}
-                  disabled={inlineTemplateStatus === "saving"}
-                  livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail&genericSkeleton=1`}
-                />
+                <div className="mx-auto w-full max-w-[576px]">
+                  <CanonicalTemplatePicker
+                    templates={inlineTemplates as any}
+                    selectedTemplateId={inlineSelectedTemplateId as any}
+                    onSelect={(templateId) => selectInlineTemplate(templateId)}
+                    disabled={inlineTemplateStatus === "saving"}
+                    livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail&genericSkeleton=1`}
+                  />
+                </div>
                 {inlineSelectedTemplateId ? (
                   <p className="mt-4 text-sm font-bold text-slate-900">
                     Applied template: <span className="text-blue-600">{inlineTemplates.find((t) => t.id === inlineSelectedTemplateId)?.name ?? inlineSelectedTemplateId}</span>
