@@ -41,12 +41,21 @@ import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
   baked-in constant. A fixed 280px card forced exactly one column on
   every phone - the four templates stacked into a ~1732px column, so a
   mobile user saw one template and had no reason to think there were
-  more. The variable steps down at narrow widths (two columns fit from
-  320px up) and returns to the original 280px at sm, where the 576px
-  wrapper has always shown two columns. Because the box height and the
-  iframe scale are calc()-ed from the same variable, the aspect ratio
-  and the page-to-thumbnail mapping stay exact at every step - still no
-  runtime ResizeObserver, and no transform hack on the card itself.
+  more.
+
+  Every step below is measured against the space this grid actually
+  gets, not against the raw viewport: the page gutter and the enclosing
+  card padding are subtracted first, and the wrapper is capped at 576px.
+  Earlier values were derived from the viewport alone, which is why the
+  card padding went unaccounted for and 400px-wide phones dropped back
+  to a single column while 399px still showed two. Each step is sized so
+  two columns fit with room to spare and a third can never fit, which is
+  what keeps the count at exactly two - a step that merely "fits" at its
+  own breakpoint reverses on the phone that sits just below the next
+  one. Because the box height and the iframe scale are calc()-ed from
+  the same variable, the aspect ratio and the page-to-thumbnail mapping
+  stay exact at every step - still no runtime ResizeObserver, and no
+  transform hack on the card itself.
 */
 const PAGE_WIDTH_PX = PAPER_DIMENSIONS.letter.widthPx;
 const PAGE_HEIGHT_PX = PAPER_DIMENSIONS.letter.heightPx;
@@ -176,7 +185,7 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
   }, [scheduleKey, previewStatusBySrc]);
 
   return (
-    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto [--tpl-w:132px] min-[400px]:[--tpl-w:160px] sm:[--tpl-w:280px]" style={{ gridTemplateColumns: columns ? `repeat(${columns}, var(--tpl-w))` : "repeat(auto-fit, var(--tpl-w))" }}>
+    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto [--tpl-w:108px] min-[380px]:[--tpl-w:132px] min-[500px]:[--tpl-w:192px] sm:[--tpl-w:240px] md:[--tpl-w:272px]" style={{ gridTemplateColumns: columns ? `repeat(${columns}, var(--tpl-w))` : "repeat(auto-fit, var(--tpl-w))" }}>
       {templates.map((template) => {
         const isSelected = selectedTemplateId === template.id;
         const previewSrc = livePreviewUrl && startedTemplateIds.includes(template.id) ? livePreviewUrl(template.id) : null;

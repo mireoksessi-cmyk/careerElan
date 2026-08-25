@@ -805,6 +805,33 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
         return;
       }
 
+      /*
+        Step 9 reads the PERSISTED career_memory row - import-manual is a
+        bodyless POST, so the server re-reads the database and never sees
+        the form state the user is looking at. Reaching Step 9 through the
+        Steps sidebar calls setCurrentStep() alone, with no save in
+        between, so a person who edits Personal Information and jumps
+        straight here was previewing whatever was saved BEFORE that edit:
+        the four template cards showed a different name and history than
+        the form directly above them.
+
+        Persisting here rather than at each navigation control is what
+        makes the guarantee hold for every route into this step - the Next
+        button, the sidebar, and any future entry point alike. The effect
+        that calls this flow depends on [mode, currentStep] only, and
+        persistMemory() sets neither, so this cannot re-trigger itself.
+
+        A failed save must stop the import: continuing would rebuild the
+        canonical version from the same stale row this exists to avoid.
+        persistMemory() has already surfaced its own toast in that case.
+      */
+      const saved = await persistMemory();
+      if (!saved) {
+        setManualTemplateError("Could not save your Career Memory before preparing templates. Please try again.");
+        setManualTemplateStatus("import-error");
+        return;
+      }
+
       const importRes = await fetch("/api/internal/canonical-career-memory/import-manual", { method: "POST" });
       const importData = await importRes.json().catch(() => null);
       if (!importRes.ok) {
@@ -3540,7 +3567,7 @@ return;
 
   function renderStepForm() {
     if (currentStep === 0) return (
-      <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn (optional)" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
+      <div className="mt-6 grid gap-3 sm:gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn (optional)" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
     );
     if  (currentStep === 3) {
   return (
@@ -4534,7 +4561,7 @@ return;
             : "xl:col-span-6"
         }`}
       >
-        <Card padding="md">
+        <Card padding="sm" className="sm:p-6">
           <h2 className="text-xl font-bold">
             {steps[currentStep].title}
           </h2>
