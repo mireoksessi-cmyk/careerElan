@@ -113,6 +113,33 @@ const NETLIFY_ALTERNATE_HOST_SUFFIX = `--${CANONICAL_HOST}`;
 function isNetlifyAlternateHost(hostHeader: string | null) {
   if (!hostHeader) return false;
   const hostname = hostHeader.split(":")[0].toLowerCase();
+  /*
+    One exemption: this site's own Deploy Previews. A pull request's
+    preview is the only pre-production surface this project has - the
+    production Netlify host and careerelan.com are the same deployment -
+    so canonicalizing a preview away sends every reviewer to production
+    and there is nowhere left to review a change before release. Unlike a
+    deploy permalink, a Deploy Preview is a host reviewers are MEANT to
+    browse, and its session being separate from production's is the point
+    rather than the bug the rule above exists to fix.
+
+    Deliberately narrow. The label before the suffix must be exactly
+    Netlify's own deploy-preview-<number> form, so master-- and
+    <deploy-id>-- permalinks still canonicalize as before. The suffix is
+    still required, so this can only ever exempt a preview Netlify issued
+    for THIS site; a lookalike on any other domain fails that test and is
+    handled exactly as it was before. The redirect this skips is built
+    from the CANONICAL_HOST constant either way, so no attacker-supplied
+    host can be reached through this branch.
+  */
+  if (
+    hostname.endsWith(NETLIFY_ALTERNATE_HOST_SUFFIX) &&
+    /^deploy-preview-\d+$/.test(
+      hostname.slice(0, -NETLIFY_ALTERNATE_HOST_SUFFIX.length)
+    )
+  ) {
+    return false;
+  }
   return (
     hostname.length > NETLIFY_ALTERNATE_HOST_SUFFIX.length &&
     hostname.endsWith(NETLIFY_ALTERNATE_HOST_SUFFIX)
