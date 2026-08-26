@@ -241,7 +241,7 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
                 <p className="font-bold text-slate-900">{template.name}</p>
                 {isSelected && <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-bold text-white">Selected</span>}
               </div>
-              <p className="mt-1 text-xs text-slate-500">{template.description}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-slate-500 sm:line-clamp-none">{template.description}</p>
             </div>
           </button>
         );

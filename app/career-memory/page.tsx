@@ -3248,7 +3248,7 @@ return;
                 static asset and keeps the new iframe hidden until its own
                 document loads. src, key and request are unchanged.
               */}
-              <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+              <div className="relative h-[320px] w-full overflow-hidden rounded-xl sm:h-[820px]">
                 {/*
                   Dropped once the live document has loaded, not merely covered
                   by it. The two layers do not line up: the underlay is a
@@ -3274,7 +3274,7 @@ return;
                   title="Canonical resume preview"
                   onLoad={() => markLargePreview(manualLargePreviewSrc, "loaded")}
                   onError={() => markLargePreview(manualLargePreviewSrc, "failed")}
-                  className={`relative h-[820px] w-full rounded-xl border border-slate-200 bg-white transition-opacity duration-300 ${largePreviewStatusBySrc[manualLargePreviewSrc] === "loaded" ? "opacity-100" : "opacity-0"}`}
+                  className={`relative h-[320px] w-full rounded-xl border border-slate-200 bg-white transition-opacity duration-300 sm:h-[820px] ${largePreviewStatusBySrc[manualLargePreviewSrc] === "loaded" ? "opacity-100" : "opacity-0"}`}
                 />
                 {largePreviewStatusBySrc[manualLargePreviewSrc] === "failed" && (
                   <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
@@ -3410,7 +3410,7 @@ return;
                   come through here. */}
               <button type="button" onClick={openUploadedEdit} className="rounded-xl border border-blue-600 px-5 py-2.5 font-bold text-blue-600">Edit Content</button>
             </div>
-            <div className="mt-3">{renderLiveResumePreviewContent()}</div>
+            <div className="mt-3 max-h-[360px] overflow-auto sm:max-h-none sm:overflow-visible">{renderLiveResumePreviewContent()}</div>
           </div>
 
           <div className="min-w-0 rounded-2xl border border-blue-100 bg-white p-6">
