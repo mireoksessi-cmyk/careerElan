@@ -40,6 +40,7 @@ export type AdminUserRow = {
   generatePackageThisMonth: number;
   applicationCount: number;
   lastActivity: string | null;
+  emailConfirmedAt: string | null;
 };
 
 async function buildLookups() {
@@ -89,6 +90,7 @@ function toRow(user: AuthUserSummary, lookups: Awaited<ReturnType<typeof buildLo
     generatePackageThisMonth: lookups.generatePackageThisMonth.get(user.id) ?? 0,
     applicationCount: lookups.applicationCount.get(user.id) ?? 0,
     lastActivity: lookups.lastActivity.get(user.id) ?? null,
+    emailConfirmedAt: user.emailConfirmedAt,
   };
 }
 
@@ -229,6 +231,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     generatePackageThisMonth: appsThisMonth.length,
     applicationCount: (apps ?? []).length,
     lastActivity: apps?.[0]?.created_at ?? null,
+    emailConfirmedAt: user.email_confirmed_at ?? null,
     selectedResumeExists: Boolean(cm?.selected_resume_id),
     selectedTemplate: cm?.resume_template ?? null,
     successfulGenerationCount: succeeded.length,

@@ -17,7 +17,15 @@ export default async function AdminOverviewPage() {
 
       <Section title="Users">
         <CardGrid>
-          <MetricCard label="Total Users" metric={overview.users.total} />
+          {/*
+            "Total Users" used to sit over a count of every auth.users row,
+            which is a count of signup attempts - an account exists there
+            before its email is ever confirmed. The label now says what the
+            number is, and the two cards beside it say how it splits.
+          */}
+          <MetricCard label="Total Auth Accounts" metric={overview.users.total} />
+          <MetricCard label="Verified Members" metric={overview.users.verifiedMembers} />
+          <MetricCard label="Unverified Signups" metric={overview.users.unverifiedSignups} />
           <MetricCard label="New Today" metric={overview.users.newToday} />
           <MetricCard label="New 7 Days" metric={overview.users.new7Days} />
           <MetricCard label="New This Month" metric={overview.users.newThisMonth} />

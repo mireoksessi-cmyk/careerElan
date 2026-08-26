@@ -75,6 +75,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                 <th className="px-3 py-2">Email</th>
                 <th className="px-3 py-2">Joined</th>
                 <th className="px-3 py-2">Provider</th>
+                <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Plan</th>
                 <th className="px-3 py-2">Career Memory</th>
                 <th className="px-3 py-2">Resumes</th>
@@ -92,6 +93,15 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   </td>
                   <td className="px-3 py-2 text-slate-500">{new Date(row.joinedAt).toLocaleDateString()}</td>
                   <td className="px-3 py-2">{row.provider}</td>
+                  {/*
+                    A row exists in auth.users the moment Create Account is
+                    pressed, so "appears in this table" has never meant "is a
+                    member". This column is what says which of the two you are
+                    looking at.
+                  */}
+                  <td className="px-3 py-2">
+                    {row.emailConfirmedAt ? <Badge tone="success">Verified</Badge> : <Badge>Unverified email</Badge>}
+                  </td>
                   <td className="px-3 py-2">
                     <Badge tone={row.plan === "pro" ? "success" : "default"}>{row.plan}</Badge>
                   </td>
