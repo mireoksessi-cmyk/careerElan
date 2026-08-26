@@ -762,6 +762,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [manualTemplateStatus, setManualTemplateStatus] = useState<"idle" | "not-applicable" | "importing" | "import-error" | "selecting" | "saving-template" | "ready">("idle");
   const [manualTemplates, setManualTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
   const [manualSelectedTemplateId, setManualSelectedTemplateId] = useState<string | null>(null);
+  const [manualMobilePreviewOpen, setManualMobilePreviewOpen] = useState(false);
   /*
     Phase Step9-gate - true ONLY once the user has clicked a card for
     THIS manual Step 9 flow (set in selectManualTemplate on a
@@ -3237,8 +3238,8 @@ return;
     const manualLargePreviewAsset = templatePreviewAsset(manualSelectedTemplateId);
 
     return (
-      <div className="mt-6 flex flex-col gap-6">
-        <div className="min-w-0">
+      <div className="mt-6 flex flex-col-reverse gap-6 sm:flex-col">
+        <div className={`min-w-0 ${manualMobilePreviewOpen ? "" : "hidden"} sm:block`}>
           {manualSelectedTemplateId ? (
             <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
               {/*
@@ -3306,6 +3307,30 @@ return;
               />
             </div>
           </div>
+          {/*
+            Phones only. The preview above is display:none until this is
+            tapped, so Step 9 opens on the four choices instead of on a
+            document. Reading a resume and picking a design are different
+            jobs and only one of them needs a page-sized surface - on a
+            phone that surface costs the entire screen, so it waits until
+            it is asked for. The src it reveals is derived from
+            manualSelectedTemplateId, so picking another card and tapping
+            again shows that card's design; nothing here saves, generates
+            or persists anything. sm: keeps the desktop layout exactly as
+            it was - preview above, always open, no button.
+          */}
+          <button
+            type="button"
+            onClick={() => setManualMobilePreviewOpen((prev) => !prev)}
+            disabled={!manualSelectedTemplateId}
+            className="mt-4 w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 sm:hidden"
+          >
+            {!manualSelectedTemplateId
+              ? "Select a template to preview"
+              : manualMobilePreviewOpen
+                ? "Hide preview"
+                : "Preview template"}
+          </button>
         </div>
       </div>
     );
