@@ -78,6 +78,14 @@ const [
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
+  /*
+    Null until Create Account has classified the address. Anything else
+    means the signup was stopped because the account already exists, and
+    the form is showing that instead of a success it cannot honestly claim.
+  */
+  const [signupAccountState, setSignupAccountState] = useState<
+    "EXISTING_VERIFIED" | "EXISTING_UNVERIFIED" | "EXISTING_SOCIAL" | "UNKNOWN" | null
+  >(null);
   const [loginId, setLoginId] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [agreedToLegalTerms, setAgreedToLegalTerms] = useState(false);
@@ -459,8 +467,22 @@ useEffect(() => {
 
   setLoading(true);
   setMessage("");
+  setSignupAccountState(null);
 
   try {
+    /*
+      Checked before signUp, not after: with email confirmation on,
+      Supabase answers an already-registered address in a way the browser
+      cannot tell apart from a new one, so there is nothing to inspect
+      afterwards. Only a genuinely new address goes on to create an account.
+    */
+    const preflightStatus = await classifySignupEmail(cleanEmail);
+
+    if (preflightStatus !== "NEW") {
+      setSignupAccountState(preflightStatus);
+      return;
+    }
+
     const { data, error } =
       await supabase.auth.signUp({
         email: cleanEmail,
@@ -502,13 +524,14 @@ useEffect(() => {
           .toLowerCase()
           .includes("duplicate")
       ) {
-        toast.success(
-          "Your account has been created. Please verify your email address - you'll be able to log in once it's verified."
-        );
-
-        setMessage(
-          "Verification email sent. Check your inbox to finish setting up your account."
-        );
+        /*
+          Kept as a safety net for the window between the check above and
+          this call. It no longer claims the account was created - it asks
+          once more what the address actually is and shows that, falling
+          back to the neutral message if even that cannot be answered. The
+          raw Supabase text never reaches the browser either way.
+        */
+        setSignupAccountState(await classifySignupEmail(cleanEmail));
         return;
       }
 
@@ -520,6 +543,17 @@ useEffect(() => {
       setMessage(
         "Unable to create your account."
       );
+      return;
+    }
+
+    /*
+      Supabase hands back a user carrying no identities when the address was
+      already taken - the same window the duplicate branch above covers,
+      reached when it answers without an error at all. Reclassify once
+      rather than announce a signup that did not happen.
+    */
+    if ((data.user.identities?.length ?? 0) === 0 && !data.session) {
+      setSignupAccountState(await classifySignupEmail(cleanEmail));
       return;
     }
 
@@ -546,6 +580,35 @@ setMessage(
     );
   } finally {
     setLoading(false);
+  }
+}
+
+/*
+  Asks the server whether this address already belongs to an account. The
+  browser is told only which of five states applies - never an id, a
+  provider or a timestamp - and the server writes nothing to answer. A
+  failure returns UNKNOWN rather than NEW: proceeding on a bad guess is how
+  the misleading success message happened in the first place.
+*/
+async function classifySignupEmail(email: string) {
+  try {
+    const response = await fetch("/api/auth/email-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    const result = await response.json().catch(() => null);
+    const status = result?.status;
+
+    return status === "NEW" ||
+      status === "EXISTING_VERIFIED" ||
+      status === "EXISTING_UNVERIFIED" ||
+      status === "EXISTING_SOCIAL"
+      ? status
+      : "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
   }
 }
 
@@ -1015,14 +1078,62 @@ async function resendConfirmationEmail() {
         : "Create Account"}
     </button>
 
-    <button
-      type="button"
-      onClick={resendConfirmationEmail}
-      disabled={loading}
-      className="w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600 disabled:opacity-50"
-    >
-      Resend Verification Email
-    </button>
+    {/*
+      Shown only once the address has been identified as an account that
+      never finished verifying. It used to sit here on every signup,
+      offering to re-send a confirmation to people who had no account and
+      to people whose address was already confirmed - neither of whom would
+      ever receive anything from it.
+    */}
+    {signupAccountState === "EXISTING_UNVERIFIED" && (
+      <button
+        type="button"
+        onClick={resendConfirmationEmail}
+        disabled={loading}
+        className="w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600 disabled:opacity-50"
+      >
+        Resend verification email
+      </button>
+    )}
+
+    {/*
+      What Create Account found, when it found an account instead of
+      creating one. The verified and social wordings differ because the
+      actions differ: one has a password to log in with, the other has to
+      use whichever provider they signed up through - never named here,
+      since an account can carry more than one and guessing wrong sends
+      them to the wrong button.
+    */}
+    {signupAccountState && (
+      <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-slate-700">
+        <p>
+          {signupAccountState === "EXISTING_VERIFIED"
+            ? "This email is already registered. Please log in instead."
+            : signupAccountState === "EXISTING_UNVERIFIED"
+              ? "This account hasn't finished email verification yet. Check your inbox, or send yourself a new verification email."
+              : signupAccountState === "EXISTING_SOCIAL"
+                ? "An account already exists for this email. Please sign in with the method you used before."
+                : "We couldn't complete that just now. Please try again in a moment."}
+        </p>
+
+        {(signupAccountState === "EXISTING_VERIFIED" ||
+          signupAccountState === "EXISTING_SOCIAL") && (
+          <button
+            type="button"
+            onClick={() => {
+              setLoginEmail(signupEmail.trim());
+              setSignupAccountState(null);
+              setAuthMode("login");
+              setMessage("");
+            }}
+            disabled={loading}
+            className="mt-3 w-full rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"
+          >
+            Log in
+          </button>
+        )}
+      </div>
+    )}
 
     <button
       type="button"
