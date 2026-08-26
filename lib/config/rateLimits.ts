@@ -26,7 +26,8 @@ export type RateLimitedEndpoint =
   | "analyze-job-url"
   | "career-insight"
   | "search-jobs"
-  | "login-by-id";
+  | "login-by-id"
+  | "auth-email-status";
 
 export const RATE_LIMIT_WINDOW_SECONDS = 600; // 10 minutes
 
@@ -49,4 +50,12 @@ export const RATE_LIMITS: Record<
   // rather than left to invite a future authenticated caller to get a
   // looser limit than intended.
   "login-by-id": { guest: 5, user: 5 },
+  // Its own bucket, deliberately not shared with "login-by-id" above: the
+  // signup form calls this on every Create Account attempt, and folding it
+  // into the login quota would let ordinary signup traffic exhaust the
+  // budget that bounds how many login ids a caller can probe. Same
+  // conservative numbers for the same reason - it answers whether an email
+  // is already registered, so the guest bucket is what limits how many
+  // addresses one caller can check per window.
+  "auth-email-status": { guest: 5, user: 5 },
 };
