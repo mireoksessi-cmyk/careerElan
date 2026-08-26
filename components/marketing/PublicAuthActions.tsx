@@ -168,6 +168,35 @@ useEffect(() => {
     window.location.search
   );
 
+  /*
+    Emitted by app/auth/reset-password/route.ts when a recovery link cannot
+    be turned into a session. "invalid" covers expired, already spent and
+    never-valid alike - the route deliberately does not tell them apart, and
+    asking for a fresh link is the answer to all three. Handled here rather
+    than left to a bare query string: the old recovery path already failed
+    silently through ?authError, and a second unread parameter would only
+    repeat that.
+  */
+  const resetError = params.get("resetError");
+
+  if (resetError === "invalid" || resetError === "session") {
+    setAuthMode("login");
+    setShowAuthModal(true);
+    setMessage(
+      resetError === "session"
+        ? "We couldn't start a secure password reset session. Please request a new password reset link."
+        : "This password reset link is invalid or has expired. Please request a new one."
+    );
+
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname
+    );
+
+    return;
+  }
+
   if (
     params.get("resetPassword") === "true"
   ) {
