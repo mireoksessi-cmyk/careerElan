@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 import { searchJobs } from "@/lib/services/search";
 import Image from "next/image";
@@ -2661,7 +2662,7 @@ function renderPreviewContent() {
     const previewStatus = largePreviewStatusBySrc[previewSrc];
     const placeholderAsset = availableTemplates.find((template) => template.id === previewAsset.templateId)?.previewAsset;
     return (
-      <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+      <div className="relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full overflow-hidden rounded-xl">
         {placeholderAsset && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
@@ -2672,7 +2673,7 @@ function renderPreviewContent() {
           title="Resume preview"
           onLoad={() => markLargePreview(previewSrc, "loaded")}
           onError={() => markLargePreview(previewSrc, "failed")}
-          className={`relative h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+          className={`relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
         />
         {previewStatus === "failed" && (
           <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
@@ -2710,7 +2711,7 @@ function renderPreviewContent() {
     const previewStatus = largePreviewStatusBySrc[previewSrc];
     const placeholderAsset = availableTemplates.find((template) => template.id === previewAsset.templateId)?.previewAsset;
     return (
-      <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+      <div className="relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full overflow-hidden rounded-xl">
         {placeholderAsset && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={placeholderAsset} alt="Resume template preview" className="absolute inset-0 h-full w-full object-contain" />
@@ -2721,7 +2722,7 @@ function renderPreviewContent() {
           title="Resume preview"
           onLoad={() => markLargePreview(previewSrc, "loaded")}
           onError={() => markLargePreview(previewSrc, "failed")}
-          className={`relative h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+          className={`relative h-[62dvh] min-h-[340px] sm:h-[820px] w-full rounded-xl border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
         />
         {previewStatus === "failed" && (
           <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
@@ -2864,9 +2865,9 @@ if (!user) {
       )}
 
       {showTour && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-labelledby="welcome-tour-title" className="w-full max-w-3xl rounded-3xl bg-white p-8 shadow-2xl">
-            <div className="flex items-start justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-labelledby="welcome-tour-title" className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col rounded-3xl bg-white p-5 shadow-2xl sm:p-8">
+            <div className="flex shrink-0 items-start justify-between">
               <div>
                 <h2 id="welcome-tour-title" className="text-3xl font-extrabold">Welcome to Career Élan! 👋</h2>
                 <p className="mt-2 text-sm text-slate-500">Take a quick 3-step tour to get started.</p>
@@ -2874,7 +2875,8 @@ if (!user) {
               <button onClick={closeTour} aria-label="Close" className="text-2xl text-slate-400 hover:text-slate-700"><span aria-hidden="true">×</span></button>
             </div>
 
-            <div className="mt-8 grid gap-5 md:grid-cols-3">
+            <div className="mt-6 min-h-0 flex-1 overflow-y-auto sm:mt-8">
+            <div className="grid gap-5 md:grid-cols-3">
               <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5 text-center">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-4xl shadow-sm">🧠</div>
                 <span className="mt-5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">1</span>
@@ -2908,6 +2910,7 @@ if (!user) {
               <button onClick={closeTour} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600">
                 Skip for now
               </button>
+            </div>
             </div>
           </div>
         </div>
@@ -2952,7 +2955,8 @@ if (!user) {
         </aside>
 
         <section className="min-w-0 flex-1">
-          <header className="flex flex-wrap items-center justify-between gap-4 px-8 py-6">
+          <AppContent>
+          <header className="flex flex-wrap items-center justify-between gap-4 pb-6">
             <div>
              <h1 className="text-2xl font-extrabold">
   Good morning, {displayName}! 👋
@@ -2987,7 +2991,7 @@ if (!user) {
             </div>
           </header>
 
-          <div className="grid grid-cols-12 gap-6 px-8 pb-8">
+          <div className="grid grid-cols-12 gap-6">
             <section className="col-span-12 space-y-6 xl:col-span-9">
               <div>
                 <h2 className="mb-4 text-lg font-bold">Overview</h2>
@@ -3196,7 +3200,7 @@ Choose which resume and cover letter will be used when generating your applicati
           : "border-slate-200 bg-white"
       }`}
     >
-      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+      <label className="flex w-full min-w-0 cursor-pointer items-center gap-3 sm:w-auto sm:flex-1">
         <input
           type="radio"
           name="resume"
@@ -3224,7 +3228,7 @@ Choose which resume and cover letter will be used when generating your applicati
         </div>
       </label>
 
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
         {/*
           Visibility only - the button itself, its onClick, its preview
           asset type and the renderer behind it are untouched. Edit stays
@@ -3295,7 +3299,7 @@ Choose which resume and cover letter will be used when generating your applicati
               : "border-slate-200 bg-white"
           }`}
         >
-          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+          <label className="flex w-full min-w-0 cursor-pointer items-center gap-3 sm:w-auto sm:flex-1">
             <input
               type="radio"
               name="resume"
@@ -4163,6 +4167,7 @@ recommendedJobs.slice(0, visibleJobs).map((job) => (
 </Card>
             </aside>
           </div>
+          </AppContent>
         </section>
       </div>
       <CareerElanFooter />

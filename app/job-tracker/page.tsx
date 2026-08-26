@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 import CareerInsights from "@/components/job-layout/CareerInsights";
 import FilterBar from "@/components/job-layout/FilterBar";
 
@@ -591,7 +592,8 @@ return (
 
       <Sidebar active="Job Tracker" />
 
-      <section className="min-w-0 flex-1 p-8">
+      <section className="min-w-0 flex-1">
+        <AppContent>
 
     <Header
   title="Job Tracker"
@@ -672,6 +674,7 @@ return (
 
     )}
 
+        </AppContent>
       </section>
 
     </div>

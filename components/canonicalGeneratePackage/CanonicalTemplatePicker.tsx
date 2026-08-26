@@ -33,17 +33,32 @@ import { PAPER_DIMENSIONS } from "@/lib/resumeTemplates/shared/paperSizes";
   own "8.5in"/"11in" CSS units resolve to the identical pixel size at
   the standard 96 CSS px/inch, so this is accurate for all 4
   templates, not just the 3 that already use this module's px values).
-  THUMBNAIL_HEIGHT_PX is derived FROM the real aspect ratio, so the
-  thumbnail box exactly matches the scaled page with no letterboxing
-  and no clipping - a fixed pixel size (not percentage-of-container)
-  is what makes the formula usable without a runtime ResizeObserver;
-  the grid below wraps to as many fixed-size columns as fit.
+  The box height and the iframe scale are both derived FROM the real
+  aspect ratio, so the thumbnail exactly matches the scaled page with no
+  letterboxing and no clipping.
+
+  That width is carried in a --tpl-w CSS variable rather than a single
+  baked-in constant. A fixed 280px card forced exactly one column on
+  every phone - the four templates stacked into a ~1732px column, so a
+  mobile user saw one template and had no reason to think there were
+  more.
+
+  Every step below is measured against the space this grid actually
+  gets, not against the raw viewport: the page gutter and the enclosing
+  card padding are subtracted first, and the wrapper is capped at 576px.
+  Earlier values were derived from the viewport alone, which is why the
+  card padding went unaccounted for and 400px-wide phones dropped back
+  to a single column while 399px still showed two. Each step is sized so
+  two columns fit with room to spare and a third can never fit, which is
+  what keeps the count at exactly two - a step that merely "fits" at its
+  own breakpoint reverses on the phone that sits just below the next
+  one. Because the box height and the iframe scale are calc()-ed from
+  the same variable, the aspect ratio and the page-to-thumbnail mapping
+  stay exact at every step - still no runtime ResizeObserver, and no
+  transform hack on the card itself.
 */
 const PAGE_WIDTH_PX = PAPER_DIMENSIONS.letter.widthPx;
 const PAGE_HEIGHT_PX = PAPER_DIMENSIONS.letter.heightPx;
-const THUMBNAIL_WIDTH_PX = 280;
-const THUMBNAIL_HEIGHT_PX = Math.round(THUMBNAIL_WIDTH_PX * (PAGE_HEIGHT_PX / PAGE_WIDTH_PX));
-const THUMBNAIL_SCALE = Math.min(THUMBNAIL_WIDTH_PX / PAGE_WIDTH_PX, THUMBNAIL_HEIGHT_PX / PAGE_HEIGHT_PX);
 
 /*
   How many live thumbnail previews may be IN FLIGHT at once, per picker
@@ -82,7 +97,7 @@ export type CanonicalTemplatePickerProps = {
   livePreviewUrl?: (templateId: TemplateId) => string;
   /*
     Optional fixed column count override for the outer grid. Omitted
-    (undefined) preserves the original repeat(auto-fit, THUMBNAIL_WIDTH_PX)
+    (undefined) preserves the original repeat(auto-fit, --tpl-w)
     behavior byte-for-byte for every existing caller (Career Memory Step 9,
     ApplicationTemplateSwitcher/JobDetail) - only a caller that explicitly
     passes this opts into a fixed N-column grid instead.
@@ -170,7 +185,7 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
   }, [scheduleKey, previewStatusBySrc]);
 
   return (
-    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto" style={{ gridTemplateColumns: columns ? `repeat(${columns}, ${THUMBNAIL_WIDTH_PX}px)` : `repeat(auto-fit, ${THUMBNAIL_WIDTH_PX}px)` }}>
+    <div role="radiogroup" aria-label="Choose a resume template" className="grid w-full max-w-full justify-center gap-4 overflow-x-auto [--tpl-w:108px] min-[380px]:[--tpl-w:132px] min-[500px]:[--tpl-w:192px] sm:[--tpl-w:240px] md:[--tpl-w:272px]" style={{ gridTemplateColumns: columns ? `repeat(${columns}, var(--tpl-w))` : "repeat(auto-fit, var(--tpl-w))" }}>
       {templates.map((template) => {
         const isSelected = selectedTemplateId === template.id;
         const previewSrc = livePreviewUrl && startedTemplateIds.includes(template.id) ? livePreviewUrl(template.id) : null;
@@ -183,12 +198,12 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
             aria-checked={isSelected}
             disabled={disabled}
             onClick={() => onSelect(template.id)}
-            style={{ width: THUMBNAIL_WIDTH_PX }}
+            style={{ width: "var(--tpl-w)" }}
             className={`flex flex-col overflow-hidden rounded-2xl border-2 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
               isSelected ? "border-blue-600 bg-blue-50/60 ring-2 ring-blue-200" : "border-slate-200 bg-white hover:border-blue-300"
             }`}
           >
-            <div className="relative overflow-hidden bg-white" style={{ width: THUMBNAIL_WIDTH_PX, height: THUMBNAIL_HEIGHT_PX }}>
+            <div className="relative overflow-hidden bg-white" style={{ width: "var(--tpl-w)", height: `calc(var(--tpl-w) * ${PAGE_HEIGHT_PX} / ${PAGE_WIDTH_PX})` }}>
               {/*
                 Layer 1 - always rendered, identical asset and identical
                 loading attribute in both modes. With no live preview it is
@@ -214,7 +229,7 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
                   onLoad={() => markPreview(previewSrc, "loaded")}
                   onError={() => markPreview(previewSrc, "failed")}
                   className={`pointer-events-none absolute left-0 top-0 origin-top-left border-0 transition-opacity duration-300 ${previewStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
-                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(${THUMBNAIL_SCALE})`, willChange: "transform" }}
+                  style={{ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX, transform: `scale(calc(var(--tpl-w) / ${PAGE_WIDTH_PX}px))`, willChange: "transform" }}
                 />
               ) : null}
               {previewStatus === "failed" && (
@@ -226,7 +241,7 @@ export default function CanonicalTemplatePicker({ templates, selectedTemplateId,
                 <p className="font-bold text-slate-900">{template.name}</p>
                 {isSelected && <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-bold text-white">Selected</span>}
               </div>
-              <p className="mt-1 text-xs text-slate-500">{template.description}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-slate-500 sm:line-clamp-none">{template.description}</p>
             </div>
           </button>
         );

@@ -38,7 +38,7 @@ async function loadProfile() {
 }
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 px-4 py-6 sm:px-8">
+    <header className="flex flex-wrap items-center justify-between gap-4 py-6">
 
       <div>
 

@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 import Image from "next/image";
 import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
@@ -761,6 +762,7 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [manualTemplateStatus, setManualTemplateStatus] = useState<"idle" | "not-applicable" | "importing" | "import-error" | "selecting" | "saving-template" | "ready">("idle");
   const [manualTemplates, setManualTemplates] = useState<Array<{ id: string; name: string; description: string; previewAsset: string }>>([]);
   const [manualSelectedTemplateId, setManualSelectedTemplateId] = useState<string | null>(null);
+  const [manualMobilePreviewOpen, setManualMobilePreviewOpen] = useState(false);
   /*
     Phase Step9-gate - true ONLY once the user has clicked a card for
     THIS manual Step 9 flow (set in selectManualTemplate on a
@@ -801,6 +803,33 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
       const configData = configRes.ok ? await configRes.json() : { generateEnabled: false, templateSelectorEnabled: false };
       if (!configData.generateEnabled || !configData.templateSelectorEnabled) {
         setManualTemplateStatus("not-applicable");
+        return;
+      }
+
+      /*
+        Step 9 reads the PERSISTED career_memory row - import-manual is a
+        bodyless POST, so the server re-reads the database and never sees
+        the form state the user is looking at. Reaching Step 9 through the
+        Steps sidebar calls setCurrentStep() alone, with no save in
+        between, so a person who edits Personal Information and jumps
+        straight here was previewing whatever was saved BEFORE that edit:
+        the four template cards showed a different name and history than
+        the form directly above them.
+
+        Persisting here rather than at each navigation control is what
+        makes the guarantee hold for every route into this step - the Next
+        button, the sidebar, and any future entry point alike. The effect
+        that calls this flow depends on [mode, currentStep] only, and
+        persistMemory() sets neither, so this cannot re-trigger itself.
+
+        A failed save must stop the import: continuing would rebuild the
+        canonical version from the same stale row this exists to avoid.
+        persistMemory() has already surfaced its own toast in that case.
+      */
+      const saved = await persistMemory();
+      if (!saved) {
+        setManualTemplateError("Could not save your Career Memory before preparing templates. Please try again.");
+        setManualTemplateStatus("import-error");
         return;
       }
 
@@ -3209,8 +3238,8 @@ return;
     const manualLargePreviewAsset = templatePreviewAsset(manualSelectedTemplateId);
 
     return (
-      <div className="mt-6 flex flex-col gap-6">
-        <div className="min-w-0">
+      <div className="mt-6 flex flex-col-reverse gap-6 sm:flex-col">
+        <div className={`min-w-0 ${manualMobilePreviewOpen ? "" : "hidden"} sm:block`}>
           {manualSelectedTemplateId ? (
             <div className="max-h-[900px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6">
               {/*
@@ -3220,7 +3249,7 @@ return;
                 static asset and keeps the new iframe hidden until its own
                 document loads. src, key and request are unchanged.
               */}
-              <div className="relative h-[820px] w-full overflow-hidden rounded-xl">
+              <div className="relative h-[320px] w-full overflow-hidden rounded-xl sm:h-[820px]">
                 {/*
                   Dropped once the live document has loaded, not merely covered
                   by it. The two layers do not line up: the underlay is a
@@ -3246,7 +3275,7 @@ return;
                   title="Canonical resume preview"
                   onLoad={() => markLargePreview(manualLargePreviewSrc, "loaded")}
                   onError={() => markLargePreview(manualLargePreviewSrc, "failed")}
-                  className={`relative h-[820px] w-full rounded-xl border border-slate-200 bg-white transition-opacity duration-300 ${largePreviewStatusBySrc[manualLargePreviewSrc] === "loaded" ? "opacity-100" : "opacity-0"}`}
+                  className={`relative h-[320px] w-full rounded-xl border border-slate-200 bg-white transition-opacity duration-300 sm:h-[820px] ${largePreviewStatusBySrc[manualLargePreviewSrc] === "loaded" ? "opacity-100" : "opacity-0"}`}
                 />
                 {largePreviewStatusBySrc[manualLargePreviewSrc] === "failed" && (
                   <span className="absolute bottom-2 left-2 rounded bg-slate-900/70 px-2 py-0.5 text-xs font-semibold text-white">Preview unavailable</span>
@@ -3278,6 +3307,30 @@ return;
               />
             </div>
           </div>
+          {/*
+            Phones only. The preview above is display:none until this is
+            tapped, so Step 9 opens on the four choices instead of on a
+            document. Reading a resume and picking a design are different
+            jobs and only one of them needs a page-sized surface - on a
+            phone that surface costs the entire screen, so it waits until
+            it is asked for. The src it reveals is derived from
+            manualSelectedTemplateId, so picking another card and tapping
+            again shows that card's design; nothing here saves, generates
+            or persists anything. sm: keeps the desktop layout exactly as
+            it was - preview above, always open, no button.
+          */}
+          <button
+            type="button"
+            onClick={() => setManualMobilePreviewOpen((prev) => !prev)}
+            disabled={!manualSelectedTemplateId}
+            className="mt-4 w-full rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-600 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 sm:hidden"
+          >
+            {!manualSelectedTemplateId
+              ? "Select a template to preview"
+              : manualMobilePreviewOpen
+                ? "Hide preview"
+                : "Preview template"}
+          </button>
         </div>
       </div>
     );
@@ -3382,7 +3435,7 @@ return;
                   come through here. */}
               <button type="button" onClick={openUploadedEdit} className="rounded-xl border border-blue-600 px-5 py-2.5 font-bold text-blue-600">Edit Content</button>
             </div>
-            <div className="mt-3">{renderLiveResumePreviewContent()}</div>
+            <div className="mt-3 max-h-[360px] overflow-auto sm:max-h-none sm:overflow-visible">{renderLiveResumePreviewContent()}</div>
           </div>
 
           <div className="min-w-0 rounded-2xl border border-blue-100 bg-white p-6">
@@ -3539,7 +3592,7 @@ return;
 
   function renderStepForm() {
     if (currentStep === 0) return (
-      <div className="mt-6 grid gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn (optional)" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
+      <div className="mt-6 grid gap-3 sm:gap-5 md:grid-cols-2"><Input placeholder="First Name" value={memoryData.firstName} onChange={(v) => updateMemory("firstName", v)} /><Input placeholder="Last Name" value={memoryData.lastName} onChange={(v) => updateMemory("lastName", v)} /><Input placeholder="Email" value={memoryData.email} onChange={(v) => updateMemory("email", v)} /><Input placeholder="Phone" value={memoryData.phone} onChange={(v) => updateMemory("phone", v)} /><Input placeholder="Location" value={memoryData.location} onChange={(v) => updateMemory("location", v)} /><Input placeholder="LinkedIn (optional)" value={memoryData.linkedin} onChange={(v) => updateMemory("linkedin", v)} /><Textarea rows={5} placeholder="Career Summary" value={memoryData.summary} onChange={(v) => updateMemory("summary", v)} className="md:col-span-2" /></div>
     );
     if  (currentStep === 3) {
   return (
@@ -4106,7 +4159,8 @@ return;
     </nav>
   </aside>
 
-        <section className="min-w-0 flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1">
+          <AppContent>
           {mode === "start" ? (
             <StartScreen
   strength={profileStrength}
@@ -4532,7 +4586,7 @@ return;
             : "xl:col-span-6"
         }`}
       >
-        <Card padding="md">
+        <Card padding="sm" className="sm:p-6">
           <h2 className="text-xl font-bold">
             {steps[currentStep].title}
           </h2>
@@ -4647,6 +4701,7 @@ return;
 
             </>
           )}
+          </AppContent>
         </section>
       </div>
       <CareerElanFooter />

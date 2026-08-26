@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -67,7 +68,8 @@ export default function CreatePackagePage() {
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1">
+          <AppContent>
           <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-extrabold">Create Full Package</h1>
@@ -184,6 +186,7 @@ export default function CreatePackagePage() {
               </p>
             </Card>
           </section>
+          </AppContent>
         </section>
      </div>
       <CareerElanFooter />

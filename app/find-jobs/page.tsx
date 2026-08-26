@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 import { useLogin } from "@/lib/auth/LoginManager";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
 import MobileNav from "@/components/job-layout/MobileNav";
@@ -553,7 +554,8 @@ setCategory(state.category || "All");
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1 px-8 py-6">
+        <section className="min-w-0 flex-1">
+          <AppContent>
           <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-xs font-bold text-blue-600">
@@ -913,6 +915,7 @@ setCategory(state.category || "All");
               </button>
             </div>
           </Card>
+          </AppContent>
         </section>
      </div>
     <CareerElanFooter />

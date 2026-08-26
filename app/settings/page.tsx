@@ -1,4 +1,5 @@
 "use client";
+import AppContent from "@/components/job-layout/AppContent";
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -325,7 +326,8 @@ async function deleteAccount() {
 
         <Sidebar active="Settings" />
 
-        <section className="flex-1 p-8">
+        <section className="min-w-0 flex-1">
+          <AppContent>
 
           <Header
             title="Settings"
@@ -642,6 +644,7 @@ async function deleteAccount() {
 
           </div>
 
+          </AppContent>
         </section>
 
       </div>
