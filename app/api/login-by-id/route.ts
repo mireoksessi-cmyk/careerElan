@@ -192,7 +192,7 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabaseAdmin
       .from("profiles")
-      .select("email")
+      .select("id, email")
       .eq("login_id", cleanLoginId)
       .maybeSingle();
 
@@ -214,7 +214,55 @@ export async function POST(request: Request) {
         below succeeds - the browser must never be able to tell these
         cases apart. Failures are logged server-side only.
       */
-      if (resolvedEmail) {
+      const resolvedUserId = data?.id ?? null;
+
+      /*
+        A recovery mail is a grant to create a password, so it only goes
+        to an account that already signs in with one.
+
+        Create Account already refuses an address whose identities are
+        all OAuth ones - the signup preflight classifies it
+        EXISTING_SOCIAL and never calls signUp. Forgot Password checked
+        nothing, so that same account could ask for a recovery link,
+        verify it, and reach updateUser({ password }), ending up with
+        exactly the email/password credential signup had just refused to
+        create. One door was locked and the other was not; this closes
+        the second one.
+
+        identities is what decides it, not app_metadata.provider - that
+        field names a single provider, while identities carries the
+        whole set. An account holding an email identity keeps its reset
+        no matter how many social logins sit beside it; the only
+        disqualifier is the absence of an email identity. "Some social
+        provider is present" would be the wrong test and would strand
+        every ordinary user who ever linked a social login.
+
+        Anything unexpected - lookup error, missing user, identities
+        absent - leaves this false and nothing is sent. Failing open
+        would hand a password to precisely the account the check exists
+        to protect.
+      */
+      let hasEmailIdentity = false;
+
+      if (resolvedEmail && resolvedUserId) {
+        const { data: authUserData, error: authUserError } =
+          await supabaseAdmin.auth.admin.getUserById(resolvedUserId);
+
+        if (authUserError) {
+          console.error(
+            "PASSWORD RESET ELIGIBILITY LOOKUP ERROR =",
+            authUserError
+          );
+        }
+
+        const identities = authUserData?.user?.identities;
+
+        hasEmailIdentity =
+          Array.isArray(identities) &&
+          identities.some((identity) => identity.provider === "email");
+      }
+
+      if (resolvedEmail && hasEmailIdentity) {
         const redirectOrigin = new URL(request.url).origin;
 
         const { error: resetError } =
@@ -237,7 +285,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         message:
-          "If an account exists for this ID, password reset instructions have been sent.",
+          "If this account uses password sign-in, reset instructions have been sent. If you signed up with Google, Facebook, or LinkedIn, please use that sign-in method instead.",
       });
     }
 
