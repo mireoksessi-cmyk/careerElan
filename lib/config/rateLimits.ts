@@ -27,7 +27,8 @@ export type RateLimitedEndpoint =
   | "career-insight"
   | "search-jobs"
   | "login-by-id"
-  | "auth-email-status";
+  | "auth-email-status"
+  | "find-login-id";
 
 export const RATE_LIMIT_WINDOW_SECONDS = 600; // 10 minutes
 
@@ -58,4 +59,13 @@ export const RATE_LIMITS: Record<
   // is already registered, so the guest bucket is what limits how many
   // addresses one caller can check per window.
   "auth-email-status": { guest: 5, user: 5 },
+  // Its own bucket again, for the third unauthenticated account-shaped
+  // lookup on the public auth surface. Sharing with either neighbour above
+  // would be worse than it looks: Find ID and Create Account are both driven
+  // by an email address, so one quota would let ordinary signup traffic use
+  // up the budget that bounds how many addresses a caller can test here, and
+  // the reverse. Same conservative numbers for the same reason - this answers
+  // whether an address can be sent a Login ID, and the guest bucket is what
+  // limits how many addresses one caller can probe per window.
+  "find-login-id": { guest: 5, user: 5 },
 };
