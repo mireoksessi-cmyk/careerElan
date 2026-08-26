@@ -35,6 +35,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 type AuthMode =
   | "login"
   | "signup"
+  | "forgot-id"
   | "forgot-password"
   | "new-password";
 
@@ -68,6 +69,12 @@ export default function PublicAuthActionsProvider({
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  /*
+    Find ID asks for an address, not the login_id - that is the value being
+    recovered, so it cannot also be the way in. Kept apart from loginEmail,
+    which despite its name holds the login_id the sign-in form wants.
+  */
+  const [findIdEmail, setFindIdEmail] = useState("");
   const [newPassword, setNewPassword] =
   useState("");
 
@@ -224,6 +231,69 @@ useEffect(() => {
       "",
       window.location.pathname
     );
+  }
+
+  /*
+    Emitted by /api/auth/find-login-id once it has verified an emailed
+    recovery link. The Login ID is deliberately absent from this URL - the
+    route left it behind an HttpOnly cookie, so it is asked for over a
+    request of its own rather than read out of the address bar, where it
+    would end up in history and in every log that records a path.
+  */
+  const findId = params.get("findId");
+
+  if (findId === "ready" || findId === "invalid") {
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname
+    );
+
+    setAuthMode("login");
+    setShowAuthModal(true);
+
+    if (findId === "invalid") {
+      setMessage(
+        "This Login ID recovery link is invalid or has expired. Please request a new one."
+      );
+    } else {
+      setMessage("");
+
+      fetch("/api/auth/find-login-id?consume=1")
+        .then((response) => response.json())
+        .then((result) => {
+          if (!mounted) return;
+
+          /*
+            Fills the sign-in form's ID field and stops there. No password
+            is supplied, nothing is submitted, and no session exists -
+            clicking a link proved control of a mailbox, which is not the
+            same thing as signing in.
+          */
+          if (
+            result?.status === "FOUND" &&
+            typeof result.loginId === "string"
+          ) {
+            setLoginEmail(result.loginId);
+            setMessage(
+              "Your Login ID has been recovered. Enter your password to continue."
+            );
+
+            return;
+          }
+
+          setMessage(
+            "This Login ID recovery link is invalid or has expired. Please request a new one."
+          );
+        })
+        .catch(() => {
+          if (!mounted) return;
+
+          setMessage(
+            "This Login ID recovery link is invalid or has expired. Please request a new one."
+          );
+        });
+    }
   }
 
   return () => {
@@ -704,7 +774,79 @@ async function resendConfirmationEmail() {
   } finally {
     setLoading(false);
   }
-}async function handleForgotPassword() {
+}async function handleFindLoginId() {
+  const email = findIdEmail.trim();
+
+  if (!email) {
+    setMessage("Please enter your email address first.");
+    return;
+  }
+
+  setLoading(true);
+  setMessage("");
+
+  try {
+    const response = await fetch(
+      "/api/auth/find-login-id",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      }
+    );
+
+    if (response.status === 429) {
+      setMessage(
+        "Too many requests. Please try again shortly."
+      );
+      return;
+    }
+
+    const result = await response
+      .json()
+      .catch(() => null);
+
+    /*
+      SOCIAL_ONLY is the only branch that says anything about the account,
+      and only because Create Account already says the same thing about the
+      same address. Everything else - eligible, unknown address, lookup
+      failure - collapses to one message, so this reply cannot be read as
+      confirming that a password account exists.
+    */
+    if (result?.status === "SOCIAL_ONLY") {
+      setMessage(
+        "This account uses a connected sign-in method. Please sign in with Google, Facebook, or LinkedIn instead."
+      );
+      return;
+    }
+
+    if (result?.status === "CHECK_EMAIL") {
+      setMessage(
+        "If this email belongs to a Career Élan password account, we've sent a secure Login ID link. Please check your inbox."
+      );
+      return;
+    }
+
+    setMessage(
+      "We couldn't complete that request. Please try again in a moment."
+    );
+  } catch (error) {
+    console.error(
+      "FIND LOGIN ID ERROR =",
+      error
+    );
+
+    setMessage(
+      "We couldn't complete that request. Please try again in a moment."
+    );
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleForgotPassword() {
   const cleanLoginId = loginEmail.trim();
 
   if (!cleanLoginId) {
@@ -844,6 +986,8 @@ async function resendConfirmationEmail() {
     ? "Welcome back"
     : authMode === "signup"
     ? "Create your account"
+    : authMode === "forgot-id"
+    ? "Find your Login ID"
     : authMode === "forgot-password"
     ? "Reset your password"
     : "Create a new password"}
@@ -854,6 +998,8 @@ async function resendConfirmationEmail() {
     ? "Continue building smarter applications."
     : authMode === "signup"
     ? "Start with one profile. Apply everywhere."
+    : authMode === "forgot-id"
+    ? "Enter your email and we will send you a secure link to recover it."
     : authMode === "forgot-password"
     ? "Enter your ID and we will email you a password reset link."
     : "Enter and confirm your new password."}
@@ -1209,6 +1355,40 @@ async function resendConfirmationEmail() {
       ← Back to Login
     </button>
   </form>
+) : authMode === "forgot-id" ? (
+  <form className="space-y-4">
+    <Input
+      value={findIdEmail}
+      onChange={setFindIdEmail}
+      placeholder="Enter your email"
+      icon="✉️"
+      type="email"
+      autoComplete="email"
+    />
+
+    <button
+      type="button"
+      onClick={handleFindLoginId}
+      disabled={loading}
+      className="w-full rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
+    >
+      {loading
+        ? "Sending..."
+        : "Send Login ID Link"}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => {
+        setAuthMode("login");
+        setMessage("");
+      }}
+      disabled={loading}
+      className="w-full rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50"
+    >
+      ← Back to Login
+    </button>
+  </form>
 ) : authMode === "new-password" ? (
   <form className="space-y-4">
     <Input
@@ -1256,7 +1436,18 @@ async function resendConfirmationEmail() {
       type="password"
     />
 
-    <div className="flex justify-end">
+    <div className="flex justify-between">
+      <button
+        type="button"
+        onClick={() => {
+          setAuthMode("forgot-id");
+          setMessage("");
+        }}
+        className="text-sm font-bold text-blue-600 transition hover:text-blue-700"
+      >
+        Forgot ID?
+      </button>
+
       <button
         type="button"
         onClick={() => {
@@ -1290,7 +1481,8 @@ async function resendConfirmationEmail() {
   </p>
 )}
 
-{authMode !== "forgot-password" &&
+{authMode !== "forgot-id" &&
+  authMode !== "forgot-password" &&
   authMode !== "new-password" && (
     <p className="mt-6 text-center text-sm text-slate-500">
       {authMode === "login"
