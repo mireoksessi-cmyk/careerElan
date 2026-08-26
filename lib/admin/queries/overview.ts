@@ -12,6 +12,14 @@ import { getAlerts, countBySeverity } from "./alerts";
 export type AdminOverview = {
   users: {
     total: ClassifiedMetric<number>;
+    /*
+      An auth.users row appears the moment Create Account is pressed, so
+      `total` counts signup attempts, not members. Membership is the
+      verified half of that, split out here so the console can stop
+      reporting one as the other.
+    */
+    verifiedMembers: ClassifiedMetric<number>;
+    unverifiedSignups: ClassifiedMetric<number>;
     newToday: ClassifiedMetric<number>;
     new7Days: ClassifiedMetric<number>;
     newThisMonth: ClassifiedMetric<number>;
@@ -51,6 +59,13 @@ export async function getAdminOverview(): Promise<AdminOverview> {
 
   const authUsers = await listAllAuthUsers();
   const total = authUsers.length;
+  /*
+    email_confirmed_at is Supabase Auth's own record of the address having
+    been proven. Nothing else here stands in for it - a profile row, a last
+    sign-in, a finished Career Memory and a subscription can all exist
+    without the address ever having been confirmed.
+  */
+  const verifiedMembers = authUsers.filter((u) => u.emailConfirmedAt !== null).length;
   const newToday = authUsers.filter((u) => u.createdAt >= todayStart).length;
   const new7Days = authUsers.filter((u) => u.createdAt >= sevenDaysAgo).length;
   const newThisMonth = authUsers.filter((u) => u.createdAt >= monthStart).length;
@@ -104,6 +119,8 @@ export async function getAdminOverview(): Promise<AdminOverview> {
   return {
     users: {
       total: metric(total, "EXACT_INTERNAL_DATA", authUsers.length >= 50000 ? "capped at 50,000 rows" : undefined),
+      verifiedMembers: metric(verifiedMembers, "EXACT_INTERNAL_DATA"),
+      unverifiedSignups: metric(total - verifiedMembers, "EXACT_INTERNAL_DATA"),
       newToday: metric(newToday, "EXACT_INTERNAL_DATA"),
       new7Days: metric(new7Days, "EXACT_INTERNAL_DATA"),
       newThisMonth: metric(newThisMonth, "EXACT_INTERNAL_DATA"),

@@ -62,6 +62,13 @@ export type AuthUserSummary = {
   createdAt: string;
   provider: string;
   lastSignInAt: string | null;
+  /*
+    Canonical verification truth, read straight from Supabase Auth on every
+    query rather than copied into public.profiles. A duplicated flag is a
+    second thing that can be wrong, and this one would only ever be a stale
+    mirror of the row Supabase already hands us right here.
+  */
+  emailConfirmedAt: string | null;
 };
 
 const MAX_AUTH_USER_PAGES = 50;
@@ -83,6 +90,7 @@ export async function listAllAuthUsers(): Promise<AuthUserSummary[]> {
         createdAt: user.created_at,
         provider,
         lastSignInAt: user.last_sign_in_at ?? null,
+        emailConfirmedAt: user.email_confirmed_at ?? null,
       });
     }
 

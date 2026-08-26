@@ -96,6 +96,34 @@ useEffect(() => {
     window.location.search
   );
 
+  /*
+    Emitted by app/auth/confirm/route.ts when a confirmation link cannot be
+    turned into a session. "invalid" covers expired, already-used and
+    never-valid alike - the route deliberately does not tell them apart, and
+    the instruction is the same for all three. "session" means the address
+    really was verified and only the sign-in is missing, so it must not read
+    like a failure.
+  */
+  const verifyError = params.get("verifyError");
+
+  if (verifyError === "invalid" || verifyError === "session") {
+    setAuthMode("login");
+    setShowAuthModal(true);
+    setMessage(
+      verifyError === "session"
+        ? "Your email has been verified. Please log in to continue."
+        : "This verification link is invalid or has expired. Please request a new verification email."
+    );
+
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname
+    );
+
+    return;
+  }
+
   if (params.get("verified") === "true") {
     setAuthMode("login");
     setShowAuthModal(true);
@@ -475,11 +503,11 @@ useEffect(() => {
           .includes("duplicate")
       ) {
         toast.success(
-          "Your account has been created successfully. Please check your email and verify your account before logging in."
+          "Your account has been created. Please verify your email address - you'll be able to log in once it's verified."
         );
 
         setMessage(
-          "Verification email sent. Please verify your email to complete account creation."
+          "Verification email sent. Check your inbox to finish setting up your account."
         );
         return;
       }
@@ -504,11 +532,11 @@ useEffect(() => {
 }
 
 toast.success(
-  "Your account has been created successfully. Please check your email and verify your account before logging in."
+  "Your account has been created. Please verify your email address - you'll be able to log in once it's verified."
 );
 
 setMessage(
-  "Verification email sent. Please verify your email to complete account creation."
+  "Verification email sent. Check your inbox to finish setting up your account."
 );
   } catch (error) {
     console.error("SIGNUP ERROR =", error);
