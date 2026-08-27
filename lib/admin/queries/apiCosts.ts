@@ -31,6 +31,7 @@ import {
 } from "../../openai/usageAggregation";
 import { listRecentRecharges, type RechargeHistoryRow } from "../../openai/recharges";
 import { getConfiguredUsdToCadRate } from "../../openai/currency";
+import { isPricingKnown } from "../../openai/pricing";
 
 /*
   Admin API Usage Phase 2 - shared select() column list for both the
@@ -51,15 +52,30 @@ const USAGE_EVENT_COLUMNS =
 */
 const MAX_USAGE_EVENT_ROWS = 50_000;
 
-async function fetchAllUsageRows(): Promise<{ rows: UsageEventRow[]; capReached: boolean }> {
+/*
+  API-A - `unavailable` separates "the query failed" from "the query
+  succeeded and there was nothing". Both used to collapse into an empty
+  array, so a database problem rendered as a confident 0 calls / $0 -
+  indistinguishable from a quiet month, and wrong in the direction that
+  gets noticed last.
+*/
+async function fetchAllUsageRows(): Promise<{
+  rows: UsageEventRow[];
+  capReached: boolean;
+  unavailable: boolean;
+}> {
   const { data, error } = await supabaseAdmin
     .from("openai_usage_events")
     .select(USAGE_EVENT_COLUMNS)
     .order("created_at", { ascending: false })
     .limit(MAX_USAGE_EVENT_ROWS);
 
-  const rows: UsageEventRow[] = error || !data ? [] : (data as UsageEventRow[]);
-  return { rows, capReached: rows.length >= MAX_USAGE_EVENT_ROWS };
+  if (error || !data) {
+    return { rows: [], capReached: false, unavailable: true };
+  }
+
+  const rows = data as UsageEventRow[];
+  return { rows, capReached: rows.length >= MAX_USAGE_EVENT_ROWS, unavailable: false };
 }
 
 /*
@@ -138,6 +154,12 @@ export type ApiCostMetrics = {
     rechargeHistory: RechargeHistoryRow[];
     remainingCapacity: ClassifiedMetric<string>;
     unknownPricingModels: ClassifiedMetric<string[]>;
+    /*
+      API-A - calls on a priced model that returned no usage to price.
+      Counted separately from unknownPricingModels so neither is described
+      as the other.
+    */
+    noUsageDataCalls: number;
     perOperation: OperationBreakdownRow[];
     perModel: ModelBreakdownRow[];
     /* This UTC calendar month only - see lib/openai/usageAggregation.ts's buildUserBreakdown() for "calls" semantics. */
@@ -148,6 +170,30 @@ export type ApiCostMetrics = {
   sentry: { configured: boolean; note: string };
   resend: { note: string };
 };
+
+/*
+  API-A - when the underlying query could not be read, every figure in the
+  period is reported NOT_AVAILABLE rather than as a real measurement. A
+  genuine empty period still returns ordinary zeros, which is the whole
+  point of keeping the two apart.
+*/
+function unavailablePeriodMetrics(note: string): PeriodMetrics {
+  const n = (): ClassifiedMetric<number> => metric(0, "NOT_AVAILABLE", note);
+
+  return {
+    calls: n(),
+    successCount: n(),
+    errorCount: n(),
+    retryCount: n(),
+    totalTokens: n(),
+    cost: n(),
+    costCad: n(),
+    avgLatencyMs: metric(null, "NOT_AVAILABLE", note),
+    rateLimited429: n(),
+    timeouts: n(),
+    serverErrors5xx: n(),
+  };
+}
 
 function periodMetrics(summary: UsagePeriodSummary): PeriodMetrics {
   return {
@@ -181,14 +227,26 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     fetchAllUsageRows(),
   ]);
 
-  const rows: UsageEventRow[] = rowsError || !monthRows ? [] : (monthRows as UsageEventRow[]);
+  /*
+    API-A - same distinction as the all-time query above: a failed read
+    must not be aggregated as a real, empty month.
+  */
+  const monthUnavailable = Boolean(rowsError) || !monthRows;
+  const rows: UsageEventRow[] = monthUnavailable ? [] : (monthRows as UsageEventRow[]);
   const aggregation = aggregateUsageRows(rows, now);
+
+  const MONTH_UNAVAILABLE_NOTE =
+    "this month's usage could not be read - not a measurement of zero";
+  const ALL_TIME_UNAVAILABLE_NOTE =
+    "all-time usage could not be read - not a measurement of zero";
   const authUserCount = authUsers.length;
 
   const emailByUserId = new Map(authUsers.map((u) => [u.id, u.email]));
   const rechargeHistory = await listRecentRecharges(emailByUserId);
 
-  const allTimeMetrics = periodMetrics(summarizeAllTimeRows(allTimeFetch.rows));
+  const allTimeMetrics = allTimeFetch.unavailable
+    ? unavailablePeriodMetrics(ALL_TIME_UNAVAILABLE_NOTE)
+    : periodMetrics(summarizeAllTimeRows(allTimeFetch.rows));
 
   const perUser: UserUsageRow[] = aggregation.perUser.map((u: UserBreakdownRow) => ({
     userId: u.userId,
@@ -203,18 +261,51 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
         : metric(u.costCadKnown, "DERIVED_ESTIMATE", u.costCadMissingCount > 0 ? `${u.costCadMissingCount} call(s) excluded (no CAD rate recorded).` : undefined),
   }));
 
+  /*
+    API-A - a model belongs on the unpriced list only when the model itself
+    has no confirmed price. It used to be listed whenever any of its rows
+    carried UNKNOWN_PRICING, and the stored column uses that same value for
+    calls that failed before reporting usage - so a fully priced model
+    appeared under "Unpriced Models (cost understated)" because two of its
+    requests had errored. isPricingKnown() answers the actual question, and
+    a genuinely unpriced model is still listed exactly as before.
+  */
   const unknownPricingModels = Array.from(
-    new Set(aggregation.perModel.filter((m) => m.unknownPricingCount > 0).map((m) => m.model))
+    new Set(
+      aggregation.perModel
+        .filter((m) => m.unknownPricingCount > 0 && !isPricingKnown(m.model))
+        .map((m) => m.model)
+    )
   );
+
+  /*
+    The remainder: priced models whose rows had no usage to price. Reported
+    as a count of calls, with no claim about their cost in either direction
+    - a request that never returned usage gives this codebase nothing to
+    price, which is not the same as knowing it was free.
+  */
+  const noUsageDataCalls = aggregation.perModel
+    .filter((m) => isPricingKnown(m.model))
+    .reduce((sum, m) => sum + m.unknownPricingCount, 0);
 
   return {
     openAi: {
-      today: periodMetrics(aggregation.today),
+      today: monthUnavailable
+        ? unavailablePeriodMetrics(MONTH_UNAVAILABLE_NOTE)
+        : periodMetrics(aggregation.today),
       thisMonth: {
-        ...periodMetrics(aggregation.thisMonth),
-        dailyAverageCost: metric(aggregation.dailyAverageCostUsd, "DERIVED_ESTIMATE", "month-to-date cost / day of month"),
-        projectedMonthEndCost: metric(aggregation.projectedMonthEndCostUsd, "DERIVED_ESTIMATE", "linear projection from month-to-date daily average"),
-        lastCallAt: metric(aggregation.thisMonth.lastCallAt, "EXACT_INTERNAL_DATA"),
+        ...(monthUnavailable
+          ? unavailablePeriodMetrics(MONTH_UNAVAILABLE_NOTE)
+          : periodMetrics(aggregation.thisMonth)),
+        dailyAverageCost: monthUnavailable
+          ? metric(0, "NOT_AVAILABLE", MONTH_UNAVAILABLE_NOTE)
+          : metric(aggregation.dailyAverageCostUsd, "DERIVED_ESTIMATE", "month-to-date cost / day of month"),
+        projectedMonthEndCost: monthUnavailable
+          ? metric(0, "NOT_AVAILABLE", MONTH_UNAVAILABLE_NOTE)
+          : metric(aggregation.projectedMonthEndCostUsd, "DERIVED_ESTIMATE", "linear projection from month-to-date daily average"),
+        lastCallAt: monthUnavailable
+          ? metric(null, "NOT_AVAILABLE", MONTH_UNAVAILABLE_NOTE)
+          : metric(aggregation.thisMonth.lastCallAt, "EXACT_INTERNAL_DATA"),
       },
       allTime: allTimeMetrics,
       allTimeRowCapReached: allTimeFetch.capReached,
@@ -233,6 +324,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
           ? "cost for these models could not be estimated - not in the confirmed pricing table (lib/openai/pricing.ts) - real spend on these models is understated above"
           : undefined
       ),
+      noUsageDataCalls,
       perOperation: aggregation.perOperation,
       perModel: aggregation.perModel,
       perUser,

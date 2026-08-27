@@ -32,7 +32,20 @@ function PeriodCards({ p }: { p: PeriodMetrics }) {
       <MetricCard label="Success / Failed" metric={{ ...p.successCount, value: `${p.successCount.value} / ${p.errorCount.value}` }} />
       <MetricCard label="Retries" metric={p.retryCount} />
       <MetricCard label="Total Tokens" metric={p.totalTokens} />
-      <MetricCard label="OpenAI API Cost (CAD)" metric={p.costCad} format={(v) => cad(Number(v))} />
+      {/*
+        API-A - an unavailable CAD figure renders as an em dash, not CA$0.00.
+        Every historical row predates any configured FX rate and stored a null
+        conversion, and printing that as a currency amount reads as "spent
+        nothing in CAD" rather than "not converted".
+      */}
+      <MetricCard
+        label="OpenAI API Cost (CAD)"
+        metric={{
+          ...p.costCad,
+          value: p.costCad.classification === "NOT_AVAILABLE" ? null : p.costCad.value,
+        }}
+        format={(v) => (v === null ? "—" : cad(Number(v)))}
+      />
       <MetricCard label="OpenAI API Cost (USD reference)" metric={p.cost} format={(v) => usd(Number(v))} />
       <MetricCard label="Avg Latency" metric={{ ...p.avgLatencyMs, value: p.avgLatencyMs.value === null ? null : `${p.avgLatencyMs.value}ms` }} />
       <MetricCard label="429 (Rate Limited)" metric={p.rateLimited429} />
@@ -159,9 +172,23 @@ export default async function ApiCostsPage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-400">
-            MONTHLY_BUDGET_NOT_CONFIGURED - set OPENAI_MONTHLY_BUDGET_USD (server-only env var) to enable budget tracking and 80/90/100% email alerts.
-          </div>
+          /*
+            API-A - a budget that exists but could not be measured is not the
+            same as no budget, and must not be reported as one. In this state
+            no threshold is evaluated or claimed, so the month's 80/90/100%
+            alerts remain available once the data can be read again.
+          */
+          budget.reason === "SPEND_UNAVAILABLE" ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              BUDGET_USAGE_UNAVAILABLE - a monthly budget is configured, but this
+              month&apos;s spend could not be read, so usage is unknown rather than
+              zero. No threshold alert was evaluated or consumed for this attempt.
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-400">
+              MONTHLY_BUDGET_NOT_CONFIGURED - set OPENAI_MONTHLY_BUDGET_USD (server-only env var) to enable budget tracking and 80/90/100% email alerts.
+            </div>
+          )
         )}
       </Section>
 
@@ -173,6 +200,23 @@ export default async function ApiCostsPage() {
         <Section title="Unpriced Models (cost understated)">
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             No confirmed pricing for: {m.openAi.unknownPricingModels.value.join(", ")}. Calls to these models are counted but excluded from the cost totals above.
+          </div>
+        </Section>
+      )}
+
+      {/*
+        API-A - reported apart from unpriced models, and without claiming a
+        direction. These calls ran on a model that does have a price but
+        returned no usage to apply it to, so their cost is unknown here -
+        which is not the same as knowing they cost nothing.
+      */}
+      {m.openAi.noUsageDataCalls > 0 && (
+        <Section title="Calls Without Usage Data">
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">
+            Usage data unavailable for {m.openAi.noUsageDataCalls} call
+            {m.openAi.noUsageDataCalls === 1 ? "" : "s"} - the model is priced, but
+            the request returned no token accounting to price. Their cost is not
+            included in the totals above, and is not claimed to be zero.
           </div>
         </Section>
       )}
