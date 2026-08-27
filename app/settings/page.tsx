@@ -180,15 +180,38 @@ export default function SettingsPage() {
 
   email_notifications:
     profile.email_notifications,
-
-  marketing_notifications:
-    profile.marketing_notifications,
 })
       .eq("id", userId);
 
-    toast.success("Profile updated!");
+    const { error: consentError } = await saveMarketingConsent();
+
+    if (consentError) {
+      toast.error("Failed to save your marketing email preference.");
+    } else {
+      toast.success("Profile updated!");
+    }
 
     setSaving(false);
+  }
+
+  /*
+    Marketing consent is written by a database function rather than by this
+    update, so the preference and the record of when it changed cannot end
+    up disagreeing - the row and its consent event are one transaction, and
+    a browser that stops halfway leaves neither.
+
+    Nothing about the consent is sent from here except the intent itself.
+    The function takes no user id and reads auth.uid(), so this page cannot
+    aim it at another account; the source and the policy version are chosen
+    inside the database, because a version supplied by a browser is not
+    evidence of which policy anybody actually agreed to.
+  */
+  async function saveMarketingConsent() {
+    const { error } = await supabase.rpc("set_marketing_consent", {
+      p_opt_in: profile.marketing_notifications,
+    });
+
+    return { error };
   }
 
 async function saveNotificationPreferences() {
@@ -198,12 +221,15 @@ async function saveNotificationPreferences() {
     .from("profiles")
     .update({
       email_notifications: profile.email_notifications,
-      marketing_notifications: profile.marketing_notifications,
     })
     .eq("id", userId);
 
+  const { error: consentError } = await saveMarketingConsent();
+
   if (error) {
     toast.error(error.message);
+  } else if (consentError) {
+    toast.error("Failed to save your marketing email preference.");
   } else {
     toast.success("Notification preferences saved!");
   }

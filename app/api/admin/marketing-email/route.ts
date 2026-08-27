@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { Resend } from "resend";
 import { requireAdminPermission, AdminAuthError } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -125,9 +126,80 @@ function messageToSafeHtml(message: string): string {
     .join("<br />");
 }
 
+function buildBaseUrl(request: NextRequest): string {
+  return process.env.URL || new URL(request.url).origin;
+}
+
 function buildSettingsUrl(request: NextRequest): string {
-  const base = process.env.URL || new URL(request.url).origin;
-  return `${base}/settings`;
+  return `${buildBaseUrl(request)}/settings`;
+}
+
+/*
+  M2B - the policy version this deployment is built to write. The database
+  writes its own literal for the /settings path (see the M2B migration); this
+  is the server half of that pair, and the two must agree before anything
+  mints a token that will outlive the campaign. If the environment says
+  anything else, the version in force is not one this code understands, and
+  guessing would attach the wrong policy to a real consent record.
+*/
+const SUPPORTED_CONSENT_VERSION = "marketing-v1";
+
+const UNSUBSCRIBE_TOKEN_PURPOSE = "marketing-unsubscribe-v1";
+
+function unsubscribeTokenKey(): Buffer | null {
+  const secret = process.env.MARKETING_UNSUBSCRIBE_SECRET;
+
+  if (!secret) {
+    return null;
+  }
+
+  return crypto
+    .createHmac("sha256", secret)
+    .update(UNSUBSCRIBE_TOKEN_PURPOSE)
+    .digest();
+}
+
+/*
+  M2B - seals which account, and which consent instance, into an opaque
+  token. The consent epoch is the recipient's marketing_consented_at at send
+  time; null is a real value meaning a legacy opt-in with no recorded
+  instance. Nothing else goes in - no address, no login id, no provider, and
+  no version, because the version is not what the token is for.
+
+  Everything is inside AES-256-GCM, so none of it is readable from the URL,
+  and the dedicated unsubscribe secret means a token from here cannot be
+  opened by, or confused with, any other feature's tokens.
+*/
+function sealUnsubscribeToken(
+  userId: string,
+  consentEpoch: string | null
+): string | null {
+  const key = unsubscribeTokenKey();
+
+  if (!key) {
+    return null;
+  }
+
+  try {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    cipher.setAAD(Buffer.from(UNSUBSCRIBE_TOKEN_PURPOSE, "utf8"));
+
+    const ciphertext = Buffer.concat([
+      cipher.update(JSON.stringify({ u: userId, e: consentEpoch }), "utf8"),
+      cipher.final(),
+    ]);
+
+    return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString(
+      "base64url"
+    );
+  } catch {
+    return null;
+  }
+}
+
+function unsubscribeUrl(baseUrl: string, token: string): string {
+  return `${baseUrl}/api/marketing/unsubscribe?token=${encodeURIComponent(token)}`;
 }
 
 function marketingEmailHtml(params: {
@@ -135,8 +207,19 @@ function marketingEmailHtml(params: {
   subject: string;
   message: string;
   settingsUrl: string;
+  unsubscribeUrl: string | null;
 }): string {
   const { type, subject, message, settingsUrl } = params;
+
+  /*
+    M2B - a visible way out, next to the existing preferences link rather
+    than replacing it. The href is built by this server from an opaque
+    token; nothing an admin types reaches it, and the admin's own copy stays
+    escaped exactly as before.
+  */
+  const unsubscribeLine = params.unsubscribeUrl
+    ? `<br />Or <a href="${params.unsubscribeUrl}">unsubscribe from marketing emails</a>.`
+    : "";
 
   return `
     <h2>${escapeHtml(TYPE_LABEL[type])} - Career Élan</h2>
@@ -148,7 +231,7 @@ function marketingEmailHtml(params: {
     <p style="margin-top: 24px; font-size: 12px; color: #64748b;">
       You are receiving this because you opted in to Marketing Emails.<br />
       You can turn off Marketing Emails anytime in
-      <a href="${settingsUrl}">Career Élan Settings</a>.
+      <a href="${settingsUrl}">Career Élan Settings</a>.${unsubscribeLine}
     </p>
   `;
 }
@@ -184,10 +267,24 @@ function marketingEmailHtml(params: {
   recipient rather than including them. Marketing is the one place where
   sending on a guess is worse than not sending at all.
 */
-async function resolveEligibleRecipients(): Promise<{ id: string; email: string }[]> {
+/*
+  M2B - consentEpoch is the recipient's marketing_consented_at, carried
+  alongside the address so each message can be sealed to the consent
+  instance it was actually sent under. Null is legitimate and means a legacy
+  opt-in from before consent evidence existed; it is passed through as null
+  rather than substituted, because inventing a timestamp here would defeat
+  the staleness check it feeds.
+*/
+type MarketingRecipient = {
+  id: string;
+  email: string;
+  consentEpoch: string | null;
+};
+
+async function resolveEligibleRecipients(): Promise<MarketingRecipient[]> {
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, email")
+    .select("id, email, marketing_consented_at")
     .eq("marketing_notifications", true)
     .is("suspended_at", null)
     .not("email", "is", null)
@@ -195,8 +292,13 @@ async function resolveEligibleRecipients(): Promise<{ id: string; email: string 
 
   if (error) throw error;
 
-  const consenting = (data ?? []) as { id: string; email: string }[];
-  const verified: { id: string; email: string }[] = [];
+  const consenting = (data ?? []).map((row) => ({
+    id: row.id as string,
+    email: row.email as string,
+    consentEpoch: (row.marketing_consented_at as string | null) ?? null,
+  }));
+
+  const verified: MarketingRecipient[] = [];
 
   for (const candidate of consenting) {
     const { data: authUser, error: authError } =
@@ -287,6 +389,7 @@ export async function POST(req: NextRequest) {
     }
 
     const marketingType = type as MarketingType;
+    const baseUrl = buildBaseUrl(req);
     const settingsUrl = buildSettingsUrl(req);
 
     /*
@@ -302,6 +405,34 @@ export async function POST(req: NextRequest) {
       the idempotency key that protects the real campaign, and no opted-in
       user receives anything.
     */
+    /*
+      M2B - the two version locations must agree before this deployment
+      mints anything that records a consent policy. Checked once here, ahead
+      of both the test and the campaign, and it fails closed: no campaign, no
+      test, no token. Nobody's existing consent is touched by a mismatch -
+      the wrong response to "I do not recognise this policy version" is to
+      start rewriting consent records under it.
+    */
+    if (process.env.MARKETING_CONSENT_VERSION !== SUPPORTED_CONSENT_VERSION) {
+      return NextResponse.json(
+        {
+          error:
+            "Marketing consent version is not configured for this release. No email was sent.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!unsubscribeTokenKey()) {
+      return NextResponse.json(
+        {
+          error:
+            "Marketing unsubscribe is not configured. No email was sent.",
+        },
+        { status: 500 }
+      );
+    }
+
     if (body.action === "test") {
       const testRecipient = ctx.email?.trim();
 
@@ -317,6 +448,30 @@ export async function POST(req: NextRequest) {
 
       const testSubject = `[TEST] ${subject}`.slice(0, SUBJECT_MAX_LENGTH);
 
+      /*
+        M2B - the test carries a working unsubscribe link only if this admin
+        is genuinely opted in to marketing right now. If they are not, the
+        test goes out without one rather than opting them in or minting a
+        token against a consent instance that does not exist: a test must
+        never change anybody's preferences, including the tester's.
+      */
+      const { data: adminProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("marketing_notifications, marketing_consented_at")
+        .eq("id", ctx.userId)
+        .maybeSingle();
+
+      const adminUnsubscribeToken = adminProfile?.marketing_notifications
+        ? sealUnsubscribeToken(
+            ctx.userId,
+            (adminProfile.marketing_consented_at as string | null) ?? null
+          )
+        : null;
+
+      const testUnsubscribeUrl = adminUnsubscribeToken
+        ? unsubscribeUrl(baseUrl, adminUnsubscribeToken)
+        : null;
+
       try {
         const { error: testError } = await resend.emails.send({
           from,
@@ -328,7 +483,16 @@ export async function POST(req: NextRequest) {
             subject: testSubject,
             message,
             settingsUrl,
+            unsubscribeUrl: testUnsubscribeUrl,
           }),
+          ...(testUnsubscribeUrl
+            ? {
+                headers: {
+                  "List-Unsubscribe": `<${testUnsubscribeUrl}>`,
+                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                },
+              }
+            : {}),
         });
 
         if (testError) {
@@ -432,7 +596,7 @@ export async function POST(req: NextRequest) {
       FAILED with zero counts rather than left ambiguous, because at this
       point it is known that no message left.
     */
-    let recipients: { id: string; email: string }[];
+    let recipients: MarketingRecipient[];
 
     try {
       recipients = await resolveEligibleRecipients();
@@ -459,7 +623,6 @@ export async function POST(req: NextRequest) {
     }
 
     const eligible = recipients.length;
-    const html = marketingEmailHtml({ type: marketingType, subject, message, settingsUrl });
 
     let attempted = 0;
     let successful = 0;
@@ -468,12 +631,46 @@ export async function POST(req: NextRequest) {
     for (const recipient of recipients) {
       attempted++;
       try {
+        /*
+          M2B - built per recipient, because the token is bound to that
+          person's own consent instance. If it cannot be produced, this
+          message is not sent: marketing that offers no way out is worse
+          than marketing that does not arrive, so the recipient is counted
+          as a failure and the campaign moves on rather than delivering
+          without an unsubscribe path.
+        */
+        const token = sealUnsubscribeToken(recipient.id, recipient.consentEpoch);
+
+        if (!token) {
+          failed++;
+          continue;
+        }
+
+        const recipientUnsubscribeUrl = unsubscribeUrl(baseUrl, token);
+
         const { error: sendError } = await resend.emails.send({
           from,
           replyTo: "careerelanhq@gmail.com",
           to: recipient.email,
           subject,
-          html,
+          html: marketingEmailHtml({
+            type: marketingType,
+            subject,
+            message,
+            settingsUrl,
+            unsubscribeUrl: recipientUnsubscribeUrl,
+          }),
+          /*
+            The URL carries nothing but the opaque token - no address, id or
+            login id - which is what makes it safe to hand to a mail client
+            that may fetch it without a person present. The POST variant is
+            advertised because the endpoint's GET deliberately does not
+            unsubscribe anyone.
+          */
+          headers: {
+            "List-Unsubscribe": `<${recipientUnsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
         });
 
         if (sendError) {
