@@ -15,6 +15,7 @@
   only the safe budget figures themselves.
 */
 import { Resend } from "resend";
+import { recordExternalApiUsage } from "../externalApi/usageTelemetry";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -55,6 +56,17 @@ export async function sendBudgetAlertEmail(params: {
   // local dev - the admin page location is still stated in words.
   const adminPageUrl = process.env.URL ? `${process.env.URL}/admin/api-costs` : "/admin/api-costs";
 
+  /*
+    API-C2 - one row per actual Resend request. This path sends a single
+    request carrying every configured recipient in one `to` array, so it is
+    one provider request however many operators are listed - provider usage
+    follows API calls, not addresses. Nothing about the recipients, the
+    subject or the budget figures reaches telemetry.
+
+    A system alert has no user behind it, so no user is attributed.
+  */
+  const startedAt = Date.now();
+
   try {
     await resend.emails.send({
       from: "Career Élan <onboarding@resend.dev>",
@@ -69,8 +81,29 @@ export async function sendBudgetAlertEmail(params: {
         <p>Details: <a href="${adminPageUrl}">${adminPageUrl}</a> (AI &amp; API Costs tab)</p>
       `,
     });
+    await recordExternalApiUsage({
+      provider: "resend",
+      operation: "EMAIL_SEND",
+      status: "success",
+      httpStatusClass: "2xx",
+      durationMs: Date.now() - startedAt,
+    });
+
     return { sent: true };
   } catch {
+    /*
+      This path awaits the send without destructuring an error object, so a
+      rejection is all it can observe - recorded without a status class it
+      cannot honestly determine.
+    */
+    await recordExternalApiUsage({
+      provider: "resend",
+      operation: "EMAIL_SEND",
+      status: "error",
+      httpStatusClass: "unknown",
+      durationMs: Date.now() - startedAt,
+    });
+
     return { sent: false, reason: "Resend send failed" };
   }
 }
