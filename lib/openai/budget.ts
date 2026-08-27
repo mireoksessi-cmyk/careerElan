@@ -91,9 +91,23 @@ export async function getBudgetSummary(now = new Date()): Promise<BudgetSummary>
   if (baseBudgetUsd === null) return { configured: false, reason: "NOT_CONFIGURED" };
 
   const [{ data, error }, rechargesUsdRaw] = await Promise.all([
+    /*
+      API-B - production spend only. Deploy Previews run against this same
+      database with the same keys, so before attribution existed a preview
+      exercising an AI feature pushed the real budget toward its 80/90/100%
+      thresholds and could burn an alert that describes customer cost.
+
+      Rows from before attribution carry NULL and are excluded too. Their
+      origin is unknown, and counting unknown traffic toward a production
+      threshold is the same mistake in a quieter form. The effect is that
+      production budget accounting starts from this deployment - a real
+      discontinuity, and better than a continuous figure nobody can vouch
+      for.
+    */
     supabaseAdmin
       .from("openai_usage_events")
       .select("estimated_cost_usd")
+      .eq("environment", "production")
       .gte("created_at", startOfUtcMonthIso(now))
       .lt("created_at", startOfNextUtcMonthIso(now)),
     getMonthlyRechargesUsd(now),

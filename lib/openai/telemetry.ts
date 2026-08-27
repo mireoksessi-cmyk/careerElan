@@ -100,6 +100,53 @@ export function classifyOpenAiError(error: unknown): { httpStatusClass: HttpStat
   return { httpStatusClass: "unknown", errorCategory: "unknown" };
 }
 
+/*
+  API-B - which deployment this call ran in, decided here and only here.
+  Every OpenAI call in the codebase already goes through this module, so one
+  central resolution attributes all of them without touching a single call
+  site.
+
+  Netlify's CONTEXT is the signal, matching the same four values
+  lib/generatePackage/backgroundTarget.ts already normalises. NODE_ENV is
+  deliberately not consulted: a Deploy Preview builds with NODE_ENV set to
+  production exactly like the live site, so trusting it would label preview
+  traffic as production - the precise confusion this exists to end.
+
+  Nothing here reads a request, header or body. The environment is a
+  property of the running deployment, and a caller-supplied one would be
+  worth nothing.
+
+  Production requires CONTEXT to say so. Anything unrecognised is 'unknown',
+  never production, because the cost of guessing wrong is preview spend
+  silently consuming the real budget's alert thresholds.
+*/
+type UsageEnvironment =
+  | "production"
+  | "deploy-preview"
+  | "branch-deploy"
+  | "development"
+  | "unknown";
+
+function resolveEnvironment(): UsageEnvironment {
+  const context = process.env.CONTEXT;
+
+  if (context === "production") return "production";
+  if (context === "deploy-preview") return "deploy-preview";
+  if (context === "branch-deploy") return "branch-deploy";
+  if (context === "dev") return "development";
+
+  /*
+    No Netlify context at all: a local run, or something that is not a
+    Netlify deployment. Reported as development only when it is also not a
+    production build - otherwise the honest answer is that we do not know.
+  */
+  if (process.env.NETLIFY !== "true" && process.env.NODE_ENV !== "production") {
+    return "development";
+  }
+
+  return "unknown";
+}
+
 async function persistUsageEvent(row: {
   operation: OpenAiOperation;
   model: string;
@@ -135,6 +182,7 @@ async function persistUsageEvent(row: {
         : null;
 
     const { error } = await supabaseAdmin.from("openai_usage_events").insert({
+      environment: resolveEnvironment(),
       operation: row.operation,
       model: row.model,
       status: row.status,

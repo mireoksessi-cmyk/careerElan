@@ -41,7 +41,80 @@ import { isPricingKnown } from "../../openai/pricing";
   read.
 */
 const USAGE_EVENT_COLUMNS =
-  "created_at, operation, model, status, duration_ms, input_tokens, output_tokens, total_tokens, estimated_cost_usd, cost_classification, retry_count, http_status_class, user_id, estimated_cost_cad";
+  "created_at, operation, model, status, duration_ms, input_tokens, output_tokens, total_tokens, estimated_cost_usd, cost_classification, retry_count, http_status_class, user_id, estimated_cost_cad, environment";
+
+/*
+  API-B - the console reports production traffic. Deploy Previews run
+  against this same database with the same keys, so preview experiments used
+  to be counted as customer cost; they are now identifiable and excluded,
+  along with branch and local runs.
+
+  Rows written before attribution carry NULL. They are excluded too, because
+  their origin is genuinely unknown and quietly folding unknown traffic into
+  a figure labelled "production" is the same error the column exists to fix.
+  They are not hidden either - the counts below are surfaced in the notes on
+  the affected metrics, so the difference between "no production usage yet"
+  and "usage that predates attribution" stays visible.
+*/
+type EnvUsageRow = UsageEventRow & { environment: string | null };
+
+type EnvironmentSplit = {
+  production: UsageEventRow[];
+  legacyCalls: number;
+  legacyCostUsd: number;
+  nonProductionCalls: number;
+};
+
+function splitByEnvironment(rows: EnvUsageRow[]): EnvironmentSplit {
+  const production: UsageEventRow[] = [];
+  let legacyCalls = 0;
+  let legacyCostUsd = 0;
+  let nonProductionCalls = 0;
+
+  for (const row of rows) {
+    if (row.environment === "production") {
+      production.push(row);
+      continue;
+    }
+
+    if (row.environment === null || row.environment === undefined) {
+      legacyCalls++;
+      legacyCostUsd +=
+        typeof row.estimated_cost_usd === "number" ? row.estimated_cost_usd : 0;
+      continue;
+    }
+
+    nonProductionCalls++;
+  }
+
+  return { production, legacyCalls, legacyCostUsd, nonProductionCalls };
+}
+
+/*
+  Reads as a plain sentence on the metric card rather than a separate panel,
+  which keeps the disclosure next to the number it qualifies without any new
+  UI. Empty when there is nothing excluded, so a fully attributed month says
+  nothing extra.
+*/
+function exclusionNote(split: EnvironmentSplit): string | undefined {
+  const parts: string[] = [];
+
+  if (split.legacyCalls > 0) {
+    parts.push(
+      `${split.legacyCalls} call(s) costing about $${split.legacyCostUsd.toFixed(
+        2
+      )} predate environment attribution and are excluded - their origin is unknown, not production`
+    );
+  }
+
+  if (split.nonProductionCalls > 0) {
+    parts.push(
+      `${split.nonProductionCalls} call(s) from preview/branch/development excluded`
+    );
+  }
+
+  return parts.length > 0 ? parts.join("; ") : undefined;
+}
 
 /*
   Admin API Usage Phase 2 - safety cap on the "fetch every historical
@@ -63,6 +136,7 @@ async function fetchAllUsageRows(): Promise<{
   rows: UsageEventRow[];
   capReached: boolean;
   unavailable: boolean;
+  split: EnvironmentSplit;
 }> {
   const { data, error } = await supabaseAdmin
     .from("openai_usage_events")
@@ -71,11 +145,23 @@ async function fetchAllUsageRows(): Promise<{
     .limit(MAX_USAGE_EVENT_ROWS);
 
   if (error || !data) {
-    return { rows: [], capReached: false, unavailable: true };
+    return {
+      rows: [],
+      capReached: false,
+      unavailable: true,
+      split: { production: [], legacyCalls: 0, legacyCostUsd: 0, nonProductionCalls: 0 },
+    };
   }
 
-  const rows = data as UsageEventRow[];
-  return { rows, capReached: rows.length >= MAX_USAGE_EVENT_ROWS, unavailable: false };
+  const fetched = data as EnvUsageRow[];
+  const split = splitByEnvironment(fetched);
+
+  return {
+    rows: split.production,
+    capReached: fetched.length >= MAX_USAGE_EVENT_ROWS,
+    unavailable: false,
+    split,
+  };
 }
 
 /*
@@ -195,14 +281,27 @@ function unavailablePeriodMetrics(note: string): PeriodMetrics {
   };
 }
 
-function periodMetrics(summary: UsagePeriodSummary): PeriodMetrics {
+function periodMetrics(
+  summary: UsagePeriodSummary,
+  /*
+    API-B - what production accounting left out, stated on the two cards a
+    reader checks first. Undefined when nothing was excluded.
+  */
+  excluded?: string
+): PeriodMetrics {
   return {
-    calls: metric(summary.calls, "EXACT_INTERNAL_DATA"),
+    calls: metric(summary.calls, "EXACT_INTERNAL_DATA", excluded),
     successCount: metric(summary.successCount, "EXACT_INTERNAL_DATA"),
     errorCount: metric(summary.errorCount, "EXACT_INTERNAL_DATA"),
     retryCount: metric(summary.retryCount, "EXACT_INTERNAL_DATA"),
     totalTokens: metric(summary.totalTokens, "EXACT_INTERNAL_DATA", "NULL token rows (endpoint returned no usage) contribute 0"),
-    cost: metric(summary.costUsd, "DERIVED_ESTIMATE", "sum of estimated_cost_usd - local token x price calculation, never provider billing"),
+    cost: metric(
+      summary.costUsd,
+      "DERIVED_ESTIMATE",
+      excluded
+        ? `sum of estimated_cost_usd for production traffic - local token x price calculation, never provider billing. ${excluded}`
+        : "sum of estimated_cost_usd for production traffic - local token x price calculation, never provider billing"
+    ),
     costCad: cadMetricFromSummary(summary),
     avgLatencyMs: metric(summary.avgLatencyMs, "EXACT_INTERNAL_DATA"),
     rateLimited429: metric(summary.rateLimited429, "EXACT_INTERNAL_DATA"),
@@ -232,8 +331,20 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     must not be aggregated as a real, empty month.
   */
   const monthUnavailable = Boolean(rowsError) || !monthRows;
-  const rows: UsageEventRow[] = monthUnavailable ? [] : (monthRows as UsageEventRow[]);
+
+  /*
+    API-B - the month is aggregated from production rows only; what was
+    excluded is carried alongside so the console can say so rather than
+    simply showing a smaller number.
+  */
+  const monthSplit = monthUnavailable
+    ? { production: [], legacyCalls: 0, legacyCostUsd: 0, nonProductionCalls: 0 }
+    : splitByEnvironment(monthRows as EnvUsageRow[]);
+
+  const rows: UsageEventRow[] = monthSplit.production;
   const aggregation = aggregateUsageRows(rows, now);
+  const monthExclusionNote = exclusionNote(monthSplit);
+  const allTimeExclusionNote = exclusionNote(allTimeFetch.split);
 
   const MONTH_UNAVAILABLE_NOTE =
     "this month's usage could not be read - not a measurement of zero";
@@ -246,7 +357,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
 
   const allTimeMetrics = allTimeFetch.unavailable
     ? unavailablePeriodMetrics(ALL_TIME_UNAVAILABLE_NOTE)
-    : periodMetrics(summarizeAllTimeRows(allTimeFetch.rows));
+    : periodMetrics(summarizeAllTimeRows(allTimeFetch.rows), allTimeExclusionNote);
 
   const perUser: UserUsageRow[] = aggregation.perUser.map((u: UserBreakdownRow) => ({
     userId: u.userId,
@@ -292,11 +403,11 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     openAi: {
       today: monthUnavailable
         ? unavailablePeriodMetrics(MONTH_UNAVAILABLE_NOTE)
-        : periodMetrics(aggregation.today),
+        : periodMetrics(aggregation.today, monthExclusionNote),
       thisMonth: {
         ...(monthUnavailable
           ? unavailablePeriodMetrics(MONTH_UNAVAILABLE_NOTE)
-          : periodMetrics(aggregation.thisMonth)),
+          : periodMetrics(aggregation.thisMonth, monthExclusionNote)),
         dailyAverageCost: monthUnavailable
           ? metric(0, "NOT_AVAILABLE", MONTH_UNAVAILABLE_NOTE)
           : metric(aggregation.dailyAverageCostUsd, "DERIVED_ESTIMATE", "month-to-date cost / day of month"),
