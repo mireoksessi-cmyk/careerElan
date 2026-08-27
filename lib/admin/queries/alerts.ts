@@ -72,7 +72,7 @@ export async function getAlerts(): Promise<AdminAlert[]> {
   if ((recentFailures ?? 0) >= ALERT_THRESHOLDS.highFailureCount15m) {
     alerts.push({
       key: "generate_package_failure_spike",
-      severity: "HIGH",
+      severity: "CRITICAL",
       title: "Generate Package failure spike",
       detail: `${recentFailures} failures in the last 15 minutes.`,
       status: "OPEN",
@@ -109,7 +109,7 @@ export async function getAlerts(): Promise<AdminAlert[]> {
   if ((openAi429_15m ?? 0) >= ALERT_THRESHOLDS.openAiRateLimitSpike15m) {
     alerts.push({
       key: "openai_rate_limit_spike",
-      severity: "HIGH",
+      severity: "CRITICAL",
       title: "OpenAI rate limit (429) spike",
       detail: `${openAi429_15m} rate-limited OpenAI calls in the last 15 minutes.`,
       status: "OPEN",
@@ -119,7 +119,7 @@ export async function getAlerts(): Promise<AdminAlert[]> {
   if ((openAiTimeouts15m ?? 0) >= ALERT_THRESHOLDS.openAiTimeoutSpike15m) {
     alerts.push({
       key: "openai_timeout_spike",
-      severity: "HIGH",
+      severity: "CRITICAL",
       title: "OpenAI timeout spike",
       detail: `${openAiTimeouts15m} timed-out OpenAI calls in the last 15 minutes.`,
       status: "OPEN",
@@ -131,7 +131,7 @@ export async function getAlerts(): Promise<AdminAlert[]> {
     if (errorRate >= ALERT_THRESHOLDS.openAiFailureRate15m) {
       alerts.push({
         key: "openai_failure_rate",
-        severity: "HIGH",
+        severity: "CRITICAL",
         title: "Elevated OpenAI failure rate",
         detail: `${Math.round(errorRate * 100)}% failure rate over ${openAiCalls15m} OpenAI calls (last 15 min).`,
         status: "OPEN",
