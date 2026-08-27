@@ -81,6 +81,111 @@ export default async function ApiCostsPage() {
         </div>
       )}
 
+      {/*
+        API-D - the production picture across every metered provider. Strictly
+        production-attributed: development, preview, branch and rows that
+        predate attribution contribute nothing to any figure here, and the
+        note on the total says so rather than leaving a smaller number
+        unexplained.
+      */}
+      <Section title="Production API Overview — This Month">
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2">Provider</th>
+                <th className="px-3 py-2">Production Usage</th>
+                <th className="px-3 py-2">Unit</th>
+                <th className="px-3 py-2">Success</th>
+                <th className="px-3 py-2">Failed</th>
+                <th className="px-3 py-2">Estimated Cost</th>
+                <th className="px-3 py-2">Budget / Limit</th>
+                <th className="px-3 py-2">Last Activity</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-t border-slate-100">
+                <td className="px-3 py-2 font-medium text-slate-900">OpenAI</td>
+                <td className="px-3 py-2">
+                  {m.openAi.thisMonth.calls.classification === "NOT_AVAILABLE"
+                    ? "Not available"
+                    : `${m.openAi.thisMonth.calls.value} calls · ${m.openAi.thisMonth.totalTokens.value} tokens`}
+                </td>
+                <td className="px-3 py-2 text-slate-500">calls / tokens</td>
+                <td className="px-3 py-2">{m.openAi.thisMonth.successCount.value}</td>
+                <td className="px-3 py-2">{m.openAi.thisMonth.errorCount.value}</td>
+                <td className="px-3 py-2">
+                  {m.openAi.thisMonth.cost.classification === "NOT_AVAILABLE"
+                    ? "Not available"
+                    : `${usd(m.openAi.thisMonth.cost.value)} (estimate)`}
+                </td>
+                <td className="px-3 py-2">
+                  {m.openAi.budget.configured
+                    ? `${usd(m.openAi.budget.effectiveBudgetUsd)} internal`
+                    : m.openAi.budget.reason === "SPEND_UNAVAILABLE"
+                      ? "Usage unavailable"
+                      : "Not configured"}
+                </td>
+                <td className="px-3 py-2 text-slate-500">
+                  {m.openAi.thisMonth.lastCallAt.value
+                    ? new Date(m.openAi.thisMonth.lastCallAt.value).toLocaleString()
+                    : "—"}
+                </td>
+              </tr>
+
+              {m.production.externalProviders.map((p) => (
+                <tr key={p.provider} className="border-t border-slate-100">
+                  <td className="px-3 py-2 font-medium text-slate-900">{p.label}</td>
+                  <td className="px-3 py-2">
+                    {p.requests.classification === "NOT_AVAILABLE"
+                      ? "Not available"
+                      : p.requests.value}
+                  </td>
+                  <td className="px-3 py-2 text-slate-500">{p.unit}</td>
+                  <td className="px-3 py-2">{p.successCount}</td>
+                  <td className="px-3 py-2">{p.failedCount}</td>
+                  <td className="px-3 py-2 text-slate-500">Not available</td>
+                  <td className="px-3 py-2 text-slate-500">Not configured</td>
+                  <td className="px-3 py-2 text-slate-500">
+                    {p.lastActivityAt
+                      ? new Date(p.lastActivityAt).toLocaleString()
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4">
+          <CardGrid>
+            <MetricCard
+              label="Known Estimated Production API Cost"
+              metric={m.production.knownEstimatedCostUsd}
+              format={(v) => usd(Number(v))}
+            />
+          </CardGrid>
+        </div>
+
+        {/*
+          Named rather than summarised, so the total is never mistaken for the
+          whole bill. These providers are counted exactly; only their price is
+          unknown, and $0 would be a different and false claim.
+        */}
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">
+          Cost unknown for: {m.production.costUnknownProviders.join(", ")}. Their
+          requests are counted exactly above, but no plan or SKU pricing is
+          available to this deployment, so they contribute nothing to the total
+          rather than contributing zero.
+        </div>
+
+        <div className="mt-2 rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500">
+          Production only. Development, deploy-preview, branch-deploy, unknown
+          and pre-attribution legacy usage are excluded from every figure in
+          this section.
+        </div>
+      </Section>
+
       <Section title="Tracked AI Cost — Today">
         <PeriodCards p={m.openAi.today} />
       </Section>
