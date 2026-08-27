@@ -110,9 +110,35 @@ function isApiPath(pathname: string) {
 const CANONICAL_HOST = "fabulous-frangipane-b5d970.netlify.app";
 const NETLIFY_ALTERNATE_HOST_SUFFIX = `--${CANONICAL_HOST}`;
 
+/*
+  Where users belong. CANONICAL_HOST above names the Netlify site, which is
+  what the suffix test is built from and still has to be; this is the address
+  the product actually has, and the only destination this middleware sends
+  anyone to.
+
+  The two were the same value until now, which is why the site's own default
+  Netlify hostname stayed user-facing: it served production, nothing sent a
+  visitor away from it, and it has no "--" so the alternate-host test below
+  never saw it. Someone who landed there - from a search result, an old link,
+  an OAuth redirect before app/auth/callback/route.ts was fixed - simply
+  stayed on an address that names a hosting provider rather than this product.
+
+  A fixed constant, never interpolated from a request, so no Host header can
+  steer where anyone is sent.
+*/
+const PUBLIC_CANONICAL_ORIGIN = "https://careerelan.com";
+
 function isNetlifyAlternateHost(hostHeader: string | null) {
   if (!hostHeader) return false;
   const hostname = hostHeader.split(":")[0].toLowerCase();
+
+  /*
+    The site's own default hostname. Matched exactly, not by suffix: it
+    carries no "--" and would otherwise fall through the test below, which is
+    precisely how it stayed visible. careerelan.com itself matches nothing
+    here and is never redirected, so there is no loop.
+  */
+  if (hostname === CANONICAL_HOST) return true;
   /*
     One exemption: this site's own Deploy Previews. A pull request's
     preview is the only pre-production surface this project has - the
@@ -151,7 +177,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(
       new URL(
         `${request.nextUrl.pathname}${request.nextUrl.search}`,
-        `https://${CANONICAL_HOST}`
+        /*
+          Deploy permalinks used to be sent to the Netlify hostname, which is
+          now itself a host this middleware redirects away from - leaving them
+          pointed there would only add a second hop through the address the
+          change exists to retire.
+        */
+        PUBLIC_CANONICAL_ORIGIN
       ),
       307
     );
