@@ -26,7 +26,7 @@ import { supabaseAdmin } from "../supabaseAdmin";
 import { logOperationalEvent } from "../observability/logger";
 import { estimateCostUsd } from "./pricing";
 import { getConfiguredUsdToCadRate, convertUsdToCad } from "./currency";
-import { checkAndTriggerBudgetAlerts } from "./budgetAlerts";
+import { checkAndTriggerCreditAlerts } from "./creditBalance";
 import type { OpenAiOperation } from "./operations";
 
 export type TelemetryParams = {
@@ -212,10 +212,23 @@ async function persistUsageEvent(row: {
         reason: "OPENAI_TELEMETRY_WRITE_FAILED",
       });
     } else if (cost.classification === "ESTIMATED_COST" && cost.costUsd > 0) {
-      // Cheap (one aggregate read + at most 3 atomic claims) and has its
-      // own internal try/catch - never allowed to affect this insert's
-      // success or the caller's OpenAI result.
-      await checkAndTriggerBudgetAlerts();
+      /*
+        API-D2 - depletion of the operator-confirmed OpenAI credit balance is
+        now the single authority for OpenAI 80/90/100 alerts.
+
+        The monthly-budget engine (lib/openai/budgetAlerts.ts) used to be
+        called here. It is left in place, along with its history, but nothing
+        invokes it any more: running both would send the operator two
+        unrelated sets of threshold emails describing two different notions
+        of the same money, and the monthly one described a figure that never
+        corresponded to an OpenAI balance.
+
+        Cheap (one checkpoint read, one spend read, claims only for
+        thresholds actually crossed) and has its own internal try/catch -
+        never allowed to affect this insert's success or the caller's OpenAI
+        result.
+      */
+      await checkAndTriggerCreditAlerts();
     }
   } catch {
     // Telemetry must never throw into the caller - see this module's own

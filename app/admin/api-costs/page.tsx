@@ -3,7 +3,6 @@ import { guardAdminPage } from "@/lib/admin/pageAuth";
 import AdminDenied from "@/components/admin/AdminDenied";
 import { getApiCostMetrics, type PeriodMetrics } from "@/lib/admin/queries/apiCosts";
 import { PageTitle, CardGrid, MetricCard, Section, Badge } from "@/components/admin/ui";
-import { RecordRechargeForm } from "@/components/admin/RecordRechargeForm";
 import { hasPermission } from "@/lib/admin/permissions";
 import type { BudgetStatus } from "@/lib/openai/budget";
 import { OPENAI_OPERATION_LABELS } from "@/lib/openai/operations";
@@ -55,13 +54,34 @@ function PeriodCards({ p }: { p: PeriodMetrics }) {
   );
 }
 
-export default async function ApiCostsPage() {
+/*
+  API-D2 - the outcome of a checkpoint submission, carried back on the
+  redirect. The form posts to a route handler rather than being a client
+  component, so this query parameter is how the result gets reported.
+*/
+const CHECKPOINT_RESULT_MESSAGE: Record<string, string> = {
+  recorded: "New OpenAI credit balance checkpoint recorded. The 80%, 90% and 100% alerts are re-armed.",
+  invalid: "That balance was not accepted. Enter the current remaining credit as a positive dollar amount.",
+  "not-acknowledged": "No checkpoint was created - the confirmation box was not ticked.",
+  failed: "The checkpoint could not be saved. Nothing was changed.",
+};
+
+export default async function ApiCostsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const guard = await guardAdminPage("admin.api_costs.read");
   if (guard.denied) return <AdminDenied message={guard.message} />;
 
   const canManageBudget = hasPermission(guard.ctx.role, "admin.api_costs.manage");
   const m = await getApiCostMetrics();
   const budget = m.openAi.budget;
+  const credit = m.openAi.creditBalance;
+
+  const checkpointParam = (await searchParams).checkpoint;
+  const checkpointMessage =
+    typeof checkpointParam === "string" ? CHECKPOINT_RESULT_MESSAGE[checkpointParam] : undefined;
 
   return (
     <div>
@@ -231,12 +251,18 @@ export default async function ApiCostsPage() {
                     ? "Not available"
                     : `${usd(m.openAi.thisMonth.cost.value)} (estimate)`}
                 </td>
+                {/*
+                  API-D2 - the confirmed credit balance, not the retired
+                  internal monthly budget. Only the ceiling shown in this
+                  column changed; the usage, success, failure and cost cells
+                  beside it are the same production-only figures as before.
+                */}
                 <td className="px-3 py-2">
-                  {m.openAi.budget.configured
-                    ? `${usd(m.openAi.budget.effectiveBudgetUsd)} internal`
-                    : m.openAi.budget.reason === "SPEND_UNAVAILABLE"
-                      ? "Usage unavailable"
-                      : "Not configured"}
+                  {credit.available
+                    ? `${usd(credit.estimatedRemainingUsd)} est. remaining of ${usd(credit.checkpoint.confirmedBalanceUsd)} confirmed`
+                    : credit.reason === "NO_CHECKPOINT"
+                      ? "Not configured"
+                      : "Not available"}
                 </td>
                 <td className="px-3 py-2 text-slate-500">
                   {m.openAi.thisMonth.lastCallAt.value
@@ -257,7 +283,18 @@ export default async function ApiCostsPage() {
                   <td className="px-3 py-2">{p.successCount}</td>
                   <td className="px-3 py-2">{p.failedCount}</td>
                   <td className="px-3 py-2 text-slate-500">Not available</td>
-                  <td className="px-3 py-2 text-slate-500">Not configured</td>
+                  {/*
+                    API-D2 - an absent limit stays absent. It does not become
+                    zero and no percentage is invented for it; usage above is
+                    still counted and shown either way.
+                  */}
+                  <td className="px-3 py-2 text-slate-500">
+                    {p.configuredMonthlyLimit === null
+                      ? "Not configured"
+                      : `${p.configuredMonthlyLimit} ${p.unit} configured${
+                          p.usagePercent === null ? "" : ` · ${p.usagePercent.toFixed(1)}%`
+                        }`}
+                  </td>
                   <td className="px-3 py-2 text-slate-500">
                     {p.lastActivityAt
                       ? new Date(p.lastActivityAt).toLocaleString()
@@ -322,7 +359,173 @@ export default async function ApiCostsPage() {
         )}
       </Section>
 
-      <Section title="OpenAI Budget">
+      {/*
+        API-D2 - the OpenAI funding model the console runs on.
+
+        The operator reads their remaining credit off OpenAI's billing page
+        and enters it. That figure is a fact with a timestamp; everything
+        derived from it afterwards is this codebase's own estimate, and each
+        card says which it is rather than leaving the reader to guess.
+      */}
+      <Section title="OpenAI Credit Balance">
+        {checkpointMessage ? (
+          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            {checkpointMessage}
+          </div>
+        ) : null}
+
+        {credit.available ? (
+          <div className="space-y-4">
+            <CardGrid>
+              <MetricCard
+                label="Confirmed OpenAI Balance"
+                metric={{
+                  value: credit.checkpoint.confirmedBalanceUsd,
+                  classification: "EXACT_INTERNAL_DATA",
+                  note: `Read from the OpenAI billing dashboard by an operator and confirmed at ${new Date(credit.checkpoint.createdAt).toLocaleString()}.`,
+                }}
+                format={(v) => usd(Number(v))}
+              />
+              <MetricCard
+                label="Tracked Production Spend Since Confirmation"
+                metric={{
+                  value: credit.trackedSpendUsd,
+                  classification: "DERIVED_ESTIMATE",
+                  note: "local token x price estimate for production traffic only - preview, branch, development and unattributed legacy usage excluded",
+                }}
+                format={(v) => usd(Number(v))}
+              />
+              <MetricCard
+                label="Estimated Remaining Credit"
+                metric={{
+                  value: credit.estimatedRemainingUsd,
+                  classification: "DERIVED_ESTIMATE",
+                  note: "confirmed balance minus the local estimate above - not OpenAI's live balance",
+                }}
+                format={(v) => usd(Number(v))}
+              />
+              <MetricCard
+                label="Estimated Consumed"
+                metric={{
+                  value: credit.consumedPercent,
+                  classification: "DERIVED_ESTIMATE",
+                  note:
+                    credit.estimatedOverrunUsd !== null
+                      ? `Estimated overrun: ${usd(credit.estimatedOverrunUsd)} past the confirmed balance.`
+                      : "share of the confirmed balance the local estimate has used",
+                }}
+                format={(v) => `${Number(v).toFixed(1)}%`}
+              />
+            </CardGrid>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">
+              Alert status —{" "}
+              {[80, 90, 100]
+                .map((t) => `${t}%: ${credit.consumedPercent >= t ? "threshold crossed" : "waiting"}`)
+                .join(" · ")}
+              . Each fires at most once per checkpoint by email to
+              ADMIN_ALERT_EMAILS. Confirming a new balance re-arms all three;
+              nothing else does, and they do not reset with the calendar month.
+            </div>
+
+            {credit.estimatedOverrunUsd !== null ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                The local estimate has passed the confirmed balance by{" "}
+                {usd(credit.estimatedOverrunUsd)}. Check the OpenAI dashboard
+                for the real remaining credit and record a new checkpoint.
+              </div>
+            ) : null}
+          </div>
+        ) : credit.reason === "NO_CHECKPOINT" ? (
+          <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-400">
+            OpenAI Credit Balance: Not configured. Tracked depletion: Not
+            available. Alerts: Not active. Record the current remaining credit
+            from your OpenAI billing dashboard below to start tracking.
+          </div>
+        ) : (
+          /*
+            Neither of these is "no balance". A read that failed must not
+            render as an empty, healthy state - no threshold is evaluated or
+            claimed while the figure is unknown, so the alerts stay available
+            for a later evaluation that can read the data.
+          */
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            {credit.reason === "CHECKPOINT_UNREADABLE"
+              ? "CHECKPOINT_UNREADABLE - the credit balance checkpoint could not be read, so remaining credit is unknown rather than zero."
+              : "SPEND_UNAVAILABLE - a credit checkpoint exists, but production spend since it could not be read, so depletion is unknown rather than zero."}{" "}
+            No threshold alert was evaluated or consumed for this attempt.
+          </div>
+        )}
+
+        {canManageBudget ? (
+          <form
+            method="post"
+            action="/api/admin/api-costs/credit-balance"
+            className="mt-4 rounded-lg border border-slate-200 bg-white p-4"
+          >
+            <h3 className="text-sm font-semibold text-slate-900">
+              Update Current Credit Balance
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Enter the current remaining credit shown in your OpenAI billing
+              dashboard, not the amount you just added. If your balance was $10
+              and you topped up $200, enter 210.
+            </p>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="text-sm text-slate-600" htmlFor="confirmedBalanceUsd">
+                Current balance (USD)
+              </label>
+              <input
+                id="confirmedBalanceUsd"
+                name="confirmedBalanceUsd"
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                className="w-40 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                placeholder="210.00"
+              />
+            </div>
+
+            {/*
+              Required in the markup and re-checked on the server. Saving a
+              balance re-arms the alert cycle, which is not something anyone
+              should be able to do by pressing Enter in a number field.
+            */}
+            <label className="mt-3 flex items-start gap-2 text-xs text-slate-600">
+              <input type="checkbox" name="acknowledge" value="yes" required className="mt-0.5" />
+              <span>
+                This starts a new OpenAI balance checkpoint and resets the 80%,
+                90%, and 100% depletion alert cycle.
+              </span>
+            </label>
+
+            <button
+              type="submit"
+              className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+            >
+              Update Current Credit Balance
+            </button>
+          </form>
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-400">
+            Confirming a credit balance requires the admin.api_costs.manage
+            permission (OWNER/ADMIN).
+          </div>
+        )}
+      </Section>
+
+      {/*
+        API-D2 - retained for its history only. This monthly budget and the
+        recharge ledger beneath it no longer evaluate or send any alert; the
+        credit balance above is the sole OpenAI alert authority. The rows are
+        kept because they record something that really happened, and they
+        measured a different thing - money added to an internal budget, not a
+        balance observed at OpenAI - so they are not reinterpreted as
+        checkpoints.
+      */}
+      <Section title="Legacy Monthly Budget (inactive - no alerts)">
         {budget.configured ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -339,7 +542,7 @@ export default async function ApiCostsPage() {
                 />
               </div>
               <div className="mt-2 text-xs text-slate-400">
-                Remaining capacity: {usd(budget.remainingBudgetUsd)}. Alerts fire once per threshold (80% / 90% / 100% of the effective budget) per calendar month via email - see docs for ADMIN_ALERT_EMAILS configuration.
+                Remaining capacity: {usd(budget.remainingBudgetUsd)}. This figure no longer sends any alert - OpenAI threshold emails now run on the confirmed credit balance above.
               </div>
             </div>
 
@@ -349,14 +552,6 @@ export default async function ApiCostsPage() {
               <MetricCard label="Effective Monthly Budget" metric={{ value: budget.effectiveBudgetUsd, classification: "EXACT_INTERNAL_DATA" }} format={(v) => usd(Number(v))} />
               <MetricCard label="Estimated OpenAI Spend This Month" metric={{ value: budget.monthSpendUsd, classification: "DERIVED_ESTIMATE" }} format={(v) => usd(Number(v))} />
             </CardGrid>
-
-            {canManageBudget ? (
-              <RecordRechargeForm />
-            ) : (
-              <div className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-400">
-                Recording a manual recharge requires the admin.api_costs.manage permission (OWNER/ADMIN).
-              </div>
-            )}
 
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Recharge History</h3>
@@ -403,7 +598,7 @@ export default async function ApiCostsPage() {
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-400">
-              MONTHLY_BUDGET_NOT_CONFIGURED - set OPENAI_MONTHLY_BUDGET_USD (server-only env var) to enable budget tracking and 80/90/100% email alerts.
+              MONTHLY_BUDGET_NOT_CONFIGURED - the legacy internal monthly budget is not set. It is no longer required: OpenAI alerts run on the confirmed credit balance above.
             </div>
           )
         )}
