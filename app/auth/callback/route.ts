@@ -37,8 +37,64 @@ function safeAuthErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
+/*
+  request.url is not the address the person typed. Netlify hands the
+  function its own deploy URL, so a request that arrived at careerelan.com
+  is described to this route as fabulous-frangipane-b5d970.netlify.app - and
+  a redirect built from it lands the browser on a different host than the one
+  the session cookie was just issued to. Supabase writes those cookies
+  without a Domain, so they are host-only: sending the browser elsewhere
+  leaves the session behind and the person arrives signed out, having done
+  nothing wrong.
+
+  app/auth/confirm/route.ts already carries exactly this, for exactly this
+  reason; the OAuth callback was simply never given it, which is why social
+  logins ended on the platform hostname while email confirmations did not.
+  Copied rather than shared, matching how confirm, reset-password and
+  find-login-id each hold their own - extracting it would mean editing four
+  files to fix one.
+
+  The Host header does carry the real address (middleware already relies on
+  that to canonicalize deploy permalinks), but it is caller-supplied, so it is
+  only ever matched against this fixed list and never interpolated as given.
+  Anything unrecognized falls back to the platform's own origin, which is
+  where every redirect here went before this change and is provably immune to
+  forwarded-host injection.
+
+  Deploy Previews are listed on purpose: a preview must keep authenticating
+  within itself, or reviewing a change would hand the reviewer a production
+  session. www is deliberately absent - it is not a domain alias on this site
+  and is redirected to the apex before a request ever reaches here.
+*/
+const TRUSTED_PUBLIC_HOSTS = new Set([
+  "careerelan.com",
+  "fabulous-frangipane-b5d970.netlify.app",
+]);
+
+const TRUSTED_DEPLOY_PREVIEW_HOST =
+  /^deploy-preview-\d+--fabulous-frangipane-b5d970\.netlify\.app$/;
+
+function trustedPublicOrigin(request: Request): string {
+  const hostHeader = request.headers.get("host");
+
+  if (hostHeader) {
+    const hostname = hostHeader.split(":")[0].toLowerCase();
+
+    if (
+      TRUSTED_PUBLIC_HOSTS.has(hostname) ||
+      TRUSTED_DEPLOY_PREVIEW_HOST.test(hostname)
+    ) {
+      return `https://${hostname}`;
+    }
+  }
+
+  return new URL(request.url).origin;
+}
+
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
+  /* Every redirect below is built from this, never from requestUrl. */
+  const publicOrigin = trustedPublicOrigin(request);
   const code = requestUrl.searchParams.get("code");
   const errorParam = requestUrl.searchParams.get("error");
 
@@ -95,7 +151,7 @@ export async function GET(request: Request) {
     실제 이동 주소는 로그인 확인 후 아래에서 변경한다.
   */
   const response = NextResponse.redirect(
-  new URL("/?verified=true", request.url)
+  new URL("/?verified=true", publicOrigin)
 );
 
   const cookieStore = await cookies();
@@ -145,7 +201,7 @@ export async function GET(request: Request) {
       "Location",
       new URL(
         "/?authError=missing_code",
-        request.url
+        publicOrigin
       ).toString()
     );
 
@@ -184,7 +240,7 @@ export async function GET(request: Request) {
       "Location",
       new URL(
         "/?authError=oauth_failed",
-        request.url
+        publicOrigin
       ).toString()
     );
 
@@ -201,7 +257,7 @@ export async function GET(request: Request) {
     caller's own page handle showing the "new password" form.
   */
   if (next) {
-    const recoveryRedirectUrl = new URL(next, request.url);
+    const recoveryRedirectUrl = new URL(next, publicOrigin);
 
     console.log(
       JSON.stringify({
@@ -361,7 +417,7 @@ export async function GET(request: Request) {
       ? "/dashboard"
       : "/career-memory";
 
-  const finalRedirectUrl = new URL(redirectPath, request.url);
+  const finalRedirectUrl = new URL(redirectPath, publicOrigin);
 
   console.log(
     JSON.stringify({
