@@ -32,6 +32,7 @@ import {
 import { listRecentRecharges, type RechargeHistoryRow } from "../../openai/recharges";
 import { getConfiguredUsdToCadRate } from "../../openai/currency";
 import { isPricingKnown } from "../../openai/pricing";
+import { fetchVendorMonthCostUsd, type VendorCostResult } from "../../openai/vendorCosts";
 
 /*
   Admin API Usage Phase 2 - shared select() column list for both the
@@ -382,6 +383,20 @@ export type ApiCostMetrics = {
     perUser: UserUsageRow[];
   };
   /*
+    F1 - what the vendor recorded for the same month, beside what this
+    codebase estimated. Variance is only offered when the two describe the
+    same thing; see the comment on the field itself.
+  */
+  vendor: {
+    openAiCostUsd: ClassifiedMetric<number>;
+    scopeNote: string;
+    fetchedAt: string | null;
+    varianceUsd: ClassifiedMetric<number>;
+    variancePercent: ClassifiedMetric<number>;
+    creditBalanceNote: string;
+  };
+
+  /*
     API-D - the production picture across every metered provider, plus what
     the money total deliberately leaves out.
   */
@@ -466,6 +481,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     budget,
     allTimeFetch,
     externalFetch,
+    vendorCost,
   ] = await Promise.all([
     supabaseAdmin
       .from("openai_usage_events")
@@ -476,6 +492,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     getBudgetSummary(now),
     fetchAllUsageRows(),
     fetchProductionExternalUsage(monthStart, monthEnd),
+    fetchVendorMonthCostUsd({ monthStartIso: monthStart, nowIso: now.toISOString() }),
   ]);
 
   /*
@@ -573,6 +590,70 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
         )}. Also excluded because not production: development, preview, branch and unattributed legacy usage.`
       );
 
+  /*
+    F1 - the vendor's own figure for this month, and the variance only when
+    it is a like-for-like comparison.
+
+    Variance requires the vendor answer to be scoped to the Career Élan
+    project. An organization-wide total may include work this codebase never
+    made, and subtracting a one-project estimate from an all-projects bill
+    would produce a difference that looks like estimation error and is not.
+    Without OPENAI_PROJECT_ID the vendor number is still shown, labelled
+    organization-wide, and the variance is withheld.
+
+    The local side of the comparison is production-attributed spend, the same
+    figure the cards above show - never legacy or preview usage.
+  */
+  const vendorAvailable = vendorCost.available;
+  const vendorComparable = vendorAvailable && vendorCost.scope === "PROJECT";
+  const localProductionCostUsd = monthUnavailable
+    ? null
+    : aggregation.thisMonth.costUsd;
+
+  const vendorScopeNote = vendorAvailable
+    ? vendorCost.scope === "PROJECT"
+      ? "OpenAI-recorded cost for the configured Career Élan project this month."
+      : "OpenAI-recorded cost for the whole organization this month - OPENAI_PROJECT_ID is not configured, so this may include work outside Career Élan and no variance is calculated."
+    : vendorCost.reason === "ADMIN_KEY_NOT_CONFIGURED"
+      ? "OPENAI_ADMIN_KEY is not configured, so the organization Costs endpoint cannot be read. The local estimate below is unaffected."
+      : "The OpenAI Costs endpoint could not be read. The local estimate below is unaffected.";
+
+  const vendorCostMetric: ClassifiedMetric<number> = vendorAvailable
+    ? metric(vendorCost.amountUsd, "EXACT_INTERNAL_DATA", vendorScopeNote)
+    : metric(0, "NOT_AVAILABLE", vendorScopeNote);
+
+  const varianceUsdMetric: ClassifiedMetric<number> =
+    vendorComparable && localProductionCostUsd !== null
+      ? metric(
+          Math.round((localProductionCostUsd - vendorCost.amountUsd) * 1_000_000) / 1_000_000,
+          "DERIVED_ESTIMATE",
+          "local production estimate minus vendor-recorded cost - positive means this codebase estimated high"
+        )
+      : metric(
+          0,
+          "NOT_AVAILABLE",
+          vendorAvailable
+            ? "variance needs the vendor figure scoped to the Career Élan project - set OPENAI_PROJECT_ID"
+            : "variance needs a vendor figure to compare against"
+        );
+
+  const variancePercentMetric: ClassifiedMetric<number> =
+    vendorComparable && localProductionCostUsd !== null && vendorCost.amountUsd > 0
+      ? metric(
+          Math.round(
+            ((localProductionCostUsd - vendorCost.amountUsd) / vendorCost.amountUsd) * 10000
+          ) / 100,
+          "DERIVED_ESTIMATE",
+          "positive means the local estimate exceeds what the vendor recorded"
+        )
+      : metric(
+          0,
+          "NOT_AVAILABLE",
+          vendorComparable
+            ? "vendor recorded no cost this month, so a percentage difference has no meaning"
+            : "no like-for-like vendor figure to compare against"
+        );
+
   return {
     openAi: {
       today: monthUnavailable
@@ -613,6 +694,21 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       perOperation: aggregation.perOperation,
       perModel: aggregation.perModel,
       perUser,
+    },
+    vendor: {
+      openAiCostUsd: vendorCostMetric,
+      scopeNote: vendorScopeNote,
+      fetchedAt: vendorAvailable ? vendorCost.fetchedAt : null,
+      varianceUsd: varianceUsdMetric,
+      variancePercent: variancePercentMetric,
+      /*
+        No documented OpenAI endpoint returns a prepaid balance, and the
+        arithmetic people reach for instead - top-ups minus estimated usage -
+        ignores starting balance, free grants, expiry and refunds. Left to the
+        billing dashboard rather than approximated.
+      */
+      creditBalanceNote:
+        "Current prepaid credit balance has no documented API and is not derived here - check the OpenAI billing dashboard.",
     },
     production: {
       externalProviders,

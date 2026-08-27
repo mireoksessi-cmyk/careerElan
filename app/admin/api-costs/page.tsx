@@ -88,6 +88,67 @@ export default async function ApiCostsPage() {
         note on the total says so rather than leaving a smaller number
         unexplained.
       */}
+      {/*
+        F1 - the vendor's own accounting beside this codebase's estimate. The
+        local figure is unchanged and still drives the budget alerts; this
+        section exists to say how close it has been.
+      */}
+      <Section title="OpenAI Vendor Reconciliation — This Month">
+        <CardGrid>
+          <MetricCard
+            label="Local Production Estimate (USD)"
+            metric={m.openAi.thisMonth.cost}
+            format={(v) => usd(Number(v))}
+          />
+          <MetricCard
+            label="OpenAI Recorded Cost (USD)"
+            metric={{
+              ...m.vendor.openAiCostUsd,
+              value:
+                m.vendor.openAiCostUsd.classification === "NOT_AVAILABLE"
+                  ? null
+                  : m.vendor.openAiCostUsd.value,
+            }}
+            format={(v) => (v === null ? "—" : usd(Number(v)))}
+          />
+          <MetricCard
+            label="Estimate Variance (USD)"
+            metric={{
+              ...m.vendor.varianceUsd,
+              value:
+                m.vendor.varianceUsd.classification === "NOT_AVAILABLE"
+                  ? null
+                  : m.vendor.varianceUsd.value,
+            }}
+            format={(v) => (v === null ? "—" : usd(Number(v)))}
+          />
+          <MetricCard
+            label="Estimate Variance (%)"
+            metric={{
+              ...m.vendor.variancePercent,
+              value:
+                m.vendor.variancePercent.classification === "NOT_AVAILABLE"
+                  ? null
+                  : m.vendor.variancePercent.value,
+            }}
+            format={(v) => (v === null ? "—" : `${Number(v).toFixed(1)}%`)}
+          />
+        </CardGrid>
+
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">
+          {m.vendor.scopeNote}
+          {m.vendor.fetchedAt
+            ? ` Read from OpenAI at ${new Date(m.vendor.fetchedAt).toLocaleString()}.`
+            : ""}
+        </div>
+
+        <div className="mt-2 rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500">
+          {m.vendor.creditBalanceNote} Budget alerts continue to run on the local
+          estimate, which is available the moment a call returns; vendor cost is
+          settled accounting and is used here for comparison only.
+        </div>
+      </Section>
+
       <Section title="Production API Overview — This Month">
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <table className="w-full min-w-[860px] text-left text-sm">
