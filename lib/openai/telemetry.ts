@@ -26,7 +26,7 @@ import { supabaseAdmin } from "../supabaseAdmin";
 import { logOperationalEvent } from "../observability/logger";
 import { estimateCostUsd } from "./pricing";
 import { getConfiguredUsdToCadRate, convertUsdToCad } from "./currency";
-import { checkAndTriggerBudgetAlerts } from "./budgetAlerts";
+import { checkAndTriggerCreditAlerts } from "./creditBalance";
 import type { OpenAiOperation } from "./operations";
 
 export type TelemetryParams = {
@@ -181,8 +181,10 @@ async function persistUsageEvent(row: {
         ? convertUsdToCad(cost.costUsd, cadRate)
         : null;
 
+    const environment = resolveEnvironment();
+
     const { error } = await supabaseAdmin.from("openai_usage_events").insert({
-      environment: resolveEnvironment(),
+      environment,
       operation: row.operation,
       model: row.model,
       status: row.status,
@@ -211,11 +213,35 @@ async function persistUsageEvent(row: {
         latencyMs: row.durationMs,
         reason: "OPENAI_TELEMETRY_WRITE_FAILED",
       });
-    } else if (cost.classification === "ESTIMATED_COST" && cost.costUsd > 0) {
-      // Cheap (one aggregate read + at most 3 atomic claims) and has its
-      // own internal try/catch - never allowed to affect this insert's
-      // success or the caller's OpenAI result.
-      await checkAndTriggerBudgetAlerts();
+    } else if (
+      environment === "production" &&
+      cost.classification === "ESTIMATED_COST" &&
+      cost.costUsd > 0
+    ) {
+      /*
+        API-D2 - depletion of the operator-confirmed OpenAI credit balance is
+        now the single authority for OpenAI 80/90/100 alerts.
+
+        Gated on production, which the monthly-budget call standing here
+        before it was not. The spend figure was always production-only, so a
+        Deploy Preview could not inflate it - but a preview request could
+        still run the evaluation and send the operator a real alert email off
+        the back of an experiment. Alert evaluation is a production concern,
+        and this is where that is decided.
+
+        The monthly-budget engine (lib/openai/budgetAlerts.ts) used to be
+        called here. It is left in place, along with its history, but nothing
+        invokes it any more: running both would send the operator two
+        unrelated sets of threshold emails describing two different notions
+        of the same money, and the monthly one described a figure that never
+        corresponded to an OpenAI balance.
+
+        Cheap (one checkpoint read, one spend read, claims only for
+        thresholds actually crossed) and has its own internal try/catch -
+        never allowed to affect this insert's success or the caller's OpenAI
+        result.
+      */
+      await checkAndTriggerCreditAlerts();
     }
   } catch {
     // Telemetry must never throw into the caller - see this module's own

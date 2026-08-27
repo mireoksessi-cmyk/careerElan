@@ -1,4 +1,10 @@
 import { supabaseAdmin } from "../supabaseAdmin";
+import {
+  claimUsageAlert,
+  settleUsageAlert,
+  getConfiguredAlertRecipients,
+  sendExternalUsageAlertEmail,
+} from "../openai/alertEmail";
 
 /*
   API-C1 - records one row per upstream request to a paid non-OpenAI
@@ -98,6 +104,8 @@ export async function recordExternalApiUsage(params: {
   userId?: string | null;
 }): Promise<void> {
   try {
+    const environment = resolveEnvironment();
+
     await supabaseAdmin.from("external_api_usage_events").insert({
       provider: params.provider,
       operation: params.operation,
@@ -118,11 +126,21 @@ export async function recordExternalApiUsage(params: {
       */
       estimated_cost_usd: null,
       cost_classification: "LOCAL_USAGE_EXACT",
-      environment: resolveEnvironment(),
+      environment,
       user_id: params.userId ?? null,
       duration_ms: params.durationMs ?? null,
       retry_count: params.retryCount ?? 0,
     });
+
+    /*
+      API-D2 - only production usage can cross a production threshold. A
+      preview experiment or a local run must never spend the operator's
+      monthly alert, so anything that is not positively production stops
+      here, before any query is issued.
+    */
+    if (environment === "production") {
+      await evaluateExternalUsageAlerts(params.provider, new Date());
+    }
   } catch {
     /*
       Swallowed on purpose. Logging the error object here would risk putting
@@ -130,5 +148,190 @@ export async function recordExternalApiUsage(params: {
       on per-request; a persistent problem shows up as a table that stops
       growing while the product keeps working.
     */
+  }
+}
+
+/*
+  API-D2 - monthly request ceilings for the metered non-OpenAI providers.
+
+  These are Career Élan's own operational limits, read from server-only
+  configuration. Nothing in this repository proves what plan is subscribed
+  with RapidAPI, what Places quota the key carries, or what tier Resend is
+  on, so a limit that is not configured stays absent. It does not become
+  zero, and it is not guessed from a published price page - a wrong ceiling
+  would either alert constantly or never, and both are worse than saying the
+  limit is unknown.
+*/
+const PROVIDER_LIMIT_ENV: Record<ExternalApiProvider, string> = {
+  rapidapi_jsearch: "RAPIDAPI_JSEARCH_MONTHLY_REQUEST_LIMIT",
+  google_places: "GOOGLE_PLACES_MONTHLY_REQUEST_LIMIT",
+  resend: "RESEND_MONTHLY_SEND_LIMIT",
+};
+
+export const EXTERNAL_PROVIDER_LABEL: Record<ExternalApiProvider, string> = {
+  rapidapi_jsearch: "RapidAPI / JSearch",
+  google_places: "Google Places",
+  resend: "Resend",
+};
+
+const EXTERNAL_PROVIDER_UNIT: Record<ExternalApiProvider, string> = {
+  rapidapi_jsearch: "requests",
+  google_places: "requests",
+  resend: "emails",
+};
+
+export function getConfiguredMonthlyLimit(
+  provider: ExternalApiProvider
+): number | null {
+  const raw = process.env[PROVIDER_LIMIT_ENV[provider]];
+  if (!raw) return null;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+
+  return parsed;
+}
+
+/* 80 and 90 only. There is no 100 here: passing a Career Élan operational
+   ceiling is not the same event as exhausting prepaid credit, and the
+   provider keeps answering. */
+const EXTERNAL_THRESHOLDS: (80 | 90)[] = [80, 90];
+
+function startOfUtcMonthIso(now: Date): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+
+function startOfNextUtcMonthIso(now: Date): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+}
+
+function utcYearMonth(now: Date): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/*
+  The configured limit is part of the alert identity, not just the month.
+
+  Raising a limit after an 80% alert has gone out creates a genuinely
+  different threshold at a different number of requests, and the operator
+  should hear about that one too. Keying on the month alone would leave them
+  silently unwarned until the calendar turned over.
+*/
+function externalAlertKey(
+  provider: ExternalApiProvider,
+  now: Date,
+  limit: number,
+  threshold: number
+): string {
+  return `external:${provider}:${utcYearMonth(now)}:${limit}:${threshold}`;
+}
+
+/*
+  API-D2 - production request count for one provider this calendar month.
+
+  head:true asks Postgres for the count without shipping the rows, so this
+  stays cheap enough to run after each provider request. Same environment
+  discipline as everywhere else: production rows only, no fallback, and a
+  failed count returns null rather than zero - an unknown numerator must not
+  produce a confident percentage.
+*/
+async function fetchProductionMonthUsage(
+  provider: ExternalApiProvider,
+  now: Date
+): Promise<number | null> {
+  const { count, error } = await supabaseAdmin
+    .from("external_api_usage_events")
+    .select("id", { count: "exact", head: true })
+    .eq("provider", provider)
+    .eq("environment", "production")
+    .gte("created_at", startOfUtcMonthIso(now))
+    .lt("created_at", startOfNextUtcMonthIso(now));
+
+  if (error || typeof count !== "number") return null;
+  return count;
+}
+
+/*
+  API-D2 - evaluates one provider's monthly usage against its configured
+  limit and sends at most one email per threshold per month per limit value.
+
+  The recursion case this has to survive is Resend's own. Resend crossing 80%
+  sends an alert; that alert is itself a Resend request; C2 records it as a
+  production resend/EMAIL_SEND row; this function runs again on the back of
+  it. The second pass claims nothing, because claimUsageAlert() wrote the
+  claim before the first email was ever handed to Resend, so the key is
+  already taken. One alert, not a loop.
+
+  Like the OpenAI path, a single evaluation that crosses both thresholds at
+  once sends only the higher one and marks the lower satisfied.
+
+  Never throws. Accounting and monitoring must not be able to fail a request
+  the provider already answered.
+*/
+async function evaluateExternalUsageAlerts(
+  provider: ExternalApiProvider,
+  now: Date
+): Promise<void> {
+  try {
+    const limit = getConfiguredMonthlyLimit(provider);
+    /* No configured limit means no percentage exists, so there is nothing to
+       alert on. Returns before any query - providers without a limit cost
+       nothing to skip. */
+    if (limit === null) return;
+
+    /* No recipient means the alert cannot be delivered. Return before
+       claiming, so the threshold survives to fire once one is configured. */
+    if (getConfiguredAlertRecipients().length === 0) return;
+
+    const usage = await fetchProductionMonthUsage(provider, now);
+    if (usage === null) return;
+
+    const usagePercent = (usage / limit) * 100;
+    /*
+      Compared against the request count each threshold represents rather than
+      a percentage, for the same reason the OpenAI path does: a percentage
+      carries rounding, and a threshold decided by rounding fires early. The
+      percentage above is for the email to read out, not to compare.
+    */
+    const crossed = EXTERNAL_THRESHOLDS.filter((t) => usage >= (t / 100) * limit);
+    if (crossed.length === 0) return;
+
+    const claimed: (80 | 90)[] = [];
+    for (const threshold of crossed) {
+      const key = externalAlertKey(provider, now, limit, threshold);
+      if (await claimUsageAlert(key, threshold, now)) claimed.push(threshold);
+    }
+
+    if (claimed.length === 0) return;
+
+    const highest = claimed[claimed.length - 1];
+
+    for (const threshold of claimed) {
+      if (threshold === highest) continue;
+      await settleUsageAlert(
+        externalAlertKey(provider, now, limit, threshold),
+        "SUPERSEDED",
+        now
+      );
+    }
+
+    const result = await sendExternalUsageAlertEmail({
+      providerLabel: EXTERNAL_PROVIDER_LABEL[provider],
+      threshold: highest,
+      productionUsage: usage,
+      configuredLimit: limit,
+      remainingUnits: Math.max(limit - usage, 0),
+      unit: EXTERNAL_PROVIDER_UNIT[provider],
+      usagePercent: Math.round(usagePercent * 100) / 100,
+      timestampIso: now.toISOString(),
+    });
+
+    await settleUsageAlert(
+      externalAlertKey(provider, now, limit, highest),
+      result.sent ? "SENT" : "FAILED",
+      now
+    );
+  } catch {
+    /* Swallowed deliberately - see this function's own header comment. */
   }
 }

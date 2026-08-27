@@ -33,6 +33,8 @@ import { listRecentRecharges, type RechargeHistoryRow } from "../../openai/recha
 import { getConfiguredUsdToCadRate } from "../../openai/currency";
 import { isPricingKnown } from "../../openai/pricing";
 import { fetchVendorMonthCostUsd, type VendorCostResult, type VendorComparableWindow } from "../../openai/vendorCosts";
+import { getCreditBalanceStatus, type CreditBalanceStatus } from "../../openai/creditBalance";
+import { getConfiguredMonthlyLimit } from "../../externalApi/usageTelemetry";
 
 /*
   Admin API Usage Phase 2 - shared select() column list for both the
@@ -260,6 +262,14 @@ export type ExternalProviderSummary = {
   failedCount: number;
   lastActivityAt: string | null;
   costNote: string;
+  /*
+    API-D2 - the operational ceiling this deployment was configured with, and
+    where usage stands against it. null when no limit is configured, which is
+    a different statement from a limit of zero: usage is still counted and
+    shown, only the percentage and the 80/90 alerts are unavailable.
+  */
+  configuredMonthlyLimit: number | null;
+  usagePercent: number | null;
 };
 
 const EXTERNAL_PROVIDER_LABELS: Record<
@@ -326,6 +336,9 @@ function summarizeExternalProviders(
   return keys.map((provider) => {
     const meta = EXTERNAL_PROVIDER_LABELS[provider];
     const providerRows = rows.filter((row) => row.provider === provider);
+    /* API-D2 - the same configuration the alert engine reads, so the console
+       and the emails can never disagree about what the limit is. */
+    const limit = getConfiguredMonthlyLimit(provider);
 
     let requests = 0;
     let successCount = 0;
@@ -357,6 +370,16 @@ function summarizeExternalProviders(
       failedCount,
       lastActivityAt,
       costNote: meta.costNote,
+      configuredMonthlyLimit: limit,
+      /*
+        Withheld when the count could not be read, for the same reason the
+        count itself is: a percentage computed from an unknown numerator
+        would look like a measurement.
+      */
+      usagePercent:
+        limit === null || unavailable
+          ? null
+          : Math.round((requests / limit) * 10000) / 100,
     };
   });
 }
@@ -433,6 +456,17 @@ export type ApiCostMetrics = {
     allTime: PeriodMetrics;
     allTimeRowCapReached: boolean;
     cadRateConfiguredNow: boolean;
+    /*
+      API-D2 - the active operator-confirmed credit balance and how far it
+      has been drawn down. This is the OpenAI funding model the console runs
+      on now, and the only thing that arms the 80/90/100 alerts.
+    */
+    creditBalance: CreditBalanceStatus;
+    /*
+      Legacy. The monthly internal budget and the recharge ledger that fed
+      it are retained for their history and no longer drive any alert - see
+      lib/openai/telemetry.ts for where that call was removed.
+    */
     budget: BudgetSummary;
     rechargeHistory: RechargeHistoryRow[];
     remainingCapacity: ClassifiedMetric<string>;
@@ -564,6 +598,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     allTimeFetch,
     externalFetch,
     vendorCost,
+    creditBalance,
   ] = await Promise.all([
     supabaseAdmin
       .from("openai_usage_events")
@@ -579,6 +614,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       nowIso: now.toISOString(),
       comparableWindow: comparable,
     }),
+    getCreditBalanceStatus(),
   ]);
 
   /*
@@ -862,6 +898,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       allTime: allTimeMetrics,
       allTimeRowCapReached: allTimeFetch.capReached,
       cadRateConfiguredNow: getConfiguredUsdToCadRate() !== null,
+      creditBalance,
       budget,
       rechargeHistory,
       remainingCapacity: metric(
