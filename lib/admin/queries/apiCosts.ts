@@ -16,7 +16,7 @@
   presented as exact billing.
 */
 import { supabaseAdmin } from "../../supabaseAdmin";
-import { metric, startOfUtcMonth, startOfNextUtcMonth, listAllAuthUsers, type ClassifiedMetric } from "./shared";
+import { metric, startOfUtcDay, startOfUtcMonth, startOfNextUtcMonth, listAllAuthUsers, type ClassifiedMetric } from "./shared";
 import { getBudgetSummary, type BudgetSummary } from "../../openai/budget";
 import {
   aggregateUsageRows,
@@ -32,7 +32,7 @@ import {
 import { listRecentRecharges, type RechargeHistoryRow } from "../../openai/recharges";
 import { getConfiguredUsdToCadRate } from "../../openai/currency";
 import { isPricingKnown } from "../../openai/pricing";
-import { fetchVendorMonthCostUsd, type VendorCostResult } from "../../openai/vendorCosts";
+import { fetchVendorMonthCostUsd, type VendorCostResult, type VendorComparableWindow } from "../../openai/vendorCosts";
 
 /*
   Admin API Usage Phase 2 - shared select() column list for both the
@@ -115,6 +115,72 @@ function exclusionNote(split: EnvironmentSplit): string | undefined {
   }
 
   return parts.length > 0 ? parts.join("; ") : undefined;
+}
+
+/*
+  F1.1 - the instant production attribution began. Rows written before it
+  carry no environment and are excluded from every production figure; see
+  splitByEnvironment() above. Recorded here because the vendor comparison
+  needs to know where the local production record actually starts.
+*/
+const PRODUCTION_ATTRIBUTION_BOUNDARY_ISO = "2026-08-27T05:43:05Z";
+
+/*
+  F1.1 - the period over which the vendor's figure and this codebase's
+  estimate are describing the same thing.
+
+  Two facts fix it. Local production accounting starts at the boundary above,
+  so nothing earlier can be called production. And the organization Costs
+  endpoint buckets by whole UTC days and nothing finer - bucket_width accepts
+  only "1d" - so it cannot report part of a day. Asking it for 05:43 onward
+  would still return the whole of that date, including hours this codebase
+  must not claim as its own.
+
+  So the window opens at the first midnight at or after the boundary, and
+  closes at the most recent midnight already past, because the day in
+  progress is a bucket the vendor has not finished filling. Comparing a
+  settled vendor day against a local total that runs on for another few hours
+  would show a shortfall that is only the clock.
+
+  This is a shorter period than "this month". It is the only one over which
+  subtraction means anything, and a smaller true comparison is worth more
+  than a larger false one.
+
+  It is also held inside the current calendar month, so it sits on the same
+  page as the month-to-date figure beside it and the vendor request that
+  serves both stays inside one page of daily buckets. Both bounds are whole
+  UTC days either way, so the comparison keeps its meaning; it simply does
+  not reach back across a month boundary.
+
+  null while no whole day has yet elapsed inside it - the honest state, not a
+  failure, and what the first of any month looks like.
+*/
+function comparableWindow(now: Date): VendorComparableWindow | null {
+  const boundary = new Date(PRODUCTION_ATTRIBUTION_BOUNDARY_ISO);
+  const boundaryDay = startOfUtcDay(boundary);
+
+  const firstFullDay =
+    boundaryDay.getTime() === boundary.getTime()
+      ? boundaryDay
+      : new Date(
+          Date.UTC(
+            boundary.getUTCFullYear(),
+            boundary.getUTCMonth(),
+            boundary.getUTCDate() + 1
+          )
+        );
+
+  const monthStart = startOfUtcMonth(now);
+  const start =
+    firstFullDay.getTime() > monthStart.getTime() ? firstFullDay : monthStart;
+
+  const end = startOfUtcDay(now);
+
+  if (end.getTime() <= start.getTime()) {
+    return null;
+  }
+
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
 /*
@@ -383,14 +449,28 @@ export type ApiCostMetrics = {
     perUser: UserUsageRow[];
   };
   /*
-    F1 - what the vendor recorded for the same month, beside what this
-    codebase estimated. Variance is only offered when the two describe the
-    same thing; see the comment on the field itself.
+    F1 - what the vendor recorded, beside what this codebase estimated.
+
+    F1.1 - "the same month" turned out not to be the same thing. The vendor's
+    month starts on the 1st; local production accounting starts at the
+    attribution boundary. Subtracting one from the other measured the gap
+    between two calendars and reported it as estimation error. The variance
+    now belongs to comparablePeriod and to nothing else.
   */
   vendor: {
+    /* The vendor's month-to-date total: a spending overview, not the comparison. */
     openAiCostUsd: ClassifiedMetric<number>;
     scopeNote: string;
     fetchedAt: string | null;
+    /*
+      F1.1 - the like-for-like window, null until a whole settled day exists
+      after attribution began. Every figure below is scoped to it.
+    */
+    comparablePeriod: VendorComparableWindow | null;
+    comparableNote: string;
+    localComparableCostUsd: ClassifiedMetric<number>;
+    localComparableCalls: ClassifiedMetric<number>;
+    vendorComparableCostUsd: ClassifiedMetric<number>;
     varianceUsd: ClassifiedMetric<number>;
     variancePercent: ClassifiedMetric<number>;
     creditBalanceNote: string;
@@ -474,6 +554,8 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
   const now = new Date();
   const monthStart = startOfUtcMonth(now).toISOString();
   const monthEnd = startOfNextUtcMonth(now).toISOString();
+  /* F1.1 - derived once and used for both halves of the comparison. */
+  const comparable = comparableWindow(now);
 
   const [
     { data: monthRows, error: rowsError },
@@ -492,7 +574,11 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     getBudgetSummary(now),
     fetchAllUsageRows(),
     fetchProductionExternalUsage(monthStart, monthEnd),
-    fetchVendorMonthCostUsd({ monthStartIso: monthStart, nowIso: now.toISOString() }),
+    fetchVendorMonthCostUsd({
+      monthStartIso: monthStart,
+      nowIso: now.toISOString(),
+      comparableWindow: comparable,
+    }),
   ]);
 
   /*
@@ -603,12 +689,49 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
 
     The local side of the comparison is production-attributed spend, the same
     figure the cards above show - never legacy or preview usage.
+
+    F1.1 - scope alone was not enough. The two sides also have to cover the
+    same hours, and month-to-date against post-attribution spend did not:
+    with production accounting only hours old, the vendor's whole month was
+    subtracted from almost nothing and the console reported -100%, as though
+    the estimate had failed completely. Everything compared below is bounded
+    by comparableWindow() on both sides.
   */
   const vendorAvailable = vendorCost.available;
-  const vendorComparable = vendorAvailable && vendorCost.scope === "PROJECT";
-  const localProductionCostUsd = monthUnavailable
-    ? null
-    : aggregation.thisMonth.costUsd;
+  const vendorProjectScoped = vendorAvailable && vendorCost.scope === "PROJECT";
+
+  /*
+    F1.1 - the local half of the comparison, bounded by exactly the instants
+    the vendor figure covers.
+
+    Reuses the all-time production rows rather than issuing another query:
+    they are already split by environment, so legacy, preview, branch and
+    development traffic cannot reach this sum, and the row cap that bounds
+    them keeps the newest rows - which is always where this window is.
+  */
+  const comparableRows =
+    comparable === null || allTimeFetch.unavailable
+      ? null
+      : allTimeFetch.split.production.filter((row) => {
+          const at = new Date(row.created_at).getTime();
+          return (
+            Number.isFinite(at) &&
+            at >= new Date(comparable.startIso).getTime() &&
+            at < new Date(comparable.endIso).getTime()
+          );
+        });
+
+  const localComparableCalls = comparableRows === null ? null : comparableRows.length;
+
+  const localComparableCostUsd =
+    comparableRows === null
+      ? null
+      : comparableRows.reduce(
+          (sum, row) =>
+            sum +
+            (typeof row.estimated_cost_usd === "number" ? row.estimated_cost_usd : 0),
+          0
+        );
 
   const vendorScopeNote = vendorAvailable
     ? vendorCost.scope === "PROJECT"
@@ -622,26 +745,89 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     ? metric(vendorCost.amountUsd, "EXACT_INTERNAL_DATA", vendorScopeNote)
     : metric(0, "NOT_AVAILABLE", vendorScopeNote);
 
-  const varianceUsdMetric: ClassifiedMetric<number> =
-    vendorComparable && localProductionCostUsd !== null
-      ? metric(
-          Math.round((localProductionCostUsd - vendorCost.amountUsd) * 1_000_000) / 1_000_000,
-          "DERIVED_ESTIMATE",
-          "local production estimate minus vendor-recorded cost - positive means this codebase estimated high"
-        )
+  /*
+    F1.1 - the vendor's cost for the comparable window. Requires the figure
+    to be project-scoped: an organization-wide total may include work this
+    codebase never made, and a one-project estimate minus an all-projects
+    bill produces a difference that looks like estimation error and is not.
+  */
+  const vendorComparableCostUsd = vendorProjectScoped
+    ? vendorCost.comparableAmountUsd
+    : null;
+
+  /*
+    F1.1 - accuracy is only measurable where there was something to measure.
+    With no production call in the window, a variance of $0.00 would read as
+    a flawless estimate and -100% as a total miss. Both are verdicts on
+    estimation quality that no call was ever made to support, and the second
+    is exactly what this phase exists to remove from the screen.
+  */
+  const measurable =
+    comparable !== null &&
+    vendorComparableCostUsd !== null &&
+    localComparableCostUsd !== null &&
+    localComparableCalls !== null &&
+    localComparableCalls > 0
+      ? { localUsd: localComparableCostUsd, vendorUsd: vendorComparableCostUsd }
+      : null;
+
+  const comparableNote =
+    comparable === null
+      ? `No comparable period yet. OpenAI's Costs endpoint reports whole UTC days only, so the first full day after production attribution began (${PRODUCTION_ATTRIBUTION_BOUNDARY_ISO}) has to finish before the vendor's figure and this estimate can describe the same hours.`
+      : localComparableCalls === null
+        ? `Local usage could not be read, so the comparable period ${comparable.startIso} to ${comparable.endIso} cannot be scored - this is a failed read, not a measurement of zero.`
+        : localComparableCalls === 0
+          ? `No comparable Production OpenAI calls yet. ${comparable.startIso} to ${comparable.endIso} is settled on both sides, but no production call was made in it, so estimate accuracy cannot be judged.`
+          : `Both figures cover ${comparable.startIso} to ${comparable.endIso} - whole settled UTC days, production-attributed only, scoped to the Career Élan project.`;
+
+  const localComparableCostMetric: ClassifiedMetric<number> =
+    localComparableCostUsd === null
+      ? metric(0, "NOT_AVAILABLE", comparableNote)
       : metric(
-          0,
-          "NOT_AVAILABLE",
-          vendorAvailable
-            ? "variance needs the vendor figure scoped to the Career Élan project - set OPENAI_PROJECT_ID"
-            : "variance needs a vendor figure to compare against"
+          Math.round(localComparableCostUsd * 1_000_000) / 1_000_000,
+          "DERIVED_ESTIMATE",
+          `local token x price estimate for the comparable period only. ${comparableNote}`
         );
 
+  const localComparableCallsMetric: ClassifiedMetric<number> =
+    localComparableCalls === null
+      ? metric(0, "NOT_AVAILABLE", comparableNote)
+      : metric(
+          localComparableCalls,
+          "EXACT_INTERNAL_DATA",
+          "production OpenAI calls inside the comparable period"
+        );
+
+  const vendorComparableCostMetric: ClassifiedMetric<number> =
+    vendorComparableCostUsd === null
+      ? metric(
+          0,
+          "NOT_AVAILABLE",
+          comparable === null
+            ? comparableNote
+            : vendorAvailable
+              ? "the vendor figure is not scoped to the Career Élan project - set OPENAI_PROJECT_ID"
+              : "the OpenAI Costs endpoint could not be read - not a measurement of zero"
+        )
+      : metric(
+          vendorComparableCostUsd,
+          "EXACT_INTERNAL_DATA",
+          "OpenAI-recorded cost for the comparable period, Career Élan project only"
+        );
+
+  const varianceUsdMetric: ClassifiedMetric<number> = measurable
+    ? metric(
+        Math.round((measurable.localUsd - measurable.vendorUsd) * 1_000_000) / 1_000_000,
+        "DERIVED_ESTIMATE",
+        "local production estimate minus vendor-recorded cost over the comparable period - positive means this codebase estimated high"
+      )
+    : metric(0, "NOT_AVAILABLE", comparableNote);
+
   const variancePercentMetric: ClassifiedMetric<number> =
-    vendorComparable && localProductionCostUsd !== null && vendorCost.amountUsd > 0
+    measurable && measurable.vendorUsd > 0
       ? metric(
           Math.round(
-            ((localProductionCostUsd - vendorCost.amountUsd) / vendorCost.amountUsd) * 10000
+            ((measurable.localUsd - measurable.vendorUsd) / measurable.vendorUsd) * 10000
           ) / 100,
           "DERIVED_ESTIMATE",
           "positive means the local estimate exceeds what the vendor recorded"
@@ -649,9 +835,9 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       : metric(
           0,
           "NOT_AVAILABLE",
-          vendorComparable
-            ? "vendor recorded no cost this month, so a percentage difference has no meaning"
-            : "no like-for-like vendor figure to compare against"
+          measurable
+            ? "the vendor recorded no cost in the comparable period, so a percentage difference has no meaning"
+            : comparableNote
         );
 
   return {
@@ -699,6 +885,11 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       openAiCostUsd: vendorCostMetric,
       scopeNote: vendorScopeNote,
       fetchedAt: vendorAvailable ? vendorCost.fetchedAt : null,
+      comparablePeriod: comparable,
+      comparableNote,
+      localComparableCostUsd: localComparableCostMetric,
+      localComparableCalls: localComparableCallsMetric,
+      vendorComparableCostUsd: vendorComparableCostMetric,
       varianceUsd: varianceUsdMetric,
       variancePercent: variancePercentMetric,
       /*

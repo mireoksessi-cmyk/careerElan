@@ -30,11 +30,29 @@ const REQUEST_TIMEOUT_MS = 10_000;
 
 export type VendorCostScope = "PROJECT" | "ORGANIZATION";
 
+/*
+  F1.1 - the window over which the vendor figure and local telemetry can
+  honestly be subtracted from one another. Both sides must name the same
+  project and the same instants; see comparableWindow() in
+  lib/admin/queries/apiCosts.ts for how the bounds are derived and why they
+  are whole UTC days.
+*/
+export type VendorComparableWindow = { startIso: string; endIso: string };
+
 export type VendorCostResult =
   | {
       available: true;
-      /* USD the vendor recorded for the requested window. */
+      /* USD the vendor recorded for the calendar month to date. */
       amountUsd: number;
+      /*
+        F1.1 - the same USD figure restricted to whole settled daily buckets
+        inside the comparable window, so it can be set against a local
+        estimate covering exactly those instants. null when no window was
+        requested, when the window has not opened yet, or when the response
+        could not be partitioned - never 0, which would read as "the vendor
+        recorded nothing".
+      */
+      comparableAmountUsd: number | null;
       /*
         PROJECT means the figure was filtered to the configured Career Élan
         project and is comparable with local telemetry. ORGANIZATION means it
@@ -58,6 +76,14 @@ type CostsBucketResult = {
 };
 
 type CostsBucket = {
+  /*
+    Unix seconds, and required by the documented schema. F1.1 partitions on
+    these rather than trusting the requested range, because one request now
+    answers two questions and only the bucket itself says which window it
+    belongs to.
+  */
+  start_time?: unknown;
+  end_time?: unknown;
   results?: CostsBucketResult[] | null;
 };
 
@@ -89,39 +115,90 @@ function projectId(): string | null {
 }
 
 /*
-  Sums every bucket the endpoint returns for the window. The API groups costs
-  into time buckets, each carrying one or more result amounts; anything
-  missing or non-numeric contributes nothing rather than being guessed at.
-  Non-USD amounts are ignored for the same reason - converting them here
-  would invent a rate.
+  One bucket's USD. Each carries one or more result amounts; anything missing
+  or non-numeric contributes nothing rather than being guessed at. Non-USD
+  amounts are ignored for the same reason - converting them here would invent
+  a rate.
 */
-function sumUsd(payload: CostsResponse): number | null {
+function bucketUsd(bucket: CostsBucket): number {
+  const results = bucket?.results;
+  if (!Array.isArray(results)) return 0;
+
+  let total = 0;
+
+  for (const result of results) {
+    const value = result?.amount?.value;
+    const currency = result?.amount?.currency;
+
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (typeof currency === "string" && currency.toLowerCase() !== "usd") {
+      continue;
+    }
+
+    total += value;
+  }
+
+  return total;
+}
+
+/*
+  F1.1 - splits one response into the two figures the console needs.
+
+  `month` sums the buckets belonging to the calendar month; `comparable` sums
+  only those lying wholly inside the comparable window. A bucket that
+  straddles a boundary is never apportioned - the endpoint's smallest unit is
+  a whole day, so any part of one is all of it or none of it, and splitting it
+  by proportion would be a guess dressed as accounting.
+
+  If a bucket arrives without usable timestamps there is no way to say which
+  side it falls on, so the comparable figure is withdrawn rather than
+  understated.
+*/
+function partitionUsd(
+  payload: CostsResponse,
+  monthStartMs: number,
+  window: VendorComparableWindow | null
+): { monthUsd: number; comparableUsd: number | null } | null {
   const buckets = payload.data;
 
   if (!Array.isArray(buckets)) {
     return null;
   }
 
-  let total = 0;
+  const windowStartMs = window ? new Date(window.startIso).getTime() : 0;
+  const windowEndMs = window ? new Date(window.endIso).getTime() : 0;
+
+  let monthUsd = 0;
+  let comparableUsd: number | null = window ? 0 : null;
 
   for (const bucket of buckets) {
-    const results = bucket?.results;
-    if (!Array.isArray(results)) continue;
+    const start = bucket?.start_time;
+    const end = bucket?.end_time;
+    const usable = typeof start === "number" && typeof end === "number";
 
-    for (const result of results) {
-      const value = result?.amount?.value;
-      const currency = result?.amount?.currency;
+    if (!usable) {
+      /*
+        Undatable bucket: it cannot be attributed to the month either, so the
+        month figure is no longer trustworthy and the whole read fails rather
+        than reporting a total that quietly dropped a day.
+      */
+      return null;
+    }
 
-      if (typeof value !== "number" || !Number.isFinite(value)) continue;
-      if (typeof currency === "string" && currency.toLowerCase() !== "usd") {
-        continue;
-      }
+    const startMs = start * 1000;
+    const endMs = end * 1000;
+    const amount = bucketUsd(bucket);
 
-      total += value;
+    if (startMs >= monthStartMs) {
+      monthUsd += amount;
+    }
+
+    if (comparableUsd !== null && startMs >= windowStartMs && endMs <= windowEndMs) {
+      comparableUsd += amount;
     }
   }
 
-  return total;
+  return { monthUsd, comparableUsd };
 }
 
 /*
@@ -136,6 +213,7 @@ function sumUsd(payload: CostsResponse): number | null {
 export async function fetchVendorMonthCostUsd(params: {
   monthStartIso: string;
   nowIso: string;
+  comparableWindow: VendorComparableWindow | null;
 }): Promise<VendorCostResult> {
   const key = adminKey();
 
@@ -145,15 +223,39 @@ export async function fetchVendorMonthCostUsd(params: {
 
   const project = projectId();
 
+  const monthStartMs = new Date(params.monthStartIso).getTime();
+  const window = params.comparableWindow;
+
+  /*
+    F1.1 - one request, not two. The range asked for is whichever of the two
+    windows starts earlier, and the buckets are then sorted into the right
+    figure by their own timestamps. Asking twice would double the latency of
+    an admin page render to learn nothing extra.
+
+    The caller keeps the comparable window inside the current month, so this
+    is the month start in practice; the Math.min stands so that a wider window
+    would still be fetched rather than silently returning nothing.
+  */
+  const requestStartMs = window
+    ? Math.min(monthStartMs, new Date(window.startIso).getTime())
+    : monthStartMs;
+
   const url = new URL(COSTS_ENDPOINT);
-  url.searchParams.set(
-    "start_time",
-    String(Math.floor(new Date(params.monthStartIso).getTime() / 1000))
-  );
+  url.searchParams.set("start_time", String(Math.floor(requestStartMs / 1000)));
   url.searchParams.set(
     "end_time",
     String(Math.floor(new Date(params.nowIso).getTime() / 1000))
   );
+  /*
+    Stated rather than defaulted. The endpoint currently supports only 1d and
+    defaults to it, but the whole-bucket partitioning above is only sound for
+    a known width, so it is pinned here where that assumption lives.
+  */
+  url.searchParams.set("bucket_width", "1d");
+  /*
+    The documented maximum, against a range of at most one month of daily
+    buckets, so the response cannot paginate and no cursor handling is needed.
+  */
   url.searchParams.set("limit", "180");
 
   if (project) {
@@ -173,15 +275,16 @@ export async function fetchVendorMonthCostUsd(params: {
     }
 
     const payload = (await response.json()) as CostsResponse;
-    const amountUsd = sumUsd(payload);
+    const totals = partitionUsd(payload, monthStartMs, window);
 
-    if (amountUsd === null) {
+    if (totals === null) {
       return { available: false, reason: "RESPONSE_UNREADABLE" };
     }
 
     return {
       available: true,
-      amountUsd,
+      amountUsd: totals.monthUsd,
+      comparableAmountUsd: totals.comparableUsd,
       scope: project ? "PROJECT" : "ORGANIZATION",
       fetchedAt: new Date().toISOString(),
     };
