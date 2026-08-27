@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { checkRateLimit } from "@/lib/security/rateLimiter";
+import {
+  recordExternalApiUsage,
+  classifyExternalHttpStatus,
+} from "@/lib/externalApi/usageTelemetry";
 
 type JSearchJob = {
   job_id?: string;
@@ -407,14 +411,58 @@ const searchQuery = parts.join(" ");
         pageUrl.searchParams.set("date_posted", datePosted);
       }
 
-      return fetch(pageUrl.toString(), {
-        method: "GET",
-        headers: {
-          "x-rapidapi-key": resolvedApiKey,
-          "x-rapidapi-host": "jsearch.p.rapidapi.com",
-        },
-        cache: "no-store",
-      });
+      /*
+        API-C1 - recorded here rather than at the route entry, because this
+        is what RapidAPI actually bills. One Career Élan search can call
+        this function more than once (see the pagination-enrichment note
+        above), and each of those is a separate upstream request that will
+        appear on the invoice - so each writes its own row.
+
+        The URL is never passed to telemetry: it carries the user's search
+        text. Only the fact of the request, its outcome and how long it took
+        are recorded.
+      */
+      const startedAt = Date.now();
+
+      try {
+        const response = await fetch(pageUrl.toString(), {
+          method: "GET",
+          headers: {
+            "x-rapidapi-key": resolvedApiKey,
+            "x-rapidapi-host": "jsearch.p.rapidapi.com",
+          },
+          cache: "no-store",
+        });
+
+        await recordExternalApiUsage({
+          provider: "rapidapi_jsearch",
+          operation: "JOB_SEARCH",
+          status: response.ok ? "success" : "error",
+          httpStatusClass: classifyExternalHttpStatus(response.status),
+          durationMs: Date.now() - startedAt,
+          userId: user.id,
+        });
+
+        return response;
+      } catch (requestError) {
+        /*
+          The request left this process and did not come back with a status -
+          a network failure or timeout. Still counted, because whether
+          RapidAPI billed for it is not knowable from here and quietly
+          dropping it would understate usage. Rethrown unchanged so the
+          route's own error handling is untouched.
+        */
+        await recordExternalApiUsage({
+          provider: "rapidapi_jsearch",
+          operation: "JOB_SEARCH",
+          status: "error",
+          httpStatusClass: "network",
+          durationMs: Date.now() - startedAt,
+          userId: user.id,
+        });
+
+        throw requestError;
+      }
     };
 
     function extractRawJobs(data: any): JSearchJob[] {
