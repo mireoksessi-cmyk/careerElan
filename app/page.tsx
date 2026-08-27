@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import CareerElanFooter from "@/components/marketing/CareerElanFooter";
@@ -40,8 +41,59 @@ function HomePageBody() {
   const { user, loading } = useLogin();
   const showAuthCta = !loading && !user;
 
+  /*
+    A suspended account signs in successfully - suspension is a flag on the
+    profile, not a change to the Supabase credential - and middleware then
+    turns them away from every protected route, sending them here with
+    ?accountSuspended=1 (see middleware.ts). Until now nothing read that,
+    so the person landed back on the marketing page with no explanation and
+    no way to tell a suspension apart from a login that silently failed.
+
+    Read the same way the auth modal reads its own parameters
+    (components/marketing/PublicAuthActions.tsx): URLSearchParams over
+    window.location.search inside an effect, and the parameter is left in
+    the URL afterwards, exactly as the existing ones are.
+
+    Says only that the account is suspended and that access resumes when it
+    is reactivated. Not why, not by whom, and no support address - there is
+    no contact route in this UI to promise one.
+  */
+  const [showSuspendedNotice, setShowSuspendedNotice] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("accountSuspended") === "1") {
+      setShowSuspendedNotice(true);
+    }
+  }, []);
+
   return (
   <main className="min-h-screen w-screen overflow-x-hidden bg-white text-slate-950">
+    {/*
+      Shown only for ?accountSuspended=1. Dismissing it clears local state
+      and nothing else - no request, no write, no session change.
+    */}
+    {showSuspendedNotice && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <h2 className="text-xl font-black text-slate-950">Account suspended</h2>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Your account has been suspended. You won&apos;t be able to use Career
+            Élan until it is reactivated.
+          </p>
+          <div className="mt-5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowSuspendedNotice(false)}
+              className="rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     <section className="relative overflow-hidden bg-gradient-to-br from-white via-blue-50 to-slate-50">
       <div className="pointer-events-none absolute -left-40 top-24 h-96 w-96 rounded-full bg-blue-200/50 blur-3xl" />
       <div className="pointer-events-none absolute -right-40 top-0 h-[520px] w-[520px] rounded-full bg-blue-300/40 blur-3xl" />
