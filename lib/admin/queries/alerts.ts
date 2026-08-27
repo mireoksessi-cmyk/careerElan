@@ -12,7 +12,6 @@ import { supabaseAdmin } from "../../supabaseAdmin";
 import { getStuckPendingGenerationsHealth, getRecentGenerationOutcomeHealth } from "../../observability/health";
 import { minutesAgo } from "./shared";
 import { ALERT_THRESHOLDS } from "../alertThresholds";
-import { getBudgetSummary } from "../../openai/budget";
 
 export type AlertSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "INFO";
 
@@ -140,21 +139,21 @@ export async function getAlerts(): Promise<AdminAlert[]> {
     }
   }
 
-  const budget = await getBudgetSummary();
-  if (budget.configured && budget.status !== "NORMAL") {
-    alerts.push({
-      key: "openai_budget_" + budget.status.toLowerCase(),
-      severity: budget.status === "WARNING" ? "MEDIUM" : "CRITICAL",
-      title:
-        budget.status === "BUDGET_EXCEEDED"
-          ? "OpenAI monthly budget exceeded"
-          : budget.status === "CRITICAL"
-            ? "OpenAI monthly budget critical (90%+)"
-            : "OpenAI monthly budget warning (80%+)",
-      detail: `${budget.budgetUsedPercent}% of the $${budget.effectiveBudgetUsd} effective monthly budget used ($${budget.monthSpendUsd.toFixed(2)} spent).`,
-      status: "OPEN",
-    });
-  }
+  /*
+    API-D2 - the OpenAI monthly-budget alert that stood here has been removed.
+
+    It described the pre-D2 model: a configured monthly figure plus that
+    month's manual recharges, reset by the calendar. OpenAI money is now
+    tracked against an operator-confirmed credit balance that resets only when
+    a new balance is confirmed, so this card was reporting a percentage of a
+    ceiling nothing measures itself against any more - and presenting it as an
+    open alert implied it was still watching something.
+
+    Deliberately not replaced here. The confirmed balance, tracked spend,
+    estimated remaining and the 80/90/100 checkpoint status all live on
+    /admin/api-costs, and a second copy on this page would be one more place
+    for the two to disagree.
+  */
 
   return alerts;
 }
