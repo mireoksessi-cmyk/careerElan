@@ -81,12 +81,62 @@ export type CostEstimate =
   telemetry.ts) persists that honestly rather than substituting a
   guessed number.
 */
+/*
+  API-A - what a costless row actually means. The stored
+  cost_classification cannot express this: its CHECK constraint accepts
+  only ESTIMATED_COST, EXACT_PROVIDER_DATA and UNKNOWN_PRICING, so a row
+  that failed before returning any usage has always been written as
+  UNKNOWN_PRICING alongside genuinely unpriced models. Widening the column
+  would need a migration, and would still leave every historical row
+  mislabelled.
+
+  So the distinction is drawn where the rows are read instead, from the
+  columns already stored - the model name and whether token counts exist.
+  That corrects the existing rows as well as future ones, and requires no
+  schema change.
+
+    PRICED          a known model with usable token counts
+    UNKNOWN_PRICING the model itself has no confirmed price entry
+    NO_USAGE_DATA   the model is priced, but the call returned no usage
+                    to price - a failure or timeout that never got far
+                    enough to report tokens
+*/
+export type CostOutcome = "PRICED" | "UNKNOWN_PRICING" | "NO_USAGE_DATA";
+
+export function classifyCostOutcome(
+  model: string,
+  inputTokens: number | null,
+  outputTokens: number | null
+): CostOutcome {
+  /*
+    Model first, deliberately. An unpriced model stays unpriced whether or
+    not that particular call reported usage, and calling it NO_USAGE_DATA
+    would hide a real gap in the pricing table.
+  */
+  if (!PRICING_BY_MODEL.has(model)) {
+    return "UNKNOWN_PRICING";
+  }
+
+  if (inputTokens === null || outputTokens === null) {
+    return "NO_USAGE_DATA";
+  }
+
+  return "PRICED";
+}
+
 export function estimateCostUsd(
   model: string,
   inputTokens: number | null,
   outputTokens: number | null
 ): CostEstimate {
   const pricing = PRICING_BY_MODEL.get(model);
+
+  /*
+    Both non-priced outcomes still persist as UNKNOWN_PRICING, because that
+    is the only value the column accepts for them. The reason is recovered
+    at read time by classifyCostOutcome() above; nothing here fabricates a
+    cost for either case.
+  */
   if (!pricing || inputTokens === null || outputTokens === null) {
     return { classification: "UNKNOWN_PRICING", costUsd: null };
   }

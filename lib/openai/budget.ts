@@ -32,7 +32,14 @@ export type BudgetSummary =
       budgetUsedPercent: number;
       status: BudgetStatus;
     }
-  | { configured: false };
+  /*
+    API-A - two different reasons there is no usable budget picture, kept
+    apart so the console can say which. NOT_CONFIGURED means no budget was
+    ever set. SPEND_UNAVAILABLE means one is set but this month's spend
+    could not be read, which is emphatically not the same as spending
+    nothing.
+  */
+  | { configured: false; reason?: "NOT_CONFIGURED" | "SPEND_UNAVAILABLE" };
 
 export function getConfiguredMonthlyBudgetUsd(): number | null {
   const raw = process.env.OPENAI_MONTHLY_BUDGET_USD;
@@ -81,7 +88,7 @@ function round6(n: number): number {
 */
 export async function getBudgetSummary(now = new Date()): Promise<BudgetSummary> {
   const baseBudgetUsd = getConfiguredMonthlyBudgetUsd();
-  if (baseBudgetUsd === null) return { configured: false };
+  if (baseBudgetUsd === null) return { configured: false, reason: "NOT_CONFIGURED" };
 
   const [{ data, error }, rechargesUsdRaw] = await Promise.all([
     supabaseAdmin
@@ -92,9 +99,34 @@ export async function getBudgetSummary(now = new Date()): Promise<BudgetSummary>
     getMonthlyRechargesUsd(now),
   ]);
 
-  const monthSpendUsd = error
-    ? 0
-    : (data ?? []).reduce((sum, row) => sum + (typeof row.estimated_cost_usd === "number" ? row.estimated_cost_usd : 0), 0);
+  /*
+    API-A - the read failing is not the same as having spent nothing, and
+    this is the one place where confusing the two is dangerous. The old
+    code substituted 0 here, which made a broken query look like a healthy
+    0% month: no threshold could ever be reached, so no 80/90/100 alert
+    would fire while spend was in fact unknown and possibly over budget,
+    and the console would show a reassuring bar.
+
+    Returning the unconfigured shape instead means every caller stops.
+    checkAndTriggerBudgetAlerts() returns before evaluating any threshold,
+    so nothing is claimed from openai_budget_alert_state and no misleading
+    email goes out; the month's thresholds stay available for a later
+    evaluation that can actually read the data. The alerts tab raises no
+    budget card, and the console reports that the figure is unavailable
+    rather than printing a zero.
+
+    Alert monitoring failing this way never reaches the product request
+    that triggered it - the caller already swallows its own errors so a
+    telemetry or budget problem cannot fail somebody's generation.
+  */
+  if (error) {
+    return { configured: false, reason: "SPEND_UNAVAILABLE" };
+  }
+
+  const monthSpendUsd = (data ?? []).reduce(
+    (sum, row) => sum + (typeof row.estimated_cost_usd === "number" ? row.estimated_cost_usd : 0),
+    0
+  );
 
   const rechargesUsd = round6(rechargesUsdRaw);
   const effectiveBudgetUsd = round6(baseBudgetUsd + rechargesUsd);
