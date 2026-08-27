@@ -92,22 +92,69 @@ export default async function ApiCostsPage() {
         F1 - the vendor's own accounting beside this codebase's estimate. The
         local figure is unchanged and still drives the budget alerts; this
         section exists to say how close it has been.
+
+        F1.1 - the top row is the month: two overview figures that are NOT a
+        comparison, because they start on different dates. The comparison is
+        the row below, where both sides are bounded by the same settled days.
       */}
-      <Section title="OpenAI Vendor Reconciliation — This Month">
+      <Section title="OpenAI Vendor Reconciliation">
         <CardGrid>
           <MetricCard
-            label="Local Production Estimate (USD)"
+            label="Local Production Estimate — This Month (USD)"
             metric={m.openAi.thisMonth.cost}
             format={(v) => usd(Number(v))}
           />
           <MetricCard
-            label="OpenAI Recorded Cost (USD)"
+            label="OpenAI Recorded Cost — This Month (USD)"
             metric={{
               ...m.vendor.openAiCostUsd,
               value:
                 m.vendor.openAiCostUsd.classification === "NOT_AVAILABLE"
                   ? null
                   : m.vendor.openAiCostUsd.value,
+            }}
+            format={(v) => (v === null ? "—" : usd(Number(v)))}
+          />
+        </CardGrid>
+
+        <p className="mt-4 text-sm font-medium text-slate-700">
+          Comparable period
+          {m.vendor.comparablePeriod
+            ? `: ${m.vendor.comparablePeriod.startIso} → ${m.vendor.comparablePeriod.endIso}`
+            : ": none yet"}
+        </p>
+
+        <CardGrid>
+          <MetricCard
+            label="Production Calls — Comparable Period"
+            metric={{
+              ...m.vendor.localComparableCalls,
+              value:
+                m.vendor.localComparableCalls.classification === "NOT_AVAILABLE"
+                  ? null
+                  : m.vendor.localComparableCalls.value,
+            }}
+            format={(v) => (v === null ? "—" : Number(v).toLocaleString())}
+          />
+          <MetricCard
+            label="Local Estimate — Comparable Period (USD)"
+            metric={{
+              ...m.vendor.localComparableCostUsd,
+              value:
+                m.vendor.localComparableCostUsd.classification === "NOT_AVAILABLE"
+                  ? null
+                  : m.vendor.localComparableCostUsd.value,
+            }}
+            format={(v) => (v === null ? "—" : usd(Number(v)))}
+          />
+          <MetricCard
+            label="OpenAI Recorded Cost — Comparable Period (USD)"
+            metric={{
+              ...m.vendor.vendorComparableCostUsd,
+              value:
+                m.vendor.vendorComparableCostUsd.classification === "NOT_AVAILABLE"
+                  ? null
+                  : m.vendor.vendorComparableCostUsd.value,
             }}
             format={(v) => (v === null ? "—" : usd(Number(v)))}
           />
@@ -136,6 +183,10 @@ export default async function ApiCostsPage() {
         </CardGrid>
 
         <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">
+          {m.vendor.comparableNote}
+        </div>
+
+        <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">
           {m.vendor.scopeNote}
           {m.vendor.fetchedAt
             ? ` Read from OpenAI at ${new Date(m.vendor.fetchedAt).toLocaleString()}.`
