@@ -160,22 +160,30 @@ export default async function ApiCostsPage({
                 ))}
               </div>
 
+              {/*
+                Kept to the bare percentages. The two marks sit a tenth of the
+                track apart, so anything wordier overlaps as soon as the
+                console is opened in a narrower window; what they mean is one
+                line further down, where there is room to say it.
+              */}
               <div className="relative mt-1 h-4 text-[10px] text-slate-400">
                 <span className="absolute left-0">0%</span>
                 <span className="absolute -translate-x-1/2" style={{ left: "80%" }}>
-                  80% alert
+                  80%
                 </span>
                 <span className="absolute -translate-x-1/2" style={{ left: "90%" }}>
-                  90% alert
+                  90%
                 </span>
                 <span className="absolute right-0">100%</span>
               </div>
 
               <div className="mt-3 text-xs text-slate-500">
-                Estimated remaining: {usd(credit.estimatedRemainingUsd)}. Fill is
-                the local Production estimate measured against the balance you
-                confirmed on {new Date(credit.checkpoint.createdAt).toLocaleString()} —
-                not OpenAI&apos;s live balance.
+                Estimated remaining: {usd(credit.estimatedRemainingUsd)}. The 80%
+                and 90% marks are where alert emails fire; 100% is estimated
+                exhaustion. Fill is the local Production estimate measured
+                against the balance you confirmed on{" "}
+                {new Date(credit.checkpoint.createdAt).toLocaleString()} — not
+                OpenAI&apos;s live balance.
               </div>
             </div>
 
