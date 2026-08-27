@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  recordExternalApiUsage,
+  classifyExternalHttpStatus,
+} from "@/lib/externalApi/usageTelemetry";
 
 type GoogleSuggestion = {
   placePrediction?: {
@@ -69,6 +73,19 @@ export async function GET(req: Request) {
       );
     }
 
+    /*
+      API-C1 - one row per upstream Places request, recorded around this
+      call because this is the request Google bills for. The route makes
+      exactly one per invocation.
+
+      The body carries the user's typed city text and the response carries
+      their suggestions; neither is passed to telemetry, which takes no
+      parameter capable of holding them. This endpoint is unauthenticated,
+      so rows carry no user - the route is not given an identity it does not
+      otherwise need just to attribute a cost line.
+    */
+    const placesStartedAt = Date.now();
+
     const response = await fetch(
       "https://places.googleapis.com/v1/places:autocomplete",
       {
@@ -87,6 +104,14 @@ export async function GET(req: Request) {
         cache: "no-store",
       }
     );
+
+    await recordExternalApiUsage({
+      provider: "google_places",
+      operation: "PLACES_AUTOCOMPLETE",
+      status: response.ok ? "success" : "error",
+      httpStatusClass: classifyExternalHttpStatus(response.status),
+      durationMs: Date.now() - placesStartedAt,
+    });
 
    if (!response.ok) {
   const errorText = await response.text();
