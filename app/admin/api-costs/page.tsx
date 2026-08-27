@@ -109,6 +109,76 @@ export default async function ApiCostsPage({
 
         {credit.available ? (
           <div className="space-y-4">
+            {/*
+              How much of this checkpoint has been consumed, drawn rather than
+              read off a card. The figures below say the same thing, but a
+              number has to be compared against another number to mean
+              anything, and "$168 of $210" only becomes "nearly out" after the
+              reader does that arithmetic themselves.
+
+              Fill is consumed credit, so a fresh checkpoint is empty and the
+              bar grows toward exhaustion. The width is clamped at 100% while
+              the percentage beside it is not: an overrun is real information,
+              but a bar wider than its track is a rendering bug.
+            */}
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-sm text-slate-600">
+                  {usd(credit.trackedSpendUsd)} of{" "}
+                  {usd(credit.checkpoint.confirmedBalanceUsd)} confirmed credit
+                  estimated consumed
+                </span>
+                <span className="text-sm font-semibold text-slate-900">
+                  {credit.consumedPercent.toFixed(1)}%
+                </span>
+              </div>
+
+              <div className="relative mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full ${
+                    credit.consumedPercent >= 100
+                      ? "bg-red-500"
+                      : credit.consumedPercent >= 90
+                        ? "bg-red-400"
+                        : credit.consumedPercent >= 80
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${Math.min(100, Math.max(0, credit.consumedPercent))}%` }}
+                />
+                {/*
+                  The two thresholds that actually send an email, marked on the
+                  track itself. Without them the colour change at 80% looks
+                  like decoration rather than the operational line it is.
+                */}
+                {[80, 90].map((t) => (
+                  <div
+                    key={t}
+                    className="absolute top-0 h-full w-px bg-slate-400"
+                    style={{ left: `${t}%` }}
+                  />
+                ))}
+              </div>
+
+              <div className="relative mt-1 h-4 text-[10px] text-slate-400">
+                <span className="absolute left-0">0%</span>
+                <span className="absolute -translate-x-1/2" style={{ left: "80%" }}>
+                  80% alert
+                </span>
+                <span className="absolute -translate-x-1/2" style={{ left: "90%" }}>
+                  90% alert
+                </span>
+                <span className="absolute right-0">100%</span>
+              </div>
+
+              <div className="mt-3 text-xs text-slate-500">
+                Estimated remaining: {usd(credit.estimatedRemainingUsd)}. Fill is
+                the local Production estimate measured against the balance you
+                confirmed on {new Date(credit.checkpoint.createdAt).toLocaleString()} —
+                not OpenAI&apos;s live balance.
+              </div>
+            </div>
+
             <CardGrid>
               <MetricCard
                 label="Confirmed OpenAI Balance"
