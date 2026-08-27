@@ -4,6 +4,27 @@ import { Resend } from "resend";
 import { requireAdminPermission, AdminAuthError } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { logAdminAction } from "@/lib/admin/auditLog";
+import {
+  recordExternalApiUsage,
+  classifyExternalHttpStatus,
+  type ExternalApiHttpStatusClass,
+} from "@/lib/externalApi/usageTelemetry";
+
+/*
+  API-C2 - Resend reports a real numeric statusCode on its error object, so
+  the class comes from that rather than from reading the message text, which
+  is not a stable contract. A send that returned no error is a 2xx; an error
+  without a status is one that never got far enough to have one.
+*/
+function resendStatusClass(
+  error: { statusCode?: number | null } | null | undefined
+): ExternalApiHttpStatusClass {
+  if (!error) return "2xx";
+  if (typeof error.statusCode === "number") {
+    return classifyExternalHttpStatus(error.statusCode);
+  }
+  return "unknown";
+}
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -472,6 +493,8 @@ export async function POST(req: NextRequest) {
         ? unsubscribeUrl(baseUrl, adminUnsubscribeToken)
         : null;
 
+      const testStartedAt = Date.now();
+
       try {
         const { error: testError } = await resend.emails.send({
           from,
@@ -495,6 +518,21 @@ export async function POST(req: NextRequest) {
             : {}),
         });
 
+        /*
+          API-C2 - one row per actual Resend request. A test is a real
+          request against the same account and quota as any other, so it is
+          counted like one; the campaign ledger records what was sent, this
+          records what the provider was asked to do.
+        */
+        await recordExternalApiUsage({
+          provider: "resend",
+          operation: "EMAIL_SEND",
+          status: testError ? "error" : "success",
+          httpStatusClass: resendStatusClass(testError),
+          durationMs: Date.now() - testStartedAt,
+          userId: ctx.userId,
+        });
+
         if (testError) {
           return NextResponse.json(
             { error: "The email provider rejected the test message." },
@@ -502,6 +540,19 @@ export async function POST(req: NextRequest) {
           );
         }
       } catch {
+        /*
+          Threw rather than returning a status - the request still left this
+          process, so it is still counted. The response below is unchanged.
+        */
+        await recordExternalApiUsage({
+          provider: "resend",
+          operation: "EMAIL_SEND",
+          status: "error",
+          httpStatusClass: "network",
+          durationMs: Date.now() - testStartedAt,
+          userId: ctx.userId,
+        });
+
         return NextResponse.json(
           { error: "The email provider rejected the test message." },
           { status: 502 }
@@ -630,6 +681,8 @@ export async function POST(req: NextRequest) {
 
     for (const recipient of recipients) {
       attempted++;
+      const sendStartedAt = Date.now();
+
       try {
         /*
           M2B - built per recipient, because the token is bound to that
@@ -673,12 +726,42 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        /*
+          API-C2 - one row per recipient, because this route already sends
+          one Resend request per recipient. A campaign to 100 people is 100
+          provider requests and is counted as 100, not as one campaign - the
+          ledger already records the campaign, and this records what the
+          provider was actually asked to do.
+        */
+        await recordExternalApiUsage({
+          provider: "resend",
+          operation: "EMAIL_SEND",
+          status: sendError ? "error" : "success",
+          httpStatusClass: resendStatusClass(sendError),
+          durationMs: Date.now() - sendStartedAt,
+          userId: ctx.userId,
+        });
+
         if (sendError) {
           failed++;
         } else {
           successful++;
         }
       } catch {
+        /*
+          The request threw rather than returning a status - it still left
+          this process, so it is still counted, with the campaign's own
+          failure handling below unchanged.
+        */
+        await recordExternalApiUsage({
+          provider: "resend",
+          operation: "EMAIL_SEND",
+          status: "error",
+          httpStatusClass: "network",
+          durationMs: Date.now() - sendStartedAt,
+          userId: ctx.userId,
+        });
+
         failed++;
       }
     }

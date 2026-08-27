@@ -3,6 +3,10 @@ import crypto from "node:crypto";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { checkRateLimit } from "@/lib/security/rateLimiter";
+import {
+  recordExternalApiUsage,
+  classifyExternalHttpStatus,
+} from "@/lib/externalApi/usageTelemetry";
 
 /*
   Recovers a forgotten Login ID for accounts that sign in with one.
@@ -299,6 +303,8 @@ async function sendFindLoginIdEmail(
   const expiryNote =
     "This link expires in 10 minutes. If you did not ask to recover your Login ID, you can ignore this email.";
 
+  const startedAt = Date.now();
+
   try {
     const { error } = await new Resend(apiKey).emails.send({
       from,
@@ -320,6 +326,25 @@ async function sendFindLoginIdEmail(
       ].join(""),
     });
 
+    /*
+      API-C2 - one row per actual Resend request. Only the fact of the
+      request is recorded: the recipient address, the recovery token and the
+      Login ID it protects never reach telemetry, which takes no parameter
+      that could carry them.
+    */
+    await recordExternalApiUsage({
+      provider: "resend",
+      operation: "EMAIL_SEND",
+      status: error ? "error" : "success",
+      httpStatusClass: error
+        ? typeof error.statusCode === "number"
+          ? classifyExternalHttpStatus(error.statusCode)
+          : "unknown"
+        : "2xx",
+      durationMs: Date.now() - startedAt,
+      userId,
+    });
+
     if (error) {
       /*
         A marker, not the error. The failure has to be visible to whoever
@@ -333,6 +358,15 @@ async function sendFindLoginIdEmail(
 
     return true;
   } catch {
+    await recordExternalApiUsage({
+      provider: "resend",
+      operation: "EMAIL_SEND",
+      status: "error",
+      httpStatusClass: "network",
+      durationMs: Date.now() - startedAt,
+      userId,
+    });
+
     console.error("FIND LOGIN ID DISPATCH FAILED");
 
     return false;

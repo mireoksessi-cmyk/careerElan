@@ -1,4 +1,8 @@
 import { Resend } from "resend";
+import {
+  recordExternalApiUsage,
+  classifyExternalHttpStatus,
+} from "@/lib/externalApi/usageTelemetry";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 
@@ -254,6 +258,7 @@ export async function GET(request: Request) {
       if (!claimed) continue;
 
       let sendSucceeded = false;
+      const sendStartedAt = Date.now();
 
       try {
         const { error: sendError } = await resend.emails.send(
@@ -281,12 +286,44 @@ export async function GET(request: Request) {
           }
         );
 
+        /*
+          API-C2 - one row per actual Resend request. The idempotency key
+          above means repeating this exact reminder returns Resend's cached
+          result rather than delivering twice, but it is still an upstream
+          request and is still counted.
+
+          The recipient address, job title and company stay out of
+          telemetry; only the fact of the request is recorded.
+        */
+        await recordExternalApiUsage({
+          provider: "resend",
+          operation: "EMAIL_SEND",
+          status: sendError ? "error" : "success",
+          httpStatusClass: sendError
+            ? typeof sendError.statusCode === "number"
+              ? classifyExternalHttpStatus(sendError.statusCode)
+              : "unknown"
+            : "2xx",
+          durationMs: Date.now() - sendStartedAt,
+          userId: application.user_id ?? null,
+        });
+
         sendSucceeded = !sendError;
 
         if (sendError) {
           console.error("FOLLOWUP SEND ERROR =", sendError);
         }
       } catch (sendThrow) {
+        /* Threw rather than returning a status - still an upstream request. */
+        await recordExternalApiUsage({
+          provider: "resend",
+          operation: "EMAIL_SEND",
+          status: "error",
+          httpStatusClass: "network",
+          durationMs: Date.now() - sendStartedAt,
+          userId: application.user_id ?? null,
+        });
+
         console.error("FOLLOWUP SEND ERROR =", sendThrow);
       }
 
