@@ -226,6 +226,23 @@ signature: "",
 type ImportStage = "idle" | "uploaded" | "parsing" | "parsed" | "preview";
 type UploadedResumeKind = "none" | "pdf" | "txt" | "docx" | "other";
 
+/*
+  The failure codes that mean the parser found a file but almost no text in
+  it - a scan, a photograph, a design exported as a single flattened image.
+  Both are raised by lib/documentAnalysis/resumeAnalysisCore.ts and surfaced
+  by the analysis-status route as `code`.
+
+  Deliberately an allowlist of two rather than a catch-all: an unsupported
+  extension, a file over the size limit, a parser exception and a network
+  drop are all different problems with their own existing messages, and none
+  of them is answered by "type it in manually".
+*/
+const UNREADABLE_RESUME_CODES = ["NO_READABLE_TEXT", "NO_TEXT_FOUND"];
+
+function isUnreadableResumeCode(code: unknown): boolean {
+  return typeof code === "string" && UNREADABLE_RESUME_CODES.includes(code);
+}
+
 export default function CareerMemoryPage() {
   const { user, loading, refresh } = useLogin();
   const router = useRouter();
@@ -246,6 +263,18 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   useState<
     "idle" | "uploaded" | "parsing" | "parsed"
   >("idle");
+  /*
+    One-time guidance shown after an import finishes, in whichever of the two
+    ways it can finish that the user needs to hear something about.
+
+    "imported" is not a claim that anything was missed - nothing here measures
+    completeness. It is a prompt to look, because a two-column or heavily
+    designed layout can lose a line without either side noticing.
+
+    "unreadable" is the file that produced almost no text. Held in component
+    state only: dismissing it is a UI act, not a fact worth a database row.
+  */
+  const [importNotice, setImportNotice] = useState<null | "imported" | "unreadable">(null);
   const [coverLetterPreview, setCoverLetterPreview] =
   useState(false);
   const [coverLetterImportMessage, setCoverLetterImportMessage] =
@@ -1931,6 +1960,8 @@ function continueUploadedDashboard() {
     setUploadProgress((prev) => Math.max(prev, 95));
     setImportStage("parsed");
     setImportMessage("Resume analyzed successfully.");
+    /* The one place an import succeeds, so the one place the review prompt is raised. */
+    setImportNotice("imported");
   }
 
 if (!user) {
@@ -2286,6 +2317,11 @@ return;
         analyzeResult.message || "Failed to analyze resume."
       );
 
+      /* Same narrow condition as the polling path - see its comment. */
+      if (isUnreadableResumeCode(analyzeResult.code)) {
+        setImportNotice("unreadable");
+      }
+
       return;
     }
 
@@ -2415,6 +2451,16 @@ return;
         setResumeUploadError(
           statusResult.message || "Failed to analyze resume."
         );
+        /*
+          Only the two codes that mean "this file carried almost no text" -
+          the scanned page, the flattened graphic. Every other failure keeps
+          its own message and raises nothing extra: telling someone whose
+          upload hit a network error to type their resume by hand would be
+          both wrong and discouraging.
+        */
+        if (isUnreadableResumeCode(statusResult.code)) {
+          setImportNotice("unreadable");
+        }
         return;
       }
 
@@ -4229,6 +4275,37 @@ return;
           disabled={templateGateSaving}
           livePreviewUrl={(templateId) => `/api/internal/canonical-career-memory/resume-preview?templateId=${templateId}&format=html&variant=thumbnail`}
         />
+      </div>
+    </div>
+  </div>
+)}
+
+{/*
+  Import guidance. Same overlay convention as the template gate above it, so
+  it reads as part of the product rather than a bolted-on alert. Dismissing
+  it only clears local state - nothing is written anywhere.
+*/}
+{importNotice && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+      <h2 className="text-xl font-black text-slate-950">
+        {importNotice === "imported"
+          ? "Resume imported"
+          : "We couldn't read this resume"}
+      </h2>
+      <p className="mt-3 text-sm leading-6 text-slate-600">
+        {importNotice === "imported"
+          ? "Your resume has been imported. Complex layouts may not be captured perfectly, so please review each section and use Edit to add or correct anything that is missing."
+          : "We couldn't find enough readable text in this file. You can try uploading a text-based PDF, or continue in Career Memory and use Edit to enter your resume information manually."}
+      </p>
+      <div className="mt-5 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setImportNotice(null)}
+          className="rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white"
+        >
+          Got it
+        </button>
       </div>
     </div>
   </div>
