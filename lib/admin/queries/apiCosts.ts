@@ -165,6 +165,136 @@ async function fetchAllUsageRows(): Promise<{
 }
 
 /*
+  API-D - the non-OpenAI providers, counted the same way and shown beside it.
+
+  Production only, and strictly: the filter is environment = 'production',
+  never "not development" and never a coalesce that lets a null through. A
+  row that cannot say where it ran does not belong in a figure describing
+  what customers cost, and the whole point of API-B/C1 was to make that
+  distinguishable.
+
+  Usage is exact - these are counted upstream requests. Cost is not shown at
+  all, because nothing in this deployment proves the subscribed RapidAPI
+  plan, which Places SKU a request bills against, or the Resend tier. A
+  provider whose cost is unknown is reported as unknown rather than folded
+  into a total as zero, which would read as "free".
+*/
+export type ExternalProviderKey =
+  | "rapidapi_jsearch"
+  | "google_places"
+  | "resend";
+
+export type ExternalProviderSummary = {
+  provider: ExternalProviderKey;
+  label: string;
+  unit: string;
+  requests: ClassifiedMetric<number>;
+  successCount: number;
+  failedCount: number;
+  lastActivityAt: string | null;
+  costNote: string;
+};
+
+const EXTERNAL_PROVIDER_LABELS: Record<
+  ExternalProviderKey,
+  { label: string; unit: string; costNote: string }
+> = {
+  rapidapi_jsearch: {
+    label: "RapidAPI / JSearch",
+    unit: "upstream requests",
+    costNote: "subscribed plan pricing not available to this deployment",
+  },
+  google_places: {
+    label: "Google Places",
+    unit: "autocomplete requests",
+    costNote: "per-SKU pricing not available to this deployment",
+  },
+  resend: {
+    label: "Resend",
+    unit: "send requests",
+    costNote: "plan pricing not available to this deployment",
+  },
+};
+
+type ExternalUsageRow = {
+  provider: string;
+  status: string;
+  request_units: number | null;
+  created_at: string;
+};
+
+/*
+  One bounded read for all three providers, grouped in memory - not a query
+  per provider, and not a query per row.
+*/
+async function fetchProductionExternalUsage(
+  monthStart: string,
+  monthEnd: string
+): Promise<{ rows: ExternalUsageRow[]; unavailable: boolean }> {
+  const { data, error } = await supabaseAdmin
+    .from("external_api_usage_events")
+    .select("provider, status, request_units, created_at")
+    .eq("environment", "production")
+    .gte("created_at", monthStart)
+    .lt("created_at", monthEnd)
+    .limit(MAX_USAGE_EVENT_ROWS);
+
+  if (error || !data) {
+    return { rows: [], unavailable: true };
+  }
+
+  return { rows: data as ExternalUsageRow[], unavailable: false };
+}
+
+function summarizeExternalProviders(
+  rows: ExternalUsageRow[],
+  unavailable: boolean
+): ExternalProviderSummary[] {
+  const keys: ExternalProviderKey[] = [
+    "rapidapi_jsearch",
+    "google_places",
+    "resend",
+  ];
+
+  return keys.map((provider) => {
+    const meta = EXTERNAL_PROVIDER_LABELS[provider];
+    const providerRows = rows.filter((row) => row.provider === provider);
+
+    let requests = 0;
+    let successCount = 0;
+    let failedCount = 0;
+    let lastActivityAt: string | null = null;
+
+    for (const row of providerRows) {
+      requests += typeof row.request_units === "number" ? row.request_units : 1;
+      if (row.status === "success") successCount++;
+      else failedCount++;
+      if (lastActivityAt === null || row.created_at > lastActivityAt) {
+        lastActivityAt = row.created_at;
+      }
+    }
+
+    return {
+      provider,
+      label: meta.label,
+      unit: meta.unit,
+      /*
+        A failed read is reported unavailable rather than as a real zero,
+        the same distinction API-A drew for OpenAI. A successful read that
+        found nothing is an ordinary zero.
+      */
+      requests: unavailable
+        ? metric(0, "NOT_AVAILABLE", "provider usage could not be read - not a measurement of zero")
+        : metric(requests, "EXACT_INTERNAL_DATA", "production-attributed upstream requests this month"),
+      successCount,
+      failedCount,
+      lastActivityAt,
+      costNote: meta.costNote,
+    };
+  });
+}
+
+/*
   Admin API Usage Phase 2 - CAD classification for a single already-
   computed summary (works for a PeriodMetrics-style summary or a single
   MonthlySummaryRow, both share UsagePeriodSummary's costCadKnown/
@@ -251,6 +381,21 @@ export type ApiCostMetrics = {
     /* This UTC calendar month only - see lib/openai/usageAggregation.ts's buildUserBreakdown() for "calls" semantics. */
     perUser: UserUsageRow[];
   };
+  /*
+    API-D - the production picture across every metered provider, plus what
+    the money total deliberately leaves out.
+  */
+  production: {
+    externalProviders: ExternalProviderSummary[];
+    /*
+      Sums only figures with a real accounting basis behind them. Today that
+      is OpenAI's local estimate and nothing else - the other three have no
+      known price, and adding them in as zero would understate the bill
+      while looking complete.
+    */
+    knownEstimatedCostUsd: ClassifiedMetric<number>;
+    costUnknownProviders: string[];
+  };
   supabase: { authUsers: ClassifiedMetric<number>; note: string };
   netlify: { note: string };
   sentry: { configured: boolean; note: string };
@@ -315,7 +460,13 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
   const monthStart = startOfUtcMonth(now).toISOString();
   const monthEnd = startOfNextUtcMonth(now).toISOString();
 
-  const [{ data: monthRows, error: rowsError }, authUsers, budget, allTimeFetch] = await Promise.all([
+  const [
+    { data: monthRows, error: rowsError },
+    authUsers,
+    budget,
+    allTimeFetch,
+    externalFetch,
+  ] = await Promise.all([
     supabaseAdmin
       .from("openai_usage_events")
       .select(USAGE_EVENT_COLUMNS)
@@ -324,6 +475,7 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     listAllAuthUsers(),
     getBudgetSummary(now),
     fetchAllUsageRows(),
+    fetchProductionExternalUsage(monthStart, monthEnd),
   ]);
 
   /*
@@ -399,6 +551,28 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
     .filter((m) => isPricingKnown(m.model))
     .reduce((sum, m) => sum + m.unknownPricingCount, 0);
 
+  /*
+    API-D - built from the production-filtered month only. The OpenAI figure
+    reuses the same production aggregation the cards above show, so the total
+    and its parts cannot disagree.
+  */
+  const externalProviders = summarizeExternalProviders(
+    externalFetch.rows,
+    externalFetch.unavailable
+  );
+
+  const costUnknownProviders = externalProviders.map((p) => p.label);
+
+  const knownEstimatedCostUsd = monthUnavailable
+    ? metric(0, "NOT_AVAILABLE", MONTH_UNAVAILABLE_NOTE)
+    : metric(
+        aggregation.thisMonth.costUsd,
+        "DERIVED_ESTIMATE",
+        `OpenAI production estimate only. Excluded because no price is known for them: ${costUnknownProviders.join(
+          ", "
+        )}. Also excluded because not production: development, preview, branch and unattributed legacy usage.`
+      );
+
   return {
     openAi: {
       today: monthUnavailable
@@ -439,6 +613,11 @@ export async function getApiCostMetrics(): Promise<ApiCostMetrics> {
       perOperation: aggregation.perOperation,
       perModel: aggregation.perModel,
       perUser,
+    },
+    production: {
+      externalProviders,
+      knownEstimatedCostUsd,
+      costUnknownProviders,
     },
     supabase: {
       authUsers: metric(authUserCount ?? 0, "EXACT_INTERNAL_DATA", "see Users tab for the authoritative count"),
