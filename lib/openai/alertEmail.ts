@@ -373,3 +373,49 @@ export async function sendExternalUsageAlertEmail(params: {
     `,
   });
 }
+
+/*
+  Critical system alert delivery - operational incidents, as opposed to the
+  usage and credit thresholds above.
+
+  Carries only what the canonical Admin alert already computed: its title, its
+  own one-line detail, and when the episode started. Those details are counts
+  and durations by construction (see lib/admin/queries/alerts.ts - every one
+  is a COUNT or an age in minutes), so nothing user-written can reach an
+  inbox through here. No resume text, no job description, no prompt, no
+  stack trace, no identifier of any person.
+*/
+export async function sendCriticalSystemAlertEmail(params: {
+  alertName: string;
+  alertKey: string;
+  title: string;
+  detail: string;
+  incidentStartedAtIso: string;
+  timestampIso: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const recipients = getConfiguredAlertRecipients();
+  if (recipients.length === 0) {
+    return { sent: false, reason: "ADMIN_ALERT_EMAILS not configured" };
+  }
+
+  const url = adminPageUrl().replace("/admin/api-costs", "/admin/alerts");
+
+  return sendAlertEmail({
+    recipients,
+    subject: `[Career Élan] Critical Alert — ${params.alertName}`,
+    html: `
+      <h2>Career Élan Critical Alert — ${params.alertName}</h2>
+      <p><strong>Severity: CRITICAL</strong></p>
+      <p>Alert: <strong>${params.title}</strong></p>
+      <p>Summary: ${params.detail}</p>
+      <p>Incident first detected (UTC): ${params.incidentStartedAtIso}</p>
+      <p>Evaluated (UTC): ${params.timestampIso}</p>
+      <p>
+        This is sent once per incident. If the condition is still present at
+        the next check you will not be mailed again; if it clears and later
+        returns, that is a new incident and you will be.
+      </p>
+      <p>Admin: <a href="${url}">${url}</a></p>
+    `,
+  });
+}
