@@ -12,9 +12,11 @@ const resend = new Resend(process.env.RESEND_API_KEY);
   "admin.marketing.send") - never trusts a client-supplied role/isAdmin
   flag. Recipients are resolved here, server-side, from
   profiles.marketing_notifications = true AND a non-empty profiles.email
-  - never from profiles.email_notifications, and email addresses are
-  never returned to the browser (GET returns only a count; POST returns
-  only eligible/attempted/successful/failed counts).
+  AND a null profiles.suspended_at AND a confirmed auth address (see
+  resolveEligibleRecipients below) - never from
+  profiles.email_notifications, and email addresses are never returned to
+  the browser (GET returns only a count; POST returns only
+  eligible/attempted/successful/failed counts).
 
   Sends one resend.emails.send() call per recipient (not a single
   multi-address "to" array) - the same pattern already used by
@@ -84,17 +86,63 @@ function marketingEmailHtml(params: {
   `;
 }
 
+/*
+  Three conditions, all resolved server-side, all required.
+
+  marketing_notifications is the consent record and is not negotiable -
+  a row without it is never a recipient, whatever else is true of it.
+
+  suspended_at is the same suspension signal middleware.ts already
+  enforces on every page and API request. An account that cannot use the
+  product should not be receiving campaigns about it, and reading the
+  same column rather than any second notion of account state means
+  suspending someone takes effect here without anyone remembering to
+  update a list.
+
+  email_confirmed_at is the address itself having been proven. It lives
+  on the auth user rather than the profile, so it is read one account at
+  a time by id - each id already resolved from a consent-bearing profile
+  row. Same bounded getUserById() pattern the signup preflight and the
+  password-reset guard use, and deliberately not listUsers(): nothing is
+  enumerated, and the number of reads is the number of people who asked
+  for these emails.
+
+  Having a Google/Facebook/LinkedIn identity is not itself a reason to
+  exclude anyone - a social account whose provider returned a verified
+  address carries email_confirmed_at like any other and stays eligible.
+  What this drops is an unproven address, whichever way the account was
+  created.
+
+  Anything unreadable - a failed auth lookup, a missing user - drops that
+  recipient rather than including them. Marketing is the one place where
+  sending on a guess is worse than not sending at all.
+*/
 async function resolveEligibleRecipients(): Promise<{ id: string; email: string }[]> {
   const { data, error } = await supabaseAdmin
     .from("profiles")
     .select("id, email")
     .eq("marketing_notifications", true)
+    .is("suspended_at", null)
     .not("email", "is", null)
     .neq("email", "");
 
   if (error) throw error;
 
-  return (data ?? []) as { id: string; email: string }[];
+  const consenting = (data ?? []) as { id: string; email: string }[];
+  const verified: { id: string; email: string }[] = [];
+
+  for (const candidate of consenting) {
+    const { data: authUser, error: authError } =
+      await supabaseAdmin.auth.admin.getUserById(candidate.id);
+
+    if (authError || !authUser?.user?.email_confirmed_at) {
+      continue;
+    }
+
+    verified.push(candidate);
+  }
+
+  return verified;
 }
 
 export async function GET() {
@@ -145,6 +193,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    /*
+      Checked before the recipient lookup so a misconfigured sender costs
+      nothing and sends nothing. There is no fallback on purpose: the
+      shared onboarding address this route used to carry does not deliver
+      to arbitrary recipients, so quietly falling back to it would turn a
+      missing variable into a campaign that reports success and reaches
+      nobody. Refusing and saying so is the better failure.
+
+      The message names the setting, never its value - this reaches an
+      admin's browser.
+    */
+    const from = process.env.MARKETING_EMAIL_FROM;
+
+    if (!from) {
+      return NextResponse.json(
+        {
+          error:
+            "Marketing email sender is not configured. No email was sent.",
+        },
+        { status: 500 }
+      );
+    }
+
     const marketingType = type as MarketingType;
     const recipients = await resolveEligibleRecipients();
     const eligible = recipients.length;
@@ -159,7 +230,7 @@ export async function POST(req: NextRequest) {
       attempted++;
       try {
         const { error: sendError } = await resend.emails.send({
-          from: "Career Élan <onboarding@resend.dev>",
+          from,
           replyTo: "careerelanhq@gmail.com",
           to: recipient.email,
           subject,
