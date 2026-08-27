@@ -69,6 +69,15 @@ export default async function ApiCostsPage({
   const canManageBudget = hasPermission(guard.ctx.role, "admin.api_costs.manage");
   const m = await getApiCostMetrics();
   const credit = m.openAi.creditBalance;
+  /*
+    The same entry the Production API Overview table renders further down,
+    pulled out so the usage bar and the table row can never quote different
+    numbers. Its limit comes from the configuration D2's alert engine reads,
+    so the bar and the emails agree by construction.
+  */
+  const places = m.production.externalProviders.find(
+    (p) => p.provider === "google_places"
+  );
 
   const checkpointParam = (await searchParams).checkpoint;
   const checkpointMessage =
@@ -326,6 +335,111 @@ export default async function ApiCostsPage({
           </div>
         )}
       </Section>
+
+      {/*
+        Google Places sits directly under the credit balance because it is the
+        other number that runs out. It is a different kind of number, though,
+        and the section says so: there is no balance here and nothing to top
+        up - only requests counted against a ceiling this deployment chose.
+
+        The denominator is GOOGLE_PLACES_MONTHLY_REQUEST_LIMIT and nothing
+        else. Google's own technical quotas - the per-day and per-minute
+        autocomplete caps - are far larger and enforced by Google; putting one
+        of those underneath this bar would show a comfortable few percent
+        while the operational limit that actually raises an alert had been
+        passed.
+      */}
+      {places ? (
+        <Section title="Google Places Monthly Usage">
+          {places.configuredMonthlyLimit !== null &&
+          places.requests.classification !== "NOT_AVAILABLE" ? (
+            (() => {
+              const limit = places.configuredMonthlyLimit;
+              const used = places.requests.value;
+              const remaining = Math.max(limit - used, 0);
+              const percent = (used / limit) * 100;
+
+              return (
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm text-slate-600">
+                      {used.toLocaleString()} of {limit.toLocaleString()}{" "}
+                      {places.unit} used this month
+                    </span>
+                    <span className="text-sm font-semibold text-slate-900">
+                      {percent.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  {/*
+                    Same convention as the credit bar above: fill is what has
+                    been consumed, clamped at the track width while the
+                    percentage beside it is free to exceed 100%.
+                  */}
+                  <div className="relative mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`h-full ${
+                        percent >= 100
+                          ? "bg-red-500"
+                          : percent >= 90
+                            ? "bg-red-400"
+                            : percent >= 80
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+                    />
+                    {[80, 90].map((t) => (
+                      <div
+                        key={t}
+                        className="absolute top-0 h-full w-px bg-slate-400"
+                        style={{ left: `${t}%` }}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="relative mt-1 h-4 text-[10px] text-slate-400">
+                    <span className="absolute left-0">0</span>
+                    <span className="absolute -translate-x-1/2" style={{ left: "80%" }}>
+                      {Math.round(limit * 0.8).toLocaleString()}
+                    </span>
+                    <span className="absolute -translate-x-1/2" style={{ left: "90%" }}>
+                      {Math.round(limit * 0.9).toLocaleString()}
+                    </span>
+                    <span className="absolute right-0">{limit.toLocaleString()}</span>
+                  </div>
+
+                  <div className="mt-3 text-xs text-slate-500">
+                    Remaining within the configured limit:{" "}
+                    {remaining.toLocaleString()} {places.unit}. The 80% and 90%
+                    marks are where alert emails fire. This counts Career Élan
+                    Production autocomplete requests against the configured
+                    monthly operating limit - not a Google quota and not a
+                    billing cap. Google billing is managed separately in Google
+                    Cloud.
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            /*
+              No invented denominator. Without a configured limit there is no
+              percentage to draw, and drawing an empty bar would say usage is
+              comfortably low against a ceiling nobody set. The count is real
+              either way, so it is still shown.
+            */
+            <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-400">
+              {places.requests.classification === "NOT_AVAILABLE"
+                ? "Production usage could not be read - not a measurement of zero."
+                : `${places.requests.value.toLocaleString()} Production ${places.unit} this month.`}{" "}
+              Configured monthly limit: Not configured. Usage percentage: Not
+              available. Alerts: Not active. Set
+              GOOGLE_PLACES_MONTHLY_REQUEST_LIMIT (server-only) to enable the
+              80% and 90% alerts.
+            </div>
+          )}
+        </Section>
+      ) : null}
 
       {/*
         API-D - the production picture across every metered provider. Strictly
