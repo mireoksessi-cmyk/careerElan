@@ -172,10 +172,10 @@ function HomePageBody() {
             </div>
 
             <h1 className="text-[44px] font-black leading-[0.98] tracking-[-0.05em] text-slate-950 sm:text-[56px] lg:text-[66px] xl:text-[72px]">
-              Upload One Profile.
+              Upload One Resume.
               <br />
               <span className="text-blue-600">
-                Apply Everywhere.
+                Tailor Every Application.
               </span>
             </h1>
 
@@ -274,7 +274,7 @@ function HomePageBody() {
 
             <div className="mt-6 rounded-2xl bg-slate-50 p-5 text-center">
               <p className="text-sm font-black text-slate-800">
-                🔒 One Profile. Unlimited Applications.
+                🔒 One Resume. Unlimited Applications.
               </p>
 
               <p className="mt-1 text-xs font-semibold text-slate-500">
@@ -417,7 +417,7 @@ function HomePageBody() {
           <Stat icon="▣" label="Generated in Minutes" value="Tailored Applications" />
           <Stat icon="◎" label="Resume Templates" value="ATS-Friendly" accent="text-green-600" />
           <Stat icon="◷" label="Built for Canada" value="Career Tools" accent="text-violet-600" highlight />
-          <Stat icon="☆" label="Apply Everywhere" value="One Profile" accent="text-yellow-500" />
+          <Stat icon="☆" label="Tailor Every Application" value="One Resume" accent="text-yellow-500" />
           <div className="text-center md:border-r md:border-slate-200 last:border-r-0">
             <p className="text-xl font-black text-yellow-400">★★★★★</p>
             <p className="mt-2 text-sm font-bold text-slate-700">Your Next Opportunity Starts Here</p>
@@ -476,7 +476,7 @@ function HomePageBody() {
         <div className="mx-auto grid max-w-[1440px] items-center gap-6 rounded-3xl bg-slate-50/80 p-6 lg:grid-cols-[1.5fr_1fr]">
           <div className="text-center">
             <p className="mx-auto mb-3 w-fit rounded-full bg-blue-50 px-4 py-2 text-xs font-black text-blue-700">YOUR AI CAREER PARTNER</p>
-            <h2 className="text-3xl font-black tracking-[-0.04em] text-slate-950">One Profile. Every Application.</h2>
+            <h2 className="text-3xl font-black tracking-[-0.04em] text-slate-950">One Resume. Every Application.</h2>
             <div className="mt-7 flex flex-wrap justify-center gap-6 text-xs font-bold text-slate-600">
               <span>▣ Resume</span>
               <span>▣ Cover Letter</span>
