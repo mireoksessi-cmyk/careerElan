@@ -5,6 +5,11 @@ import {
   recordExternalApiUsage,
   classifyExternalHttpStatus,
 } from "@/lib/externalApi/usageTelemetry";
+import {
+  buildJobSearchLookupKey,
+  readJobSearchLookup,
+  writeJobSearchLookup,
+} from "@/lib/jobSearch/lookupCache";
 
 type JSearchJob = {
   job_id?: string;
@@ -346,7 +351,22 @@ const countryNameMap: Record<string, string> = {
 const countryName =
   countryNameMap[countryCode] || "Canada";
 
+    /*
+      The label the UI shows on this page. Echoed back untouched and never
+      used to address the provider - /search-v2 has no page-number
+      pagination (proven: `page` is not echoed in its parameters and a
+      page=2 request returned the same postings as page=1). Position in the
+      result set is carried entirely by `cursor` below.
+    */
     const page = searchParams.get("page") || "1";
+
+    /*
+      The provider's own continuation token, handed back exactly as it was
+      received from a previous response. Empty means "start at the
+      beginning", which is expressed upstream by sending no cursor at all.
+      Never parsed, decoded or arithmetically advanced here.
+    */
+    const requestCursor = searchParams.get("cursor")?.trim() || "";
 
     const jobType = searchParams.get("jobType") || "";
     const datePosted = searchParams.get("datePosted") || "";
@@ -389,23 +409,51 @@ const searchQuery = parts.join(" ");
    
 
     /*
-      Pagination Enrichment V2 - fetchJSearchProviderPage() is the SAME
-      single fetch this route always made, just extracted so it can be
-      called for more than one provider page number within a single
-      request. dedupeNormalizedJobs()/extractRawJobs() are the SAME dedup
-      key (title-company-location) and rawJobs-shape detection V1 always
-      used, only pulled out so they can run once against a single page
-      and, when enrichment triggers, again against the merged
-      [primary, enrichment] array - never a redesign of either.
+      fetchJSearchProviderPage() is the single fetch this route has always
+      made, extracted so category enrichment can reach one further page
+      within a single request - by cursor, never by page number.
+      dedupeNormalizedJobs()/extractRawJobs() are the unchanged dedup key
+      (title-company-location) and rawJobs-shape detection, pulled out so
+      they can run once against a single page and, when enrichment triggers,
+      again against the merged [primary, enrichment] array.
     */
     const resolvedApiKey = apiKey;
-    const fetchJSearchProviderPage = async (providerPage: number) => {
+
+    /*
+      A plain occupation query with no city, filter or date is the same
+      question however many people ask it - see lib/jobSearch/lookupCache.ts.
+      A hit here is the difference between six upstream calls per cold
+      dashboard and none. null means the request carries something personal
+      or narrowing and must go upstream as it always did.
+    */
+    const rootLookupKey = () =>
+      buildJobSearchLookupKey({
+        query,
+        countryCode,
+        city,
+        province,
+        jobType,
+        category: categoryFilter,
+        datePosted,
+      });
+
+    /*
+      One upstream request. `cursor` is null for the first page of a search,
+      in which case none is sent - that omission is what asks the provider
+      for the beginning of the result set. No page number and no num_pages
+      are sent for pagination: the provider ignores the former and defaults
+      the latter, and supplying either would only re-create the page-number
+      model that was proven not to advance the results.
+    */
+    const fetchJSearchProviderPage = async (cursor: string | null) => {
       const pageUrl = new URL("https://jsearch.p.rapidapi.com/search-v2");
 
       pageUrl.searchParams.set("query", searchQuery);
-      pageUrl.searchParams.set("page", String(providerPage));
-      pageUrl.searchParams.set("num_pages", "1");
       pageUrl.searchParams.set("country", countryCode.toLowerCase());
+
+      if (cursor) {
+        pageUrl.searchParams.set("cursor", cursor);
+      }
 
       if (datePosted) {
         pageUrl.searchParams.set("date_posted", datePosted);
@@ -465,6 +513,56 @@ const searchQuery = parts.join(" ");
       }
     };
 
+    /*
+      The provider page, from the shared cache when the request is one of the
+      plain personless ones and a fresh entry exists, otherwise upstream as
+      before. A cache hit costs no upstream call and writes no telemetry row,
+      because no upstream request happened - the usage figures stay a record
+      of what the provider was actually asked, not of what this route served.
+
+      Failures are returned rather than thrown so the caller's existing 429
+      and non-2xx handling stays exactly as it was.
+    */
+    const loadProviderPage = async (
+      cursor: string | null
+    ): Promise<
+      | { ok: true; data: any; cached: boolean }
+      | { ok: false; status: number; body: string }
+    > => {
+      /*
+        Only the first page of a search is ever shared between people. A
+        cursor is a continuation token the provider issued to one request,
+        and nothing has been established about whether it can be replayed
+        by a different session, by a different person, or half an hour
+        later - so a request carrying one goes upstream every time rather
+        than resting on an assumption that has not been tested.
+      */
+      const lookupKey = cursor ? null : rootLookupKey();
+
+      if (lookupKey) {
+        const cached = await readJobSearchLookup(lookupKey);
+        if (cached) return { ok: true, data: cached, cached: true };
+      }
+
+      const response = await fetchJSearchProviderPage(cursor);
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          body: await response.text(),
+        };
+      }
+
+      const data = await response.json();
+
+      if (lookupKey) {
+        await writeJobSearchLookup(lookupKey, data);
+      }
+
+      return { ok: true, data, cached: false };
+    };
+
     function extractRawJobs(data: any): JSearchJob[] {
       return Array.isArray(data.data)
         ? data.data
@@ -489,46 +587,19 @@ const searchQuery = parts.join(" ");
     }
 
     /*
-      Pagination Enrichment V2 hint: providerPageAfter is the client's
-      OPTIONAL record of the highest provider page the immediately
-      previous visible UI page actually consumed (this route's own prior
-      response returned it as providerPageThrough). A missing/malformed/
-      out-of-range hint is never guessed around - per spec, that always
-      falls back to the exact V1 single-page behavior for page > 1 (fetch
-      provider page = the requested UI page, no enrichment), so a stale or
-      absent hint can only ever under-enrich, never skip or duplicate
-      results.
+      The provider's continuation token for the page after the one in a
+      given response, or null when it did not offer one. The only place a
+      cursor is ever read from - the shape was confirmed against two live
+      responses (data.cursor, an opaque ~590-character string).
     */
-    function parseProviderPageAfter(raw: string | null): number | null {
-      if (!raw) return null;
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) return null;
-      if (!Number.isInteger(parsed)) return null;
-      if (parsed < 1) return null;
-      if (parsed > 1000) return null;
-      return parsed;
+    function extractNextCursor(data: any): string | null {
+      const cursor = data?.data?.cursor;
+      return typeof cursor === "string" && cursor.trim() ? cursor : null;
     }
 
-    const pageNumber = Number(page) || 1;
-    const providerPageAfterHint = parseProviderPageAfter(
-      searchParams.get("providerPageAfter")
-    );
+    const res = await loadProviderPage(requestCursor || null);
 
-    let providerStart: number;
-    let usedV1Fallback = false;
-
-    if (pageNumber <= 1) {
-      providerStart = 1;
-    } else if (providerPageAfterHint !== null) {
-      providerStart = providerPageAfterHint + 1;
-    } else {
-      providerStart = pageNumber;
-      usedV1Fallback = true;
-    }
-
-    const res = await fetchJSearchProviderPage(providerStart);
-
-    if (res.status === 429) {
+    if (!res.ok && res.status === 429) {
       return NextResponse.json(
         {
           error:
@@ -539,18 +610,16 @@ const searchQuery = parts.join(" ");
     }
 
     if (!res.ok) {
-      const errorText = await res.text();
-
       return NextResponse.json(
         {
-          error: errorText,
+          error: res.body,
           status: res.status,
         },
         { status: res.status }
       );
     }
 
-    const data = await res.json();
+    const data = res.data;
     const primaryRawJobs = extractRawJobs(data);
 
     const categoryActive =
@@ -562,21 +631,28 @@ const searchQuery = parts.join(" ");
           Array.isArray(job.categories) && job.categories.includes(categoryFilter)
         )
       : jobs;
-    let providerPageThrough = providerStart;
+    let nextCursor = extractNextCursor(data);
 
     /*
-      V1 category filtering applied only to the currently fetched provider
-      page; V2 adds exactly ONE conditional extra provider page when a
-      category is active and the current page's filtered results are
-      sparse (<5) - never more than one, never for "All"/"All Jobs", and
-      never when this request already fell back to V1's single-page
-      behavior above. The category is still never appended to the
-      provider "query" string - only ever applied to the already-
-      normalized/classified results.
+      Category filtering can only work on postings already in hand, so when a
+      category is active and this page yielded few matches, exactly ONE extra
+      provider page may be pulled in. That page is now reached the only way
+      the provider actually supports - the cursor this response returned -
+      rather than by asking for the next page number, which never advanced
+      the results.
+
+      Strictly one extra request: no loop, and no chasing cursors until some
+      target count is reached. When there is no cursor to follow, enrichment
+      is simply skipped. The category is still never appended to the provider
+      query string - it only ever filters already-normalized results.
+
+      The enrichment page is consumed here, so the cursor handed back to the
+      client advances past it. Returning the primary page's cursor instead
+      would send the person's next click to postings they were already shown.
     */
-    if (categoryActive && !usedV1Fallback && filteredJobs.length < 5) {
+    if (categoryActive && nextCursor && filteredJobs.length < 5) {
       try {
-        const enrichRes = await fetchJSearchProviderPage(providerStart + 1);
+        const enrichRes = await fetchJSearchProviderPage(nextCursor);
 
         if (enrichRes.ok) {
           const enrichData = await enrichRes.json();
@@ -586,7 +662,7 @@ const searchQuery = parts.join(" ");
           filteredJobs = jobs.filter((job: any) =>
             Array.isArray(job.categories) && job.categories.includes(categoryFilter)
           );
-          providerPageThrough = providerStart + 1;
+          nextCursor = extractNextCursor(enrichData);
         }
         // Enrichment fetch returned a non-ok status - fall through and
         // return the already-successful primary-page results below,
@@ -603,7 +679,7 @@ const searchQuery = parts.join(" ");
       count: filteredJobs.length,
       page: Number(page),
       source: `JSearch ${countryName}`,
-      providerPageThrough,
+      nextCursor,
     });
   } catch (error) {
     console.error(error);
