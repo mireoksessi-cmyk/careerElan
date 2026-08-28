@@ -289,19 +289,38 @@ const [showCitySuggestions, setShowCitySuggestions] =
   const [externalMode, setExternalMode] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [message, setMessage] = useState("");
-  const [externalTotalPages, setExternalTotalPages] = useState(1);
   /*
-    Pagination Enrichment V2 - the ONLY server-authoritative signal this
-    page tracks about pagination: the highest provider page the last
-    successful response actually consumed (route.ts's own
-    providerPageThrough). Used ONLY to build the providerPageAfter hint
-    for a genuine one-step-forward Next click (see handleSearch below) -
-    never for Previous, never for jumping to an arbitrary page number,
-    and never carried into a brand-new search. A missing/stale value here
-    simply means the next request falls back to the server's own exact
-    V1 single-page behavior - never guessed, never invented.
+    No provider total is ever supplied, so none is displayed. noMoreResults is
+    set only when a later page actually came back empty - the one moment the
+    end of the results is genuinely known.
   */
-  const [providerPageThrough, setProviderPageThrough] = useState<number | null>(null);
+  const [noMoreResults, setNoMoreResults] = useState(false);
+  /*
+    Kept apart from `message` so a failed request can be reported in the
+    results area, where the person is looking, instead of only in the search
+    card above the fold.
+  */
+  const [searchError, setSearchError] = useState("");
+  /*
+    Every page of the current search that actually loaded, in the order they
+    were fetched, each with the cursor that produced it and the cursor that
+    leads onward. The provider paginates by opaque token, so a page can only
+    ever be reached from the one before it - which means the way back has to
+    be remembered rather than recalculated. Keeping the jobs here too is what
+    makes Previous free: returning to a page already paid for must not buy it
+    a second time.
+
+    Belongs to one search. A new set of criteria discards it whole, because a
+    cursor issued for "Teacher" says nothing about where "Law Clerk" begins.
+  */
+  type FetchedPage = {
+    pageNumber: number;
+    jobs: DisplayJob[];
+    requestCursor: string | null;
+    nextCursor: string | null;
+  };
+
+  const [pageHistory, setPageHistory] = useState<FetchedPage[]>([]);
 useEffect(() => {
   const trimmedInput = cityInput.trim();
 
@@ -362,10 +381,8 @@ setCategory(state.category || "All");
       setPage(state.page || 1);
       setExternalJobs(Array.isArray(state.jobs) ? state.jobs : []);
       setExternalMode(Boolean(state.externalMode));
-      setExternalTotalPages(state.externalTotalPages || 1);
-      setProviderPageThrough(
-        typeof state.providerPageThrough === "number" ? state.providerPageThrough : null
-      );
+      setNoMoreResults(Boolean(state.noMoreResults));
+      setPageHistory(Array.isArray(state.pageHistory) ? state.pageHistory : []);
     } catch (error) {
       console.error(error);
       sessionStorage.removeItem("findJobsState");
@@ -381,27 +398,54 @@ setCategory(state.category || "All");
   
   const activeJobs = externalJobs;
 
-  const totalPages = externalTotalPages;
+
 
   const jobsToShow = activeJobs;
 
-  async function handleSearch(nextPage = 1) {
+  /*
+    Next opens only when there is somewhere real to go: a page already
+    fetched for this search, or a continuation cursor the current page
+    actually returned. Without one of those the provider has offered no
+    further page, and offering the button anyway would invent one.
+  */
+  const currentPageEntry = pageHistory.find(
+    (entry) => entry.pageNumber === page
+  );
+
+  const canGoNext =
+    pageHistory.some((entry) => entry.pageNumber === page + 1) ||
+    (!noMoreResults && Boolean(currentPageEntry?.nextCursor));
+
+  /*
+    requestCursor is the provider's own continuation token for the page being
+    asked for: null for the first page of a search, and otherwise the exact
+    nextCursor the previous page returned. It is passed in by the caller
+    rather than read from state, so a page can only ever be requested with
+    the cursor that genuinely leads to it.
+  */
+  async function handleSearch(
+    nextPage = 1,
+    isNewSearch = false,
+    requestCursor: string | null = null
+  ) {
     setIsSearching(true);
     setMessage("");
+    setSearchError("");
+
+    /*
+      A new query must not inherit anything from the last one. Cleared before
+      the request rather than after it, so a search that fails cannot leave
+      the previous occupation's results on screen looking like an answer to
+      the new one.
+    */
+    if (isNewSearch) {
+      setExternalJobs([]);
+      setPage(1);
+      setNoMoreResults(false);
+      setPageHistory([]);
+    }
 
     try {
-      /*
-        Pagination Enrichment V2 - the providerPageAfter hint is only ever
-        forwarded for a genuine one-step-forward Next click (nextPage is
-        literally the page immediately after the one currently displayed)
-        AND only when the prior response actually returned a hint. Every
-        other navigation - Previous, jumping to a specific page number,
-        or a brand-new Search - intentionally omits it, which makes the
-        server fall back to its own exact V1 single-page behavior for
-        that request (see the pagination design audit's Part P/Q).
-      */
-      const shouldSendHint = nextPage === page + 1 && providerPageThrough !== null;
-
       const data = await searchJobs({
   query: query.trim(),
   country,
@@ -410,44 +454,89 @@ setCategory(state.category || "All");
   jobType: jobType === "All" ? "" : jobType,
   category: category === "All" ? "" : category,
   page: nextPage,
-  providerPageAfter: shouldSendHint ? providerPageThrough! : undefined,
+  cursor: requestCursor ?? undefined,
 });
 
       const jobs = data.jobs.map((job) => convertApiJob(job, hasCareerMemory));
 
-      const nextTotalPages = jobs.length > 0 ? Math.max(nextPage + 1, 2) : nextPage;
-      const nextProviderPageThrough =
-        typeof data.providerPageThrough === "number" ? data.providerPageThrough : null;
+      const nextCursor =
+        typeof data.nextCursor === "string" && data.nextCursor ? data.nextCursor : null;
+
+      /*
+        A later page that comes back empty is the end of the results, not a
+        page of nothing. The last successful page and its jobs stay where
+        they are - replacing them with an empty list would take away results
+        the person is still reading - and Next is closed for this query.
+      */
+      if (jobs.length === 0 && nextPage > 1) {
+        setNoMoreResults(true);
+        setMessage("No more jobs found for this search.");
+        return;
+      }
+
+      /*
+        Anything already recorded beyond this page is dropped: those pages
+        were reached through the cursor this page used to return, so once
+        this page has been fetched afresh they no longer describe what comes
+        after it.
+      */
+      const nextHistory: FetchedPage[] = [
+        ...(isNewSearch ? [] : pageHistory).filter(
+          (entry) => entry.pageNumber < nextPage
+        ),
+        { pageNumber: nextPage, jobs, requestCursor, nextCursor },
+      ];
 
       setExternalJobs(jobs);
       setExternalMode(true);
       setPage(nextPage);
-      setExternalTotalPages(nextTotalPages);
-      setProviderPageThrough(nextProviderPageThrough);
+      setNoMoreResults(false);
+      setPageHistory(nextHistory);
       setMessage(jobs.length > 0 ? "" : "No jobs found. Try another keyword or location.");
 
-      sessionStorage.setItem(
-  "findJobsState",
-  JSON.stringify({
-    query,
-    country,
-    province,
-    city,
-    cityInput,
-    jobType,
-    category,
-    page: nextPage,
-    jobs,
-    externalMode: true,
-    externalTotalPages: nextTotalPages,
-    providerPageThrough: nextProviderPageThrough,
-  })
-);
+      /*
+        Guarded because the stored state now carries every page fetched so
+        far, which can outgrow the session quota. Failing to save is a lost
+        convenience on the next visit, not a failed search - letting it throw
+        here would land in the catch below and report a search that actually
+        succeeded as unavailable.
+      */
+      try {
+        sessionStorage.setItem(
+          "findJobsState",
+          JSON.stringify({
+            query,
+            country,
+            province,
+            city,
+            cityInput,
+            jobType,
+            category,
+            page: nextPage,
+            jobs,
+            externalMode: true,
+            noMoreResults: false,
+            pageHistory: nextHistory,
+          })
+        );
+      } catch (storageError) {
+        console.error(storageError);
+      }
     } catch (error: any) {
       console.error(error);
-      setMessage(
-        error?.message ||
-          "Job search service is temporarily unavailable. Please try again later."
+      /*
+        One neutral sentence for every failure - 429, 5xx, network alike. The
+        provider's own wording named a monthly search limit, which is an
+        operational detail of ours and not something a job seeker can act on.
+
+        Nothing else is touched: the page number stays on the last page that
+        actually loaded, so the results still on screen remain truthfully
+        labelled, and the error below them says the requested page did not
+        load. Nothing retries on its own - a failed page must not spend
+        another provider call without the person asking for it.
+      */
+      setSearchError(
+        "Job search is temporarily unavailable. Please try again later."
       );
     } finally {
       setIsSearching(false);
@@ -459,39 +548,89 @@ setCategory(state.category || "All");
   setExternalJobs([]);
   setPage(1);
   setMessage("");
-  setExternalTotalPages(1);
-  setProviderPageThrough(null);
+  setNoMoreResults(false);
+  setSearchError("");
+  setPageHistory([]);
   sessionStorage.removeItem("findJobsState");
 }
 
   function goToPage(nextPage: number) {
     if (nextPage < 1) return;
+    if (isSearching) return;
 
     window.scrollTo({ top: 0, behavior: "smooth" });
 
-    handleSearch(nextPage);
+    /*
+      Any page already fetched for this search is shown straight from
+      history - going back, and going forward again over ground already
+      covered, cost nothing. The provider is only ever asked for a page
+      nobody has seen yet.
+    */
+    const alreadyFetched = pageHistory.find(
+      (entry) => entry.pageNumber === nextPage
+    );
+
+    if (alreadyFetched) {
+      setExternalJobs(alreadyFetched.jobs);
+      setPage(nextPage);
+      setSearchError("");
+      setMessage(
+        alreadyFetched.jobs.length > 0
+          ? ""
+          : "No jobs found. Try another keyword or location."
+      );
+      return;
+    }
+
+    /*
+      The end of this search is already known - a page came back empty. Pages
+      already fetched are still reachable above; nothing beyond them is worth
+      another request. Guarded here as well as on the button, so the rule
+      holds wherever navigation is triggered from.
+    */
+    if (noMoreResults) return;
+
+    /*
+      A cursor only ever leads one step. There is no way to address an
+      arbitrary page number, so the only page that can be fetched is the one
+      directly after the page currently shown, and only when that page
+      actually handed back a cursor.
+    */
+    if (nextPage !== page + 1) return;
+
+    const currentEntry = pageHistory.find((entry) => entry.pageNumber === page);
+
+    if (!currentEntry?.nextCursor) return;
+
+    handleSearch(nextPage, false, currentEntry.nextCursor);
   }
 
 
 
   function saveCurrentSearchState() {
-  sessionStorage.setItem(
-    "findJobsState",
-    JSON.stringify({
-      query,
-      country,
-      province,
-      city,
-      cityInput,
-      jobType,
-      category,
-      page,
-      jobs: externalJobs,
-      externalMode,
-      externalTotalPages,
-      providerPageThrough,
-    })
-  );
+  try {
+    sessionStorage.setItem(
+      "findJobsState",
+      JSON.stringify({
+        query,
+        country,
+        province,
+        city,
+        cityInput,
+        jobType,
+        category,
+        page,
+        jobs: externalJobs,
+        externalMode,
+        noMoreResults,
+        pageHistory,
+      })
+    );
+  } catch (storageError) {
+    /* See the note in handleSearch - a page that cannot be remembered is
+       still a page that loaded. */
+    console.error(storageError);
+  }
 }
 
 
@@ -661,7 +800,7 @@ setCategory(state.category || "All");
               setExternalJobs([]);
               setExternalMode(false);
               setMessage("");
-              setProviderPageThrough(null);
+              setPageHistory([]);
               sessionStorage.removeItem(
                 "findJobsState"
               );
@@ -719,7 +858,7 @@ setCategory(state.category || "All");
               </select>
 
               <Button
-                onClick={() => handleSearch(1)}
+                onClick={() => handleSearch(1, true)}
                 disabled={isSearching}
                 className="lg:col-span-2"
               >
@@ -753,13 +892,33 @@ setCategory(state.category || "All");
                 <p className="text-sm font-bold text-slate-600">
                   Showing {jobsToShow.length} jobs
                 </p>
-                <p className="text-xs text-slate-400">
-                  Page {page} of {totalPages}
-                </p>
+                {/*
+                  The provider never tells us how many pages exist, so no
+                  total is claimed. "Page N" is the page that actually loaded.
+                */}
+                <p className="text-xs text-slate-400">Page {page}</p>
               </div>
             </div>
 
-            {jobsToShow.length === 0 && (
+            {searchError && (
+              <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-5 py-4">
+                <p className="text-sm font-bold text-red-700">{searchError}</p>
+                <p className="mt-1 text-xs font-semibold text-red-600">
+                  The results below are from page {page}. Use Search or the page
+                  controls to try again.
+                </p>
+              </div>
+            )}
+
+            {isSearching && (
+              <div className="rounded-2xl border border-dashed border-blue-200 bg-blue-50 px-6 py-10 text-center">
+                <p className="text-sm font-semibold text-blue-700">
+                  Loading jobs&hellip;
+                </p>
+              </div>
+            )}
+
+            {!isSearching && jobsToShow.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
                 <p className="text-sm font-semibold text-slate-500">
                   No jobs to display yet.
@@ -770,7 +929,12 @@ setCategory(state.category || "All");
               </div>
             )}
 
-            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {/*
+              Hidden while a request is in flight. Leaving the previous page's
+              cards up during a page change is what made a failed load look
+              like a page that simply repeated itself.
+            */}
+            <div className={`grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-5 ${isSearching ? "hidden" : ""}`}>
               {jobsToShow.map((job, index) => (
                 <Card
                   key={`${job.id}-${index}`}
@@ -887,28 +1051,20 @@ setCategory(state.category || "All");
                 ‹
               </button>
 
-              {Array.from({ length: Math.min(totalPages, 5) }).map((_, i) => {
-                const pageNumber = i + 1;
-
-                return (
-                  <button
-                    key={pageNumber}
-                    onClick={() => goToPage(pageNumber)}
-                    disabled={isSearching}
-                    className={`h-10 w-10 rounded-xl text-sm font-bold ${
-                      page === pageNumber
-                        ? "bg-blue-600 text-white"
-                        : "border border-blue-100 bg-white text-blue-600 hover:bg-blue-50"
-                    }`}
-                  >
-                    {pageNumber}
-                  </button>
-                );
-              })}
+              {/*
+                No numbered buttons: their count came from an assumed total
+                (current page + 1) that the provider never supplied, so a
+                fifth button could be offered for a page that does not exist.
+                What is known is the page that loaded, and that is all this
+                shows.
+              */}
+              <span className="px-3 text-sm font-bold text-slate-600">
+                Page {page}
+              </span>
 
               <button
                 onClick={() => goToPage(page + 1)}
-                disabled={isSearching}
+                disabled={isSearching || !canGoNext}
                 className="h-10 w-10 rounded-xl border border-blue-100 bg-white text-sm font-bold text-blue-600 hover:bg-blue-50 disabled:opacity-40"
               >
                 ›

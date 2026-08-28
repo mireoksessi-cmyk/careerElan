@@ -116,9 +116,12 @@ export function classifyOpenAiError(error: unknown): { httpStatusClass: HttpStat
   property of the running deployment, and a caller-supplied one would be
   worth nothing.
 
-  Production requires CONTEXT to say so. Anything unrecognised is 'unknown',
-  never production, because the cost of guessing wrong is preview spend
-  silently consuming the real budget's alert thresholds.
+  Production requires positive evidence - CONTEXT saying so, or, when CONTEXT
+  is absent from the runtime as it is on Netlify, the deploy's own advertised
+  URL matching a known Production host and not being disqualified as a
+  preview. Anything unrecognised is 'unknown', never production, because the
+  cost of guessing wrong is preview spend silently consuming the real
+  budget's alert thresholds.
 */
 type UsageEnvironment =
   | "production"
@@ -126,6 +129,37 @@ type UsageEnvironment =
   | "branch-deploy"
   | "development"
   | "unknown";
+
+/*
+  Netlify's own site URL, present in the server runtime where CONTEXT is not -
+  lib/generatePackage/backgroundTarget.ts depends on it to reach the
+  Background Function in Production, and that path works. Parsed defensively:
+  a missing or malformed value yields null and the caller falls through,
+  never a guess.
+
+  Duplicated from lib/externalApi/usageTelemetry.ts rather than shared. The
+  two modules record different providers and are deployed on the same
+  timetable only by coincidence; a common helper would mean a change made for
+  one silently reclassifies the other's spend. Copying a dozen bounded lines
+  is the smaller risk.
+*/
+function netlifyHostFromEnv(name: string): string | null {
+  const raw = process.env[name];
+  if (!raw) return null;
+
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const PRODUCTION_HOSTS = new Set([
+  "careerelan.com",
+  "fabulous-frangipane-b5d970.netlify.app",
+]);
+
+const PREVIEW_HOST = /^deploy-preview-\d+--fabulous-frangipane-b5d970\.netlify\.app$/;
 
 function resolveEnvironment(): UsageEnvironment {
   const context = process.env.CONTEXT;
@@ -143,6 +177,34 @@ function resolveEnvironment(): UsageEnvironment {
   if (process.env.NETLIFY !== "true" && process.env.NODE_ENV !== "production") {
     return "development";
   }
+
+  /*
+    CONTEXT is a Netlify BUILD variable and is not present in this runtime, so
+    every row written here has landed on "unknown" below. That is not a
+    cosmetic mislabelling: the credit-depletion alert further down this file
+    fires only when environment is "production", so the OpenAI 80/90/100%
+    warnings have had nothing to act on.
+
+    Falling back to the deploy's own advertised URLs rather than assuming.
+    DEPLOY_PRIME_URL is checked FIRST and only ever to DISQUALIFY: when it
+    names a host other than the site URL, this is a preview or branch deploy
+    and must not be called production, whatever URL says. Only once that
+    check has not disqualified the deploy is URL allowed to identify it, and
+    only against a fixed host list - never interpolated as given.
+
+    Anything unrecognised stays "unknown", exactly as before. Production
+    still requires positive evidence; the cost of guessing wrong is preview
+    traffic consuming the real budget's alert thresholds.
+  */
+  const siteHost = netlifyHostFromEnv("URL");
+  const deployHost = netlifyHostFromEnv("DEPLOY_PRIME_URL");
+
+  if (deployHost && deployHost !== siteHost) {
+    return PREVIEW_HOST.test(deployHost) ? "deploy-preview" : "branch-deploy";
+  }
+
+  if (siteHost && PRODUCTION_HOSTS.has(siteHost)) return "production";
+  if (siteHost && PREVIEW_HOST.test(siteHost)) return "deploy-preview";
 
   return "unknown";
 }

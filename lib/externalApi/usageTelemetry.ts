@@ -60,6 +60,31 @@ type UsageEnvironment =
   whole line of work exists to remove. Production requires positive
   evidence; anything unrecognised is unknown.
 */
+/*
+  Netlify's own site URL, which this codebase has already established is
+  present in the server runtime - lib/generatePackage/backgroundTarget.ts
+  depends on it to reach the Background Function in Production, and that
+  path works. Parsed defensively: a missing or malformed value yields null
+  and the caller falls through, never a guess.
+*/
+function netlifyHostFromEnv(name: string): string | null {
+  const raw = process.env[name];
+  if (!raw) return null;
+
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const PRODUCTION_HOSTS = new Set([
+  "careerelan.com",
+  "fabulous-frangipane-b5d970.netlify.app",
+]);
+
+const PREVIEW_HOST = /^deploy-preview-\d+--fabulous-frangipane-b5d970\.netlify\.app$/;
+
 function resolveEnvironment(): UsageEnvironment {
   const context = process.env.CONTEXT;
 
@@ -71,6 +96,34 @@ function resolveEnvironment(): UsageEnvironment {
   if (process.env.NETLIFY !== "true" && process.env.NODE_ENV !== "production") {
     return "development";
   }
+
+  /*
+    CONTEXT is a Netlify BUILD variable and is not present in this runtime -
+    every row this module has written so far landed on "unknown" below, which
+    is why the Production API dashboard and the 80/90% usage alerts, both of
+    which filter strictly on environment = 'production', have been counting
+    none of the real provider traffic.
+
+    Falling back to the deploy's own advertised URLs rather than assuming.
+    DEPLOY_PRIME_URL is checked FIRST and only ever to DISQUALIFY: when it
+    names a host other than the site URL, this is a preview or branch deploy
+    and must not be called production, whatever URL says. Only once that
+    check has not disqualified the deploy is URL allowed to identify it, and
+    only against a fixed host list - never interpolated as given.
+
+    Anything unrecognised stays "unknown", exactly as before. Production
+    still requires positive evidence; the cost of guessing wrong is preview
+    traffic billed to the customer-facing figures.
+  */
+  const siteHost = netlifyHostFromEnv("URL");
+  const deployHost = netlifyHostFromEnv("DEPLOY_PRIME_URL");
+
+  if (deployHost && deployHost !== siteHost) {
+    return PREVIEW_HOST.test(deployHost) ? "deploy-preview" : "branch-deploy";
+  }
+
+  if (siteHost && PRODUCTION_HOSTS.has(siteHost)) return "production";
+  if (siteHost && PREVIEW_HOST.test(siteHost)) return "deploy-preview";
 
   return "unknown";
 }
