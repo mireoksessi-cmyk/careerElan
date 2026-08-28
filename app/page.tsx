@@ -288,69 +288,76 @@ function HomePageBody() {
 <div className="mt-9 overflow-hidden rounded-2xl border-2 border-blue-600 bg-white shadow-xl shadow-blue-100">
 
   {/* 비교표 헤더 */}
-  <div className="grid grid-cols-[minmax(0,1fr)_110px_minmax(0,1fr)] items-center border-b border-slate-200 bg-slate-50 px-6 py-5">
+  {/*
+    The fixed 110px centre column plus px-6 leaves under 100px a side on a
+    360px phone, and the labels below are whitespace-nowrap, so the Career
+    Élan column was pushed past the right border and clipped. Below sm the
+    centre column is sized to its own badge and the labels are allowed to
+    wrap; from sm up every value returns to exactly what it was.
+  */}
+  <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-slate-200 bg-slate-50 px-3 py-4 sm:grid-cols-[minmax(0,1fr)_110px_minmax(0,1fr)] sm:px-6 sm:py-5">
 
     {/* ChatGPT / Gemini */}
-    <div className="flex items-center justify-end gap-4">
+    <div className="flex items-center justify-end gap-2 sm:gap-4">
 
       <div className="text-right">
-        <p className="whitespace-nowrap text-base font-black text-slate-950">
+        <p className="text-sm font-black text-slate-950 sm:whitespace-nowrap sm:text-base">
           ChatGPT / Gemini
         </p>
 
-        <p className="whitespace-nowrap text-xs font-semibold text-slate-500">
+        <p className="text-[11px] font-semibold text-slate-500 sm:whitespace-nowrap sm:text-xs">
           General AI Assistants
         </p>
       </div>
 
       <div className="flex shrink-0 items-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm sm:h-11 sm:w-11">
           <Image
             src="/openai.png"
             alt="OpenAI"
             width={28}
             height={28}
-            className="h-7 w-7 object-contain"
+            className="h-5 w-5 object-contain sm:h-7 sm:w-7"
           />
         </div>
 
-        <div className="-ml-2 flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="-ml-2 flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm sm:h-11 sm:w-11">
           <Image
             src="/gemini.png"
             alt="Google Gemini"
             width={28}
             height={28}
-            className="h-7 w-7 object-contain"
+            className="h-5 w-5 object-contain sm:h-7 sm:w-7"
           />
         </div>
       </div>
 
     </div>
 
-    {/* VS */}
-    <div className="flex justify-center">
-      <span className="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-xs font-black tracking-widest text-white shadow-lg">
+    {/* VS - kept at every width, so the comparison still reads as one. */}
+    <div className="flex justify-center px-1 sm:px-0">
+      <span className="inline-flex items-center justify-center rounded-full bg-blue-600 px-2.5 py-1.5 text-[10px] font-black tracking-widest text-white shadow-lg sm:px-4 sm:py-2 sm:text-xs">
         VS
       </span>
     </div>
 
     {/* Career Élan */}
-    <div className="flex items-center justify-start gap-4">
+    <div className="flex items-center justify-start gap-2 sm:gap-4">
 
       <Image
         src="/logo.png"
         alt="Career Élan"
         width={52}
         height={52}
-        className="h-11 w-auto shrink-0 object-contain"
+        className="h-8 w-auto shrink-0 object-contain sm:h-11"
       />
 
       <div>
-        <p className="whitespace-nowrap text-base font-black text-slate-950">
+        <p className="text-sm font-black text-slate-950 sm:whitespace-nowrap sm:text-base">
           Career Élan
         </p>
 
-        <p className="whitespace-nowrap text-xs font-semibold text-slate-500">
+        <p className="text-[11px] font-semibold text-slate-500 sm:whitespace-nowrap sm:text-xs">
           Built for Job Seekers
         </p>
       </div>
@@ -680,32 +687,39 @@ function ComparisonRow({
   last?: boolean;
 }) {
   return (
+    /*
+      Below sm the repeated centre badge is dropped and the row becomes two
+      equal columns, so both sides of the comparison get real width instead
+      of ~85px each on a 320px screen. The header keeps its VS at every
+      width, so what is being compared stays obvious. From sm up the three
+      columns and the 110px centre are exactly as before.
+    */
     <div
-      className={`grid grid-cols-[1fr_110px_1fr] ${
+      className={`grid grid-cols-2 sm:grid-cols-[1fr_110px_1fr] ${
         last ? "" : "border-b border-slate-200"
       }`}
     >
       {/* ChatGPT / Gemini */}
-      <div className="flex min-h-[58px] items-center justify-end bg-red-50/30 px-5 py-3 text-right">
+      <div className="flex min-h-[58px] items-center justify-end bg-red-50/30 px-3 py-3 text-right sm:px-5">
         <span className="text-[13px] font-semibold text-slate-600">
           {left}
         </span>
 
-        <span className="ml-3 text-lg font-black text-red-500">
+        <span className="ml-2 shrink-0 text-lg font-black text-red-500 sm:ml-3">
           ✕
         </span>
       </div>
 
       {/* VS */}
-      <div className="flex items-center justify-center border-x border-slate-200 bg-gradient-to-b from-blue-50 to-white">
+      <div className="hidden items-center justify-center border-x border-slate-200 bg-gradient-to-b from-blue-50 to-white sm:flex">
         <span className="rounded-full bg-blue-600 px-4 py-1.5 text-xs font-black tracking-widest text-white shadow-md">
           VS
         </span>
       </div>
 
       {/* Career Élan */}
-      <div className="flex min-h-[58px] items-center justify-start bg-blue-50/30 px-5 py-3 text-left">
-        <span className="mr-3 text-lg font-black text-blue-600">
+      <div className="flex min-h-[58px] items-center justify-start border-l border-slate-200 bg-blue-50/30 px-3 py-3 text-left sm:border-l-0 sm:px-5">
+        <span className="mr-2 shrink-0 text-lg font-black text-blue-600 sm:mr-3">
           ✓
         </span>
 
