@@ -962,6 +962,14 @@ const [isCoverLetterDragging, setIsCoverLetterDragging] = useState(false);
   const [coverLetterSaved, setCoverLetterSaved] = useState(false);
   const [uploadedCoverLetterKind, setUploadedCoverLetterKind] =
   useState<UploadedResumeKind>("none");
+  /*
+    Tells the person, at the moment they hand over a cover letter, what will
+    actually happen to it: the writing carries over, the design does not.
+    Purely a notice - it is raised alongside the upload that is already under
+    way, never in place of it, so dismissing it neither cancels the upload nor
+    asks for the file again.
+  */
+  const [coverLetterFormatNotice, setCoverLetterFormatNotice] = useState(false);
 
   /*
     Same object-URL cleanup as uploadedResumeUrl above (lines ~231-237) -
@@ -2688,6 +2696,16 @@ setCoverLetterUploadError("");
   return;
 }
 
+  /*
+    Raised here rather than at file selection: everything above this point can
+    still turn the upload away (unsupported type, empty file, over 10MB, not
+    signed in), and a format notice shown next to one of those errors would be
+    answering a question the person never got to ask. From this line on the
+    upload genuinely proceeds, so the notice always describes something that
+    is actually happening.
+  */
+  setCoverLetterFormatNotice(true);
+
   let storagePath = "";
   let insertedCoverLetterId = "";
 
@@ -4303,6 +4321,44 @@ return;
           type="button"
           onClick={() => setImportNotice(null)}
           className="rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white"
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/*
+  Cover letter format notice. Same overlay convention as the two notices
+  above, widened because this one has to land a point rather than confirm an
+  outcome - a person who has just uploaded a designed letter needs to
+  understand, before they generate anything, that the words carry over and
+  the layout does not. Dismissing clears local state only; the upload it
+  describes is already running underneath.
+*/}
+{coverLetterFormatNotice && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="cover-letter-format-notice-title"
+      className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl sm:p-8"
+    >
+      <h2
+        id="cover-letter-format-notice-title"
+        className="text-xl font-black text-slate-950 sm:text-2xl"
+      >
+        Cover Letter Format Notice
+      </h2>
+      <p className="mt-4 text-base leading-7 text-slate-600">
+        Your cover letter&apos;s writing style will be used as a reference. Generated cover letters use Career Élan&apos;s standard format and won&apos;t preserve the original design or layout.
+      </p>
+      <div className="mt-6 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setCoverLetterFormatNotice(false)}
+          className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white"
         >
           Got it
         </button>
