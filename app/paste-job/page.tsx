@@ -3741,7 +3741,7 @@ async function downloadDocx() {
                 </div>
               </div>
 
-              <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-7 shadow-sm">
+              <section className="mt-6 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-7">
                 <div className="flex items-center gap-4">
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-4xl">
                     {analysis.icon}
@@ -3803,7 +3803,7 @@ async function downloadDocx() {
                   </div>
                 </div>
 
-                <div className="mt-6 rounded-2xl border border-slate-100 bg-white p-6">
+                <div className="mt-6 rounded-2xl border border-slate-100 bg-white p-4 sm:p-6">
                   <h3 className="text-xl font-extrabold">Your Saved Application</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
                     We&apos;ll use your saved Career Memory materials. Generate a tailored package below if you want a stronger version for this specific job.
@@ -3812,8 +3812,8 @@ async function downloadDocx() {
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
   {/* 선택된 Resume */}
   <Card padding="sm" className="min-w-0">
-    <div className="flex items-start gap-4">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-2xl">
+    <div className="flex items-start gap-3 sm:gap-4">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xl sm:h-12 sm:w-12 sm:text-2xl">
         📄
       </div>
 
@@ -3858,8 +3858,8 @@ async function downloadDocx() {
 
   {/* 선택된 Cover Letter */}
   <Card padding="sm" className="min-w-0">
-    <div className="flex items-start gap-4">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-2xl">
+    <div className="flex items-start gap-3 sm:gap-4">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-xl sm:h-12 sm:w-12 sm:text-2xl">
         ✉️
       </div>
 
@@ -3967,16 +3967,16 @@ async function downloadDocx() {
     !isSupportedJob ||
     resumeSelectionStatus !== "ready"
   }
-  className="mt-6 flex w-full items-center justify-between rounded-2xl bg-gradient-to-r from-purple-600 to-violet-700 px-6 py-5 text-left text-white shadow-sm transition hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+  className="mt-6 flex w-full items-center justify-between rounded-2xl bg-gradient-to-r from-purple-600 to-violet-700 px-4 py-4 text-left text-white shadow-sm transition hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50 sm:px-6 sm:py-5"
 >
-  <div className="flex min-w-0 items-center gap-4">
-    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/95 text-2xl text-purple-700">
+  <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/95 text-xl text-purple-700 sm:h-14 sm:w-14 sm:text-2xl">
       ✨
     </div>
 
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-xl font-extrabold">
+        <h3 className="text-base font-extrabold sm:text-xl">
           {generationPhase === "submitting"
             ? "Submitting Request..."
             : generationPhase === "pending"
@@ -4178,7 +4178,7 @@ async function downloadDocx() {
     </div>
   </div>
 
-  <span className="ml-4 shrink-0 text-3xl">
+  <span className="hidden shrink-0 text-3xl sm:ml-4 sm:block">
     ›
   </span>
 </button>
@@ -4248,15 +4248,15 @@ async function downloadDocx() {
 
                   <button
                     onClick={handleApplyNow}
-                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-blue-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50"
+                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-blue-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50 sm:px-6 sm:py-5"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-xl sm:h-14 sm:w-14 sm:text-2xl">
                         🛩️
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-xl font-extrabold text-slate-900">
+                          <h3 className="text-base font-extrabold text-slate-900 sm:text-xl">
                             Apply with Saved Resume
                           </h3>
                           <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold text-blue-600">
@@ -4268,19 +4268,19 @@ async function downloadDocx() {
                         </p>
                       </div>
                     </div>
-                    <span className="text-3xl text-slate-500">›</span>
+                    <span className="hidden text-3xl text-slate-500 sm:block">›</span>
                   </button>
 
                   <button
                     onClick={continueToApply}
-                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-6 py-5 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+                    className="mt-4 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50 sm:px-6 sm:py-5"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-xl sm:h-14 sm:w-14 sm:text-2xl">
                         🌐
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-xl font-extrabold text-slate-900">
+                        <h3 className="text-base font-extrabold text-slate-900 sm:text-xl">
                           Apply on Employer Website ↗
                         </h3>
                         <p className="mt-1 text-sm font-semibold text-slate-500">
@@ -4288,7 +4288,7 @@ async function downloadDocx() {
                         </p>
                       </div>
                     </div>
-                    <span className="text-3xl text-slate-500">›</span>
+                    <span className="hidden text-3xl text-slate-500 sm:block">›</span>
                  </button>
                 </div>
               </section>
@@ -4608,7 +4608,7 @@ async function downloadDocx() {
     {/* 가운데: 생성된 Resume / Cover Letter / Email */}
     <section className="min-w-0 xl:col-span-8">
       <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5 max-sm:p-4">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-extrabold">
@@ -4669,7 +4669,7 @@ async function downloadDocx() {
           )}
         </div>
 
-        <div className="grid border-b border-slate-100 md:grid-cols-3">
+        <div className="grid border-b border-slate-100 max-sm:grid-cols-3 md:grid-cols-3">
           {[
             ["resume", "📄", "Resume"],
             [
@@ -4690,22 +4690,22 @@ async function downloadDocx() {
                   key as PreviewType
                 )
               }
-              className={`flex items-center gap-3 px-5 py-4 text-left transition ${
+              className={`flex items-center gap-3 px-5 py-4 text-left transition max-sm:min-w-0 max-sm:flex-col max-sm:gap-1 max-sm:px-2 max-sm:py-3 max-sm:text-center ${
                 selectedPreview === key
                   ? "bg-blue-50 text-blue-700"
                   : "bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <span className="text-2xl">
+              <span className="text-2xl max-sm:text-lg">
                 {icon}
               </span>
 
               <div>
-                <p className="font-extrabold">
+                <p className="font-extrabold max-sm:text-[11px] max-sm:leading-tight">
                   {label}
                 </p>
 
-                <p className="text-xs font-semibold text-slate-400">
+                <p className="text-xs font-semibold text-slate-400 max-sm:hidden">
                   {selectedPreview === key
                     ? "Viewing and editing now"
                     : "Click to preview and edit"}
@@ -4715,7 +4715,7 @@ async function downloadDocx() {
           ))}
         </div>
 
-        <div className="h-[1450px] overflow-y-auto bg-slate-100 p-6">
+        <div className="h-[1450px] overflow-y-auto bg-slate-100 p-6 max-sm:h-auto max-sm:overflow-visible max-sm:p-4">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
@@ -4778,10 +4778,10 @@ async function downloadDocx() {
               <iframe
                 src={resumePdfUrl}
                 title="Resume PDF preview"
-                className="h-[1350px] w-full rounded-2xl border border-slate-100 bg-white shadow-sm"
+                className="h-[1350px] w-full rounded-2xl border border-slate-100 bg-white shadow-sm max-sm:h-[520px]"
               />
             ) : (
-              <div className="h-[1350px] w-full animate-pulse rounded-2xl border border-slate-100 bg-slate-50" />
+              <div className="h-[1350px] w-full animate-pulse rounded-2xl border border-slate-100 bg-slate-50 max-sm:h-[520px]" />
             )
           ) : selectedPreview ===
           "emailDraft" ? (
@@ -4799,7 +4799,7 @@ async function downloadDocx() {
                 );
                 setIsDirty(true);
               }}
-              className="min-h-[520px] w-full resize-y rounded-2xl border border-slate-100 bg-slate-50 p-6 text-sm leading-7 text-slate-700 outline-none"
+              className="min-h-[520px] w-full resize-y rounded-2xl border border-slate-100 bg-slate-50 p-6 text-sm leading-7 text-slate-700 outline-none max-sm:min-h-[320px] max-sm:p-4"
             />
           ) : (
             <div className="flex justify-center">
@@ -5270,8 +5270,8 @@ function PackageAnalysisPanel({
       <div
         className={`rounded-2xl border p-5 shadow-sm ${recommendationClass}`}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex items-start justify-between gap-3 max-sm:flex-wrap">
+          <div className="max-sm:min-w-0">
             <h3 className="font-extrabold">
               AI Recommendation
             </h3>

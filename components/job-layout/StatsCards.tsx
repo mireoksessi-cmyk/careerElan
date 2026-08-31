@@ -55,30 +55,30 @@ export default function StatsCards({
   ];
 
   return (
-    <div className="grid gap-5 md:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-5 max-sm:grid-cols-2 max-sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
 
       {cards.map((card) => (
 
         <div
           key={card.title}
-          className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm"
+          className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm max-sm:p-3"
         >
 
           <div className="flex items-center justify-between">
 
             <div>
 
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-slate-500 max-sm:text-xs">
                 {card.title}
               </p>
 
-              <h3 className={`mt-3 text-3xl font-extrabold ${card.color}`}>
+              <h3 className={`mt-3 text-3xl font-extrabold max-sm:mt-2 max-sm:text-2xl ${card.color}`}>
                 {card.value}
               </h3>
 
             </div>
 
-            <div className="text-3xl">
+            <div className="text-3xl max-sm:text-xl">
               {card.icon}
             </div>
 

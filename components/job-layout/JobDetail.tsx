@@ -290,7 +290,7 @@ export default function JobDetail({
   if (!selectedApplication) {
     return (
       <div className="rounded-3xl border border-blue-100 bg-white p-10 shadow-sm">
-        <div className="flex h-[700px] items-center justify-center text-slate-400">
+        <div className="flex h-[700px] items-center justify-center text-slate-400 max-sm:h-[420px]">
           Select an application.
         </div>
       </div>
@@ -303,10 +303,10 @@ export default function JobDetail({
     );
 
   return (
-    <div className="rounded-3xl border border-blue-100 bg-white p-8 shadow-sm">
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-3xl font-extrabold">
+    <div className="rounded-3xl border border-blue-100 bg-white p-8 shadow-sm max-sm:p-4">
+      <div className="flex items-start justify-between max-sm:flex-wrap max-sm:gap-3">
+        <div className="max-sm:min-w-0">
+          <h2 className="text-3xl font-extrabold max-sm:text-2xl">
             {selectedApplication.company}
           </h2>
 
@@ -337,7 +337,7 @@ export default function JobDetail({
 
       <hr className="my-8" />
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-2 gap-6 max-sm:grid-cols-1">
         <div>
           <p className="mb-2 text-xs font-bold uppercase text-slate-500">
             Status
@@ -477,7 +477,7 @@ export default function JobDetail({
           onClick={() =>
             setSelectedTab("resume")
           }
-          className={`rounded-xl px-5 py-3 font-semibold transition ${
+          className={`rounded-xl px-5 py-3 font-semibold transition max-sm:px-3 max-sm:py-2 max-sm:text-sm ${
             selectedTab === "resume"
               ? "bg-blue-600 text-white"
               : "bg-slate-100 text-slate-700 hover:bg-blue-50"
@@ -490,7 +490,7 @@ export default function JobDetail({
           onClick={() =>
             setSelectedTab("cover")
           }
-          className={`rounded-xl px-5 py-3 font-semibold transition ${
+          className={`rounded-xl px-5 py-3 font-semibold transition max-sm:px-3 max-sm:py-2 max-sm:text-sm ${
             selectedTab === "cover"
               ? "bg-blue-600 text-white"
               : "bg-slate-100 text-slate-700 hover:bg-blue-50"
@@ -503,7 +503,7 @@ export default function JobDetail({
           onClick={() =>
             setSelectedTab("email")
           }
-          className={`rounded-xl px-5 py-3 font-semibold transition ${
+          className={`rounded-xl px-5 py-3 font-semibold transition max-sm:px-3 max-sm:py-2 max-sm:text-sm ${
             selectedTab === "email"
               ? "bg-blue-600 text-white"
               : "bg-slate-100 text-slate-700 hover:bg-blue-50"
@@ -516,7 +516,7 @@ export default function JobDetail({
           onClick={() =>
             setSelectedTab("notes")
           }
-          className={`rounded-xl px-5 py-3 font-semibold transition ${
+          className={`rounded-xl px-5 py-3 font-semibold transition max-sm:px-3 max-sm:py-2 max-sm:text-sm ${
             selectedTab === "notes"
               ? "bg-blue-600 text-white"
               : "bg-slate-100 text-slate-700 hover:bg-blue-50"
@@ -546,7 +546,7 @@ export default function JobDetail({
                 />
               </div>
             ) : canonicalPreviewStatus === "ready" ? (
-              <div ref={canonicalPreviewContainerRef} className="max-h-[1500px] overflow-auto rounded-2xl border border-slate-200 bg-white p-2">
+              <div ref={canonicalPreviewContainerRef} className="max-h-[1500px] overflow-auto rounded-2xl border border-slate-200 bg-white p-2 max-sm:max-h-[560px]">
                 <div style={{ height: canonicalPreviewScaledHeight ?? PAPER_DIMENSIONS.letter.heightPx * canonicalPreviewScale }}>
                   <iframe
                     key={selectedApplication.id}
@@ -566,7 +566,7 @@ export default function JobDetail({
                 </div>
               </div>
             ) : canonicalPreviewStatus === "loading" ? (
-              <div className="flex h-[600px] items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-500">Loading resume preview...</div>
+              <div className="flex h-[600px] items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-500 max-sm:h-[360px]">Loading resume preview...</div>
             ) : (
               <A4DocumentPreview
                 text={
