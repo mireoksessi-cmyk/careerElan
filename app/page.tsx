@@ -7,6 +7,7 @@ import PublicAuthActionsProvider, {
   useAuthActions,
 } from "@/components/marketing/PublicAuthActions";
 import { useLogin } from "@/lib/auth/LoginManager";
+import { track } from "@/lib/analytics/posthog";
 
 /*
   Phase 6I.6.28 - the real Log in/Get Started/CTA behavior (the modal,
@@ -28,6 +29,28 @@ export default function HomePage() {
 
 function HomePageBody() {
   const { openAuth } = useAuthActions();
+
+  /*
+    Analytics only. This route IS the public landing page, so mounting it is
+    exactly the "landing_viewed" moment. Fires once per mount and touches
+    nothing else.
+  */
+  useEffect(() => {
+    track("landing_viewed");
+  }, []);
+
+  /*
+    Analytics only. Every landing CTA - "Try Career Élan Free", "Try Free",
+    "Start Free Beta" and the mobile menu's Try Free - already routes through
+    this same openAuth prop (see LandingPage.tsx), so wrapping it here records
+    the primary Get Started click for all of them WITHOUT touching
+    LandingPage.tsx or changing any existing handler. Additive: the original
+    openAuth is always called with the original argument.
+  */
+  function openAuthWithAnalytics(mode?: "login" | "signup") {
+    if (mode === "signup") track("get_started_clicked");
+    openAuth(mode);
+  }
   /*
     Phase 6I.6.30 - session-aware Header. LoginManager (lib/auth/
     LoginManager.tsx) already wraps the entire app (app/layout.tsx) and
@@ -93,7 +116,7 @@ function HomePageBody() {
       </div>
     )}
 
-    <LandingPage openAuth={openAuth} showAuthCta={showAuthCta} />
+    <LandingPage openAuth={openAuthWithAnalytics} showAuthCta={showAuthCta} />
 
       <CareerElanFooter />
     </main>
