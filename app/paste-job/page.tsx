@@ -35,6 +35,7 @@ import type { DpeOriginalLayoutPayload } from "@/lib/generatePackage/shared";
 
 import { useLogin } from "@/lib/auth/LoginManager";
 import { supabase } from "@/lib/supabase";
+import { trackOnce } from "@/lib/analytics/posthog";
 import Image from "next/image";
 import A4Preview from "../job-tracker/A4Preview";
 import ResumePreviewRenderer from "@/components/resume/ResumePreviewRenderer";
@@ -1020,6 +1021,27 @@ return lines.join("\n").trim();
 
 export default function PasteJobPage() {
   const { user, loading, hasResumeData } = useLogin();
+
+  /*
+    Analytics only. Fires "first_job_added" the first time this user's saved
+    application count is exactly 1 - a read-only COUNT, no schema change, no
+    change to how applications are created. The user id is used solely as a
+    LOCAL de-duplication key and is never sent to analytics. Fully guarded:
+    any failure here is swallowed so saving/generating can never break.
+  */
+  async function trackFirstJobAdded() {
+    try {
+      if (!user) return;
+      const { count, error } = await supabase
+        .from("applications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if (error || count !== 1) return;
+      trackOnce(`first_job_added_${user.id}`, "first_job_added");
+    } catch {
+      /* analytics must never affect the application flow */
+    }
+  }
   const toast = useToast();
   const confirm = useConfirm();
   const [showResumeRequiredModal, setShowResumeRequiredModal] =
@@ -1558,6 +1580,7 @@ export default function PasteJobPage() {
     setGenerated(true);
     setShowDefaultApplication(false);
     setApplicationId(result.applicationId || null);
+    void trackFirstJobAdded();
     setGenerationPhase("succeeded");
     setGenerationErrorInfo(null);
     setProgressInfo(null);
@@ -3319,6 +3342,7 @@ async function downloadDocx() {
     }
 
     setApplicationId(data.id);
+    void trackFirstJobAdded();
   }
 
   toast.success("Application package has been saved successfully!");

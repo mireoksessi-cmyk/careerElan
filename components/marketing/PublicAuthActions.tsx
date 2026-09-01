@@ -43,6 +43,8 @@ type AuthActionsContextValue = {
   openAuth: (mode?: AuthMode) => void;
 };
 
+import { track, trackOnce } from "@/lib/analytics/posthog";
+
 const AuthActionsContext = createContext<AuthActionsContextValue | null>(null);
 
 export function useAuthActions(): AuthActionsContextValue {
@@ -98,6 +100,20 @@ const [
   const [agreedToLegalTerms, setAgreedToLegalTerms] = useState(false);
 
   const authModalPanelRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+    Analytics only. The signup form is shown both by a landing CTA and by the
+    /signup route (AuthEntryPageClient auto-opens this same modal), so this one
+    effect covers every way it can be displayed. signupStartedRef resets here so
+    "signup_started" is one-per-attempt rather than one-per-browser.
+  */
+  const signupStartedRef = useRef(false);
+  useEffect(() => {
+    if (showAuthModal && authMode === "signup") {
+      signupStartedRef.current = false;
+      track("signup_viewed");
+    }
+  }, [showAuthModal, authMode]);
   const authModalCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   useModalFocusTrap(
     showAuthModal,
@@ -656,6 +672,15 @@ useEffect(() => {
       return;
     }
 
+    /*
+      Analytics only. Reached ONLY after Supabase returned no error, returned a
+      user, and that user carried real identities - i.e. a genuinely new
+      account. Validation failures, duplicate-address replays and abandoned
+      attempts all return earlier and never reach this line. trackOnce keeps a
+      retried submit from double counting.
+    */
+    trackOnce("signup_completed", "signup_completed");
+
     if (data.session) {
   toast.success("Your account has been created successfully.");
 
@@ -1146,7 +1171,25 @@ async function handleForgotPassword() {
   )}
 
 {authMode === "signup" ? (
-  <form className="space-y-4">
+  <form
+    className="space-y-4"
+    /*
+      Analytics only. Capture-phase listener on the existing form: records the
+      first real interaction with the signup form (a keystroke or a field
+      focus), once per attempt - never per keystroke. Adds no state, no
+      re-render and no change to any field's own onChange.
+    */
+    onFocusCapture={() => {
+      if (signupStartedRef.current) return;
+      signupStartedRef.current = true;
+      track("signup_started");
+    }}
+    onInputCapture={() => {
+      if (signupStartedRef.current) return;
+      signupStartedRef.current = true;
+      track("signup_started");
+    }}
+  >
     <Input
       value={fullName}
       onChange={setFullName}

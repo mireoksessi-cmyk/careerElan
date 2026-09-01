@@ -5,6 +5,7 @@ import { LoginManager } from "@/lib/auth/LoginManager";
 import CareerAssistant from "@/components/chatbot/CareerAssistant";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { ConfirmDialogProvider } from "@/components/ui/ConfirmDialogProvider";
+import AnalyticsProvider from "@/components/analytics/AnalyticsProvider";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -37,6 +38,8 @@ export default function RootLayout({
         {children}
 
         <CareerAssistant />
+
+        <AnalyticsProvider />
       </LoginManager>
     </ConfirmDialogProvider>
   </ToastProvider>
